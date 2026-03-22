@@ -29,9 +29,11 @@ internal static class StartupValidationService
 
         // Each check is recorded separately so the caller gets a complete preflight
         // report instead of failing on the first problem encountered.
-        results.Add(checks.CheckInputFile
-            ? CheckInputFile(options.InputFilePath)
-            : StartupCheckResult.Skipped("Input file", "Check disabled by configuration."));
+        results.Add(options.IsBatchMode
+            ? StartupCheckResult.Skipped("Input file", "Skipped in batch mode.")
+            : checks.CheckInputFile
+                ? CheckInputFile(options.InputFilePath)
+                : StartupCheckResult.Skipped("Input file", "Check disabled by configuration."));
 
         results.AddRange(CheckOutputTargets(options, checks));
 
@@ -52,6 +54,11 @@ internal static class StartupValidationService
         results.Add(checks.CheckLanguageSupport
             ? CheckLanguageSupport(options)
             : StartupCheckResult.Skipped("Language support", "Check disabled by configuration."));
+
+        if (options.IsBatchMode)
+        {
+            results.AddRange(CheckBatchTargets(options.Batch));
+        }
 
         return new StartupValidationReport(results);
     }
@@ -283,6 +290,64 @@ internal static class StartupValidationService
             return StartupCheckResult.Warning(
                 "Model file state",
                 $"Model file is not loadable and will be re-downloaded during execution: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Verifies batch-specific prerequisites when batch mode is active.
+    /// </summary>
+    private static IEnumerable<StartupCheckResult> CheckBatchTargets(BatchOptions batch)
+    {
+        if (!Directory.Exists(batch.InputDirectory))
+        {
+            yield return StartupCheckResult.Failed("Batch input directory", $"Directory not found: {batch.InputDirectory}");
+        }
+        else
+        {
+            var matchingFiles = Directory.GetFiles(batch.InputDirectory, batch.FilePattern);
+            yield return matchingFiles.Length > 0
+                ? StartupCheckResult.Passed("Batch input directory", $"{matchingFiles.Length} file(s) matching '{batch.FilePattern}' in: {batch.InputDirectory}")
+                : StartupCheckResult.Failed("Batch input directory", $"No files matching '{batch.FilePattern}' in: {batch.InputDirectory}");
+        }
+
+        if (!Directory.Exists(batch.OutputDirectory))
+        {
+            yield return StartupCheckResult.Failed("Batch output directory", $"Directory not found: {batch.OutputDirectory}");
+        }
+        else
+        {
+            yield return CheckDirectoryWriteAccessDirect(batch.OutputDirectory, "Batch output directory");
+        }
+
+        if (!Directory.Exists(batch.TempDirectory))
+        {
+            yield return StartupCheckResult.Failed("Batch temp directory", $"Directory not found: {batch.TempDirectory}");
+        }
+        else
+        {
+            yield return CheckDirectoryWriteAccessDirect(batch.TempDirectory, "Batch temp directory");
+        }
+    }
+
+    /// <summary>
+    /// Verifies that a file can be created and deleted in a directory path.
+    /// </summary>
+    private static StartupCheckResult CheckDirectoryWriteAccessDirect(string directoryPath, string label)
+    {
+        var tempFilePath = Path.Combine(directoryPath, $".startup-check-{Guid.NewGuid():N}.tmp");
+
+        try
+        {
+            using (File.Create(tempFilePath))
+            {
+            }
+
+            File.Delete(tempFilePath);
+            return StartupCheckResult.Passed(label, $"Writable: {directoryPath}");
+        }
+        catch (Exception ex)
+        {
+            return StartupCheckResult.Failed(label, $"Directory is not writable: {directoryPath}. {ex.Message}");
         }
     }
 

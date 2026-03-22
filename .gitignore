@@ -9,6 +9,7 @@ TestResults/
 # IDE files
 .vs/
 .vscode/
+.claude/
 *.user
 *.rsuser
 *.suo

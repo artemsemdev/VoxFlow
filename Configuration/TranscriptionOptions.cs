@@ -11,6 +11,7 @@ using System.Text.Json;
 internal sealed class TranscriptionOptions
 {
     public string ConfigurationPath { get; }
+    public bool IsBatchMode { get; }
     public string InputFilePath { get; }
     public string WavFilePath { get; }
     public string ResultFilePath { get; }
@@ -41,6 +42,7 @@ internal sealed class TranscriptionOptions
     public int MaxDuplicateSegmentTextLength { get; }
     public StartupValidationOptions StartupValidation { get; }
     public ConsoleProgressOptions ConsoleProgress { get; }
+    public BatchOptions Batch { get; }
 
     /// <summary>
     /// Creates validated options from raw configuration data.
@@ -48,9 +50,12 @@ internal sealed class TranscriptionOptions
     private TranscriptionOptions(TranscriptionConfiguration configuration, string configurationPath)
     {
         ConfigurationPath = configurationPath;
-        InputFilePath = RequireValue(configuration.InputFilePath, nameof(configuration.InputFilePath));
-        WavFilePath = RequireValue(configuration.WavFilePath, nameof(configuration.WavFilePath));
-        ResultFilePath = RequireValue(configuration.ResultFilePath, nameof(configuration.ResultFilePath));
+        IsBatchMode = string.Equals(configuration.ProcessingMode, "batch", StringComparison.OrdinalIgnoreCase);
+
+        // Single-file paths are only required in single-file mode.
+        InputFilePath = IsBatchMode ? (configuration.InputFilePath?.Trim() ?? string.Empty) : RequireValue(configuration.InputFilePath, nameof(configuration.InputFilePath));
+        WavFilePath = IsBatchMode ? (configuration.WavFilePath?.Trim() ?? string.Empty) : RequireValue(configuration.WavFilePath, nameof(configuration.WavFilePath));
+        ResultFilePath = IsBatchMode ? (configuration.ResultFilePath?.Trim() ?? string.Empty) : RequireValue(configuration.ResultFilePath, nameof(configuration.ResultFilePath));
         ModelFilePath = RequireValue(configuration.ModelFilePath, nameof(configuration.ModelFilePath));
         ModelType = RequireValue(configuration.ModelType, nameof(configuration.ModelType));
         FfmpegExecutablePath = RequireValue(configuration.FfmpegExecutablePath, nameof(configuration.FfmpegExecutablePath));
@@ -94,6 +99,7 @@ internal sealed class TranscriptionOptions
             nameof(configuration.MaxDuplicateSegmentTextLength));
         StartupValidation = CreateStartupValidationOptions(configuration.StartupValidation);
         ConsoleProgress = CreateConsoleProgressOptions(configuration.ConsoleProgress);
+        Batch = IsBatchMode ? CreateBatchOptions(configuration.Batch) : BatchOptions.Disabled;
     }
 
     /// <summary>
@@ -250,6 +256,38 @@ internal sealed class TranscriptionOptions
     }
 
     /// <summary>
+    /// Converts batch processing settings into an immutable runtime model.
+    /// Called only when processingMode is "batch".
+    /// </summary>
+    private static BatchOptions CreateBatchOptions(BatchConfiguration? configuration)
+    {
+        if (configuration is null)
+        {
+            throw new InvalidOperationException(
+                "Settings must define the 'batch' section inside 'transcription' when processingMode is 'batch'.");
+        }
+
+        var inputDirectory = RequireValue(configuration.InputDirectory, nameof(configuration.InputDirectory));
+        var outputDirectory = RequireValue(configuration.OutputDirectory, nameof(configuration.OutputDirectory));
+        var filePattern = string.IsNullOrWhiteSpace(configuration.FilePattern) ? "*.m4a" : configuration.FilePattern.Trim();
+        var tempDirectory = string.IsNullOrWhiteSpace(configuration.TempDirectory)
+            ? Path.GetTempPath()
+            : configuration.TempDirectory.Trim();
+        var summaryFilePath = string.IsNullOrWhiteSpace(configuration.SummaryFilePath)
+            ? "batch-summary.txt"
+            : configuration.SummaryFilePath.Trim();
+
+        return new BatchOptions(
+            InputDirectory: inputDirectory,
+            OutputDirectory: outputDirectory,
+            TempDirectory: tempDirectory,
+            FilePattern: filePattern,
+            StopOnFirstError: configuration.StopOnFirstError,
+            KeepIntermediateFiles: configuration.KeepIntermediateFiles,
+            SummaryFilePath: summaryFilePath);
+    }
+
+    /// <summary>
     /// Ensures a required string setting is present.
     /// </summary>
     private static string RequireValue(string? value, string settingName)
@@ -333,6 +371,7 @@ internal sealed class TranscriptionSettingsRoot
 /// </summary>
 internal sealed class TranscriptionConfiguration
 {
+    public string? ProcessingMode { get; set; }
     public string? InputFilePath { get; set; }
     public string? WavFilePath { get; set; }
     public string? ResultFilePath { get; set; }
@@ -363,6 +402,7 @@ internal sealed class TranscriptionConfiguration
     public int MaxDuplicateSegmentTextLength { get; set; }
     public StartupValidationConfiguration? StartupValidation { get; set; }
     public ConsoleProgressConfiguration? ConsoleProgress { get; set; }
+    public BatchConfiguration? Batch { get; set; }
 }
 
 /// <summary>
@@ -426,4 +466,40 @@ internal sealed class ConsoleProgressConfiguration
     public bool UseColors { get; set; }
     public int ProgressBarWidth { get; set; }
     public int RefreshIntervalMilliseconds { get; set; }
+}
+
+/// <summary>
+/// Stores validated batch processing settings used when processingMode is "batch".
+/// </summary>
+internal sealed record BatchOptions(
+    string InputDirectory,
+    string OutputDirectory,
+    string TempDirectory,
+    string FilePattern,
+    bool StopOnFirstError,
+    bool KeepIntermediateFiles,
+    string SummaryFilePath)
+{
+    public static readonly BatchOptions Disabled = new(
+        InputDirectory: string.Empty,
+        OutputDirectory: string.Empty,
+        TempDirectory: string.Empty,
+        FilePattern: "*.m4a",
+        StopOnFirstError: false,
+        KeepIntermediateFiles: false,
+        SummaryFilePath: string.Empty);
+}
+
+/// <summary>
+/// Represents raw batch processing settings loaded from JSON inside the transcription section.
+/// </summary>
+internal sealed class BatchConfiguration
+{
+    public string? InputDirectory { get; set; }
+    public string? OutputDirectory { get; set; }
+    public string? TempDirectory { get; set; }
+    public string? FilePattern { get; set; }
+    public bool StopOnFirstError { get; set; }
+    public bool KeepIntermediateFiles { get; set; }
+    public string? SummaryFilePath { get; set; }
 }

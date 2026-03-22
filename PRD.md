@@ -32,21 +32,27 @@ The product must stay local-only and must not depend on cloud transcription APIs
 - Translation
 - Web or desktop UI
 - Cloud-hosted inference
-- Batch folder processing
+- Parallel/concurrent batch file processing
+- Recursive subdirectory scanning for batch mode
+- Watch mode or file system monitoring
+- Merging batch results into a single output file
 
 ## External Contract
 
 ### Input
 
-- local `.m4a` source file
+- Single-file mode: local `.m4a` source file
+- Batch mode: directory of `.m4a` files matching a configurable file pattern
 
 ### Intermediate Output
 
-- local `.wav` file
+- Single-file mode: local `.wav` file at configured path
+- Batch mode: per-file `.wav` files in a configurable temp directory, cleaned up after processing
 
 ### Final Output
 
-- local `result.txt`
+- Single-file mode: local `result.txt`
+- Batch mode: one `.txt` result file per input file in a configured output directory, plus a batch summary report
 
 ### Output Format
 
@@ -81,6 +87,8 @@ The following settings must be configurable:
 - anti-hallucination transcription settings
 - startup validation behavior
 - console progress behavior
+- processing mode (`single` or `batch`)
+- batch processing behavior (input directory, output directory, temp directory, file pattern, error handling, intermediate file retention, summary file path)
 
 ## Functional Requirements
 
@@ -231,6 +239,49 @@ The application must write accepted transcript segments to the configured result
 
 If the run is rejected because of unsupported or ambiguous language, the application must not silently produce misleading transcript output.
 
+### 11. Batch Processing
+
+The application must support processing multiple audio files from a configured input directory in a single run.
+
+Batch mode activation:
+
+- the processing mode is controlled by the `processingMode` field inside the `transcription` section
+- when `processingMode` is `"batch"`, the application discovers and processes files from `batch.inputDirectory` (the `batch` section is also inside `transcription`)
+- when `processingMode` is `"single"` or absent, the application uses the existing single-file mode unchanged
+- single-file paths (`inputFilePath`, `wavFilePath`, `resultFilePath`) are optional and ignored in batch mode
+
+File discovery:
+
+- scan the configured input directory for files matching `batch.filePattern` (default `*.m4a`)
+- sort discovered files alphabetically for deterministic ordering
+- skip files that are empty (0 bytes) or not readable
+- fail if no files match the pattern
+
+Per-file processing:
+
+- each file follows the same pipeline as single-file mode: convert, load WAV, transcribe, filter, write output
+- each input file produces its own result `.txt` file in `batch.outputDirectory`, named `{inputFileNameWithoutExtension}.txt`
+- intermediate WAV files are generated in `batch.tempDirectory` and cleaned up after each file unless `batch.keepIntermediateFiles` is `true`
+- the Whisper model and factory are loaded once and reused across all files in the batch
+
+Error handling:
+
+- by default, record the error for a failed file and continue processing remaining files
+- when `batch.stopOnFirstError` is `true`, stop the batch on the first file failure
+- user cancellation (`Ctrl+C`) always stops the entire batch immediately
+- completed result files must remain intact after cancellation or failure
+
+Batch summary:
+
+- a human-readable summary report is written to `batch.summaryFilePath` after the batch completes
+- the summary must include total file count, succeeded count, failed count, skipped count, and total duration
+- the summary must list each file with its status, output file name, detected language, and processing duration
+
+Progress reporting:
+
+- batch mode must show file-level progress (`[File X/Y]`) alongside per-file transcription progress
+- single-file mode progress must remain unchanged
+
 ## Reliability Requirements
 
 - fail early on invalid configuration
@@ -269,6 +320,9 @@ The solution must include unit coverage for:
 - output formatting
 - language decision rules
 - startup validation reporting
+- batch configuration loading and validation
+- file discovery and path generation
+- batch summary report formatting
 
 ### End-to-End Tests
 
@@ -276,6 +330,10 @@ The solution must include process-level tests for:
 
 - clean failure on startup-validation failure
 - successful startup and entry into the transcription flow
+- batch mode disabled preserves single-file behavior
+- batch mode with valid input directory processes all matching files
+- batch mode with missing input directory fails startup validation
+- batch mode with `stopOnFirstError` stops after first failure
 
 The current end-to-end tests use:
 
@@ -291,4 +349,11 @@ The current end-to-end tests use:
 - single-language runs no longer mis-route through unnecessary language selection
 - obvious silence and stage-direction hallucinations are reduced
 - output format remains unchanged
+- single-file mode works identically when `processingMode` is `"single"` or absent
+- batch mode discovers and processes all matching files from the input directory
+- each batch file produces an independent result file in the output directory
+- the Whisper model is loaded once and reused across all batch files
+- failed files are recorded and remaining files continue processing
+- a batch summary report is generated with per-file status
+- batch-level progress is shown alongside per-file progress
 - unit and end-to-end tests pass

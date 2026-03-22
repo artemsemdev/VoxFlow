@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 
 /// <summary>
@@ -19,6 +20,9 @@ internal sealed class ConsoleProgressService
     private string currentLanguageName = string.Empty;
     private int latestLanguageProgress;
     private long spinnerIndex;
+    private int? batchFileIndex;
+    private int? batchTotalFiles;
+    private string? batchFileName;
 
     /// <summary>
     /// Initializes the console progress renderer from configuration.
@@ -28,6 +32,19 @@ internal sealed class ConsoleProgressService
         this.options = options;
         useAnsiColors = options.UseColors && !Console.IsOutputRedirected;
         useInteractiveUpdates = options.Enabled && !Console.IsOutputRedirected;
+    }
+
+    /// <summary>
+    /// Sets the batch-level context shown as a prefix in progress output.
+    /// </summary>
+    public void SetBatchContext(int fileIndex, int totalFiles, string fileName)
+    {
+        lock (sync)
+        {
+            batchFileIndex = fileIndex;
+            batchTotalFiles = totalFiles;
+            batchFileName = fileName;
+        }
     }
 
     /// <summary>
@@ -144,8 +161,11 @@ internal sealed class ConsoleProgressService
         var completedBar = new string('#', completedBlocks);
         var remainingBar = new string('-', remainingBlocks);
         var bar = $"[{Colorize(completedBar, "96")}{Colorize(remainingBar, "90")}]";
+        var batchPrefix = batchFileIndex.HasValue && batchTotalFiles.HasValue
+            ? $"[File {batchFileIndex.Value}/{batchTotalFiles.Value}] "
+            : "";
         var line =
-            $"{Colorize(spinner.ToString(), "93")} {bar} " +
+            $"{batchPrefix}{Colorize(spinner.ToString(), "93")} {bar} " +
             $"{Colorize($"{processedPercentage,6:0.0}%", "92")} done | " +
             $"{Colorize($"{remainingPercentage,6:0.0}%", "91")} left | " +
             $"Language {Math.Min(currentLanguageIndex + 1, totalLanguageCount)}/{totalLanguageCount} " +

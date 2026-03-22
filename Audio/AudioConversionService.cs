@@ -139,6 +139,68 @@ internal static class AudioConversionService
     }
 
     /// <summary>
+    /// Converts a specific input file into WAV format at the specified output path.
+    /// Used by batch mode where input and output paths vary per file.
+    /// </summary>
+    public static async Task ConvertToWavAsync(
+        string inputFilePath,
+        string wavFilePath,
+        TranscriptionOptions options,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        Console.WriteLine($"WAV conversion started: {inputFilePath} -> {wavFilePath}");
+        if (options.AudioFilterChain.Count > 0)
+        {
+            Console.WriteLine($"Applying ffmpeg audio filters: {string.Join(" | ", options.AudioFilterChain)}");
+        }
+
+        var startInfo = CreateFfmpegStartInfo(options.FfmpegExecutablePath);
+
+        startInfo.ArgumentList.Add("-y");
+        startInfo.ArgumentList.Add("-i");
+        startInfo.ArgumentList.Add(inputFilePath);
+
+        if (options.AudioFilterChain.Count > 0)
+        {
+            startInfo.ArgumentList.Add("-af");
+            startInfo.ArgumentList.Add(string.Join(",", options.AudioFilterChain));
+        }
+
+        startInfo.ArgumentList.Add("-ar");
+        startInfo.ArgumentList.Add(options.OutputSampleRate.ToString(CultureInfo.InvariantCulture));
+        startInfo.ArgumentList.Add("-ac");
+        startInfo.ArgumentList.Add(options.OutputChannelCount.ToString(CultureInfo.InvariantCulture));
+        startInfo.ArgumentList.Add("-f");
+        startInfo.ArgumentList.Add(options.OutputContainerFormat);
+        startInfo.ArgumentList.Add(wavFilePath);
+
+        ProcessRunResult result;
+        try
+        {
+            result = await RunProcessAsync(startInfo, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Win32Exception ex)
+        {
+            throw new InvalidOperationException("Failed to start ffmpeg for WAV conversion.", ex);
+        }
+
+        if (result.ExitCode != 0)
+        {
+            throw new InvalidOperationException(
+                $"ffmpeg conversion failed with exit code {result.ExitCode}: {result.StandardError}".Trim());
+        }
+
+        var outputInfo = new FileInfo(wavFilePath);
+        if (!outputInfo.Exists || outputInfo.Length == 0)
+        {
+            throw new InvalidOperationException("ffmpeg reported success, but the WAV file is missing or empty.");
+        }
+
+        Console.WriteLine("WAV conversion succeeded.");
+    }
+
+    /// <summary>
     /// Creates a common ffmpeg process start configuration.
     /// </summary>
     private static ProcessStartInfo CreateFfmpegStartInfo(string ffmpegPath)

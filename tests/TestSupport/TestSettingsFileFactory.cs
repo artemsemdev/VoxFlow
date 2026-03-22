@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
@@ -34,7 +35,9 @@ internal static class TestSettingsFileFactory
         float entropyThreshold = 2.4f,
         bool suppressBracketedNonSpeechSegments = true,
         int maxConsecutiveDuplicateSegments = 2,
-        int maxDuplicateSegmentTextLength = 32)
+        int maxDuplicateSegmentTextLength = 32,
+        string processingMode = "single",
+        object? batch = null)
     {
         supportedLanguages ??=
         [
@@ -74,51 +77,59 @@ internal static class TestSettingsFileFactory
             refreshIntervalMilliseconds = 1
         };
 
-        var configuration = new
+        var transcription = new Dictionary<string, object?>
         {
-            transcription = new
+            ["processingMode"] = processingMode,
+            ["inputFilePath"] = inputFilePath,
+            ["wavFilePath"] = wavFilePath,
+            ["resultFilePath"] = resultFilePath,
+            ["modelFilePath"] = modelFilePath,
+            ["modelType"] = modelType,
+            ["ffmpegExecutablePath"] = ffmpegExecutablePath,
+            ["outputSampleRate"] = outputSampleRate,
+            ["outputChannelCount"] = outputChannelCount,
+            ["outputContainerFormat"] = outputContainerFormat,
+            ["overwriteWavOutput"] = overwriteWavOutput,
+            ["audioFilterChain"] = audioFilterChain,
+            ["supportedLanguages"] = supportedLanguages.Select(language => new
             {
-                inputFilePath,
-                wavFilePath,
-                resultFilePath,
-                modelFilePath,
-                modelType,
-                ffmpegExecutablePath,
-                outputSampleRate,
-                outputChannelCount,
-                outputContainerFormat,
-                overwriteWavOutput,
-                audioFilterChain,
-                supportedLanguages = supportedLanguages.Select(language => new
-                {
-                    code = language.Code,
-                    displayName = language.DisplayName
-                }),
-                nonSpeechMarkers,
-                longLowInformationSegmentThresholdSeconds,
-                minTextLengthForLongSegment,
-                minSegmentProbability,
-                minWinningCandidateProbability,
-                minWinningMargin,
-                tieBreakerEpsilon,
-                rejectAmbiguousLanguageCandidates,
-                minAcceptedSpeechDurationSeconds,
-                useNoContext,
-                noSpeechThreshold,
-                logProbThreshold,
-                entropyThreshold,
-                suppressBracketedNonSpeechSegments,
-                maxConsecutiveDuplicateSegments,
-                maxDuplicateSegmentTextLength,
-                startupValidation,
-                consoleProgress
-            }
+                code = language.Code,
+                displayName = language.DisplayName
+            }).ToArray(),
+            ["nonSpeechMarkers"] = nonSpeechMarkers,
+            ["longLowInformationSegmentThresholdSeconds"] = longLowInformationSegmentThresholdSeconds,
+            ["minTextLengthForLongSegment"] = minTextLengthForLongSegment,
+            ["minSegmentProbability"] = minSegmentProbability,
+            ["minWinningCandidateProbability"] = minWinningCandidateProbability,
+            ["minWinningMargin"] = minWinningMargin,
+            ["tieBreakerEpsilon"] = tieBreakerEpsilon,
+            ["rejectAmbiguousLanguageCandidates"] = rejectAmbiguousLanguageCandidates,
+            ["minAcceptedSpeechDurationSeconds"] = minAcceptedSpeechDurationSeconds,
+            ["useNoContext"] = useNoContext,
+            ["noSpeechThreshold"] = noSpeechThreshold,
+            ["logProbThreshold"] = logProbThreshold,
+            ["entropyThreshold"] = entropyThreshold,
+            ["suppressBracketedNonSpeechSegments"] = suppressBracketedNonSpeechSegments,
+            ["maxConsecutiveDuplicateSegments"] = maxConsecutiveDuplicateSegments,
+            ["maxDuplicateSegmentTextLength"] = maxDuplicateSegmentTextLength,
+            ["startupValidation"] = startupValidation,
+            ["consoleProgress"] = consoleProgress
+        };
+
+        if (batch != null)
+        {
+            transcription["batch"] = batch;
+        }
+
+        var configurationData = new Dictionary<string, object?>
+        {
+            ["transcription"] = transcription
         };
 
         var settingsPath = Path.Combine(directoryPath, "appsettings.json");
         File.WriteAllText(
             settingsPath,
-            JsonSerializer.Serialize(configuration, new JsonSerializerOptions { WriteIndented = true }));
+            JsonSerializer.Serialize(configurationData, new JsonSerializerOptions { WriteIndented = true }));
 
         return settingsPath;
     }

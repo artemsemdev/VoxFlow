@@ -56,11 +56,11 @@ The application is a single-process `.NET 9` console app that orchestrates a sta
 The runtime is organized into responsibility-based modules:
 
 - `Program.cs`
-  Orchestrates the end-to-end workflow and top-level error handling.
+  Orchestrates the end-to-end workflow and top-level error handling. Supports both single-file and batch execution paths.
 - `Configuration/`
-  Loads and validates immutable runtime options from JSON and environment override.
+  Loads and validates immutable runtime options from JSON and environment override, including batch configuration.
 - `Services/StartupValidationService.cs`
-  Runs preflight checks and produces a summarized startup report.
+  Runs preflight checks and produces a summarized startup report. Includes batch-specific checks when batch mode is active.
 - `Audio/AudioConversionService.cs`
   Invokes `ffmpeg` to convert `.m4a` to filtered mono `16000 Hz` WAV.
 - `Services/ModelService.cs`
@@ -72,11 +72,17 @@ The runtime is organized into responsibility-based modules:
 - `Processing/TranscriptionFilter.cs`
   Removes unusable, low-confidence, and hallucinated segments.
 - `Services/ConsoleProgressService.cs`
-  Renders progress in interactive and redirected console modes.
+  Renders progress in interactive and redirected console modes. Supports batch-level context overlay.
 - `Services/OutputWriter.cs`
   Writes accepted transcript segments using the stable timestamped output format.
+- `Services/FileDiscoveryService.cs`
+  Discovers and validates input files for batch processing.
+- `Services/BatchSummaryWriter.cs`
+  Generates human-readable batch summary reports with per-file results.
 
 ## Runtime Flow
+
+### Single-File Mode
 
 ```mermaid
 flowchart TD
@@ -96,6 +102,28 @@ flowchart TD
     K --> L[Exit success]
 ```
 
+### Batch Mode
+
+```mermaid
+flowchart TD
+    A[Load configuration] --> B{processingMode = batch?}
+    B -->|No| SF[Single-file flow]
+    B -->|Yes| C[Run batch startup validation]
+    C -->|Failed| X[Exit with diagnostics]
+    C -->|Passed| D[Load or download Whisper model]
+    D --> E[Discover input files]
+    E --> F[For each discovered file]
+    F --> G[Convert .m4a to temp .wav]
+    G --> H[Load WAV samples]
+    H --> I[Transcribe and filter]
+    I --> J[Write per-file result .txt]
+    J --> K[Clean up temp .wav]
+    K --> L{More files?}
+    L -->|Yes| F
+    L -->|No| M[Write batch summary]
+    M --> N[Exit with batch status]
+```
+
 ## Component View
 
 ```mermaid
@@ -111,6 +139,8 @@ flowchart LR
         filter[TranscriptionFilter]
         progress[ConsoleProgressService]
         output[OutputWriter]
+        discovery[FileDiscoveryService]
+        summary[BatchSummaryWriter]
     end
 
     subgraph External[External Local Dependencies]
@@ -125,6 +155,8 @@ flowchart LR
     program --> modelsvc
     program --> loader
     program --> select
+    program --> discovery
+    program --> summary
     select --> filter
     select --> progress
     program --> output
@@ -138,20 +170,22 @@ flowchart LR
     modelsvc --> whisper
     loader --> files
     output --> files
+    discovery --> files
+    summary --> files
 ```
 
 ## Data And Control Boundaries
 
 - Input boundary
-  The only source input is a local `.m4a` file plus local configuration.
+  Single-file mode uses a local `.m4a` file plus local configuration. Batch mode uses a directory of `.m4a` files.
 - Processing boundary
   Audio conversion is delegated to `ffmpeg`; inference is delegated to local Whisper runtime bindings.
 - Intermediate artifact boundary
-  The generated `.wav` file is an explicit intermediate output and a stable handoff between conversion and inference.
+  The generated `.wav` file is an explicit intermediate output and a stable handoff between conversion and inference. In batch mode, each file gets its own temp WAV.
 - Output boundary
-  The final artifact is `result.txt` in the legacy line format `{start}->{end}: {text}`.
+  Single-file mode produces `result.txt`. Batch mode produces one `.txt` per input file plus a batch summary report.
 - Control boundary
-  `Program` remains the sole top-level orchestrator; lower-level modules do not own application flow.
+  `Program` remains the sole top-level orchestrator; lower-level modules do not own application flow. In batch mode, `Program` drives the file loop and error isolation.
 
 ## Key Quality Attributes
 
@@ -270,12 +304,60 @@ flowchart LR
   - Multi-language processing remains inside one controlled inference session.
   - Native lifecycle concerns are isolated behind the transcription services.
 
+### ADR-011: Sequential batch file processing
+
+- Status: Accepted
+- Context: Whisper inference is CPU/GPU-intensive. Parallel processing would require careful memory management and native runtime coordination.
+- Decision: Process files sequentially in a single thread. The Whisper factory and model are shared across files.
+- Consequences:
+  - Simpler implementation with predictable memory usage.
+  - No native runtime contention.
+  - Throughput scales linearly with file count.
+
+### ADR-012: Configuration-driven batch mode
+
+- Status: Accepted
+- Context: The application is fully configuration-driven (ADR-003). Batch mode should follow the same pattern rather than introducing CLI arguments.
+- Decision: Add a `processingMode` field and a `batch` section inside the `transcription` configuration. When `processingMode` is `"batch"`, the application discovers files from `batch.inputDirectory` instead of using the single `inputFilePath`. Single-file paths are optional in batch mode.
+- Consequences:
+  - No CLI contract changes.
+  - The user's intent (single vs. batch) is explicit and unambiguous.
+  - Backward-compatible: when `processingMode` is `"single"` or absent, the application behaves exactly as before.
+
+### ADR-013: One result file per input file in batch mode
+
+- Status: Accepted
+- Context: The current output contract is one `result.txt` per run. For batch mode, combining all results would lose file boundaries.
+- Decision: Each input file produces its own result file in `batch.outputDirectory`, named `{inputFileNameWithoutExtension}.txt`.
+- Consequences:
+  - Existing output format is preserved per file.
+  - Results are independently usable.
+  - The single-file `resultFilePath` setting is ignored when batch mode is active.
+
+### ADR-014: Continue-on-error with batch summary
+
+- Status: Accepted
+- Context: A batch of many files should not abort entirely because one file has a corrupt header.
+- Decision: By default, record the error and continue to the next file. Configurable via `batch.stopOnFirstError`.
+- Consequences:
+  - Users get maximum output from a batch run.
+  - The summary report clearly shows which files succeeded, failed, or were skipped.
+
+### ADR-015: Intermediate WAV files use a temp directory in batch mode
+
+- Status: Accepted
+- Context: In single-file mode, `wavFilePath` is a fixed configured path. In batch mode, each file needs its own WAV.
+- Decision: Generate intermediate WAV files in `batch.tempDirectory` (defaults to system temp). Clean up after each file completes unless `batch.keepIntermediateFiles` is `true`.
+- Consequences:
+  - Disk usage stays bounded.
+  - Debugging is possible by enabling `keepIntermediateFiles`.
+
 ## Testing Alignment
 
 The architecture supports the PRD testing strategy:
 
-- unit tests cover configuration loading, startup validation reporting, WAV loading, filtering, language decision rules, and output formatting
-- end-to-end tests validate startup failure and successful entry into the transcription flow
+- unit tests cover configuration loading, startup validation reporting, WAV loading, filtering, language decision rules, output formatting, batch configuration validation, file discovery, and batch summary formatting
+- end-to-end tests validate startup failure, successful entry into the transcription flow, batch mode disabled behavior, batch processing of multiple files, and batch error handling
 - test support utilities use temporary settings, generated WAV fixtures, and fake `ffmpeg` executables to keep tests local and deterministic
 
 ## Future Evolution
@@ -286,5 +368,8 @@ The current architecture leaves room for future extension without breaking the c
 - alternate local Whisper model sizes
 - richer diagnostics and reporting
 - internal refactoring toward interfaces if the application grows beyond the current static-service layout
+- parallel batch processing with concurrency limits
+- recursive subdirectory scanning for batch input
+- structured output formats (JSON, CSV) for batch results
 
 Any future change should preserve the PRD non-goals unless the product scope changes explicitly.
