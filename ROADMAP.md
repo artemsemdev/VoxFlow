@@ -1,364 +1,974 @@
-# Roadmap: Batch Processing
+# ROADMAP — Add MCP Server to WhisperNETConsole
 
-## Overview
+## 1. Objective
 
-Extend the Audio Transcription Utility to support processing multiple audio files in a single run. The application currently processes exactly one `.m4a` file per invocation. Batch processing adds the ability to discover, queue, and transcribe multiple files from an input directory, producing one result file per input file.
+Add a **local MCP server** on top of `WhisperNETConsole` so AI clients such as ChatGPT, Claude, GitHub Copilot, Cursor, and VS Code can discover and invoke the application's transcription capabilities through the **Model Context Protocol (MCP)**.
 
-> **Scope change:** The PRD (`PRD.md`, Non-Goals) currently lists "Batch folder processing" as out of scope. Implementing this feature requires updating the PRD to move batch processing from Non-Goals into Functional Requirements.
-
----
-
-## Goals
-
-- Process all `.m4a` files in a configured input directory in a single application run
-- Produce one result `.txt` file per input file, preserving the existing output format
-- Reuse the Whisper model and factory across all files in a batch (aligned with ADR-010)
-- Report batch-level progress (file X of Y) alongside per-file progress
-- Support graceful cancellation that stops the batch without corrupting completed results
-- Continue processing remaining files when a single file fails (configurable)
-- Generate a batch summary report at the end of the run
-
-## Non-Goals (for this iteration)
-
-- Parallel/concurrent file processing (files are processed sequentially)
-- Recursive subdirectory scanning
-- CLI argument parsing (all behavior remains configuration-driven)
-- Watch mode / file system monitoring
-- Merging results from multiple files into a single output file
-- Web UI or REST API for batch management
+The server must expose the application's existing local-only Whisper transcription workflow as safe, structured, reusable MCP tools without breaking the current console application behavior.
 
 ---
 
-## Architecture Decisions
+## 2. Current State Analysis
 
-### BATCH-ADR-001: Sequential file processing
+### What the current application already does well
 
-- **Context:** Whisper inference is CPU/GPU-intensive. Parallel processing would require careful memory management and native runtime coordination.
-- **Decision:** Process files sequentially in a single thread. The Whisper factory and model are shared across files.
-- **Consequences:** Simpler implementation. Predictable memory usage. No native runtime contention. Throughput scales linearly with file count.
+`WhisperNETConsole` is already a strong candidate for MCP enablement because it has a clear local-only workflow and a stable domain:
 
-### BATCH-ADR-002: Configuration-driven batch mode
+- local file-based audio transcription
+- `ffmpeg` preprocessing
+- local Whisper inference via `Whisper.net`
+- result writing to local text files
+- startup validation
+- batch processing support
+- configuration-driven behavior via `appsettings.json` / `TRANSCRIPTION_SETTINGS_PATH`
 
-- **Context:** The application is fully configuration-driven (ADR-003). Batch mode should follow the same pattern rather than introducing CLI arguments.
-- **Decision:** Add a `processingMode` field and a `batch` section inside the `transcription` configuration. When `processingMode` is `"batch"`, the application discovers files from `batch.inputDirectory` instead of using the single `inputFilePath`. Single-file paths are optional in batch mode.
-- **Consequences:** No CLI contract changes. The user's intent is explicit. Backward-compatible — when `processingMode` is `"single"` or absent, the application behaves exactly as before.
+### Current technical characteristics
 
-### BATCH-ADR-003: One result file per input file
+The repository currently represents a **.NET 9 console application** with orchestration concentrated in `Program.cs` and responsibility-based modules such as:
 
-- **Context:** The current output contract is one `result.txt` per run. For batch mode, combining all results would lose file boundaries.
-- **Decision:** Each input file produces its own result file in `batch.outputDirectory`, named `{inputFileNameWithoutExtension}.txt`.
-- **Consequences:** Existing output format is preserved per file. Results are independently usable. The single-file `resultFilePath` setting is ignored when batch mode is active.
+- `Configuration/TranscriptionOptions.cs`
+- `Audio/AudioConversionService.cs`
+- `Audio/WavAudioLoader.cs`
+- `Services/StartupValidationService.cs`
+- `Services/ModelService.cs`
+- `Services/LanguageSelectionService.cs`
+- `Processing/TranscriptionFilter.cs`
+- `Services/OutputWriter.cs`
+- batch-related services already added
 
-### BATCH-ADR-004: Continue-on-error with summary
+### Architectural limitations that matter for MCP
 
-- **Context:** A batch of 50 files should not abort entirely because file #3 has a corrupt header.
-- **Decision:** By default, record the error and continue to the next file. Configurable via `batch.stopOnFirstError`.
-- **Consequences:** Users get maximum output from a batch run. The summary report clearly shows which files succeeded, failed, or were skipped.
+1. **The current app is console-first.**
+   A lot of behavior is designed around `Console.WriteLine`, console progress output, and a direct end-to-end execution flow.
 
-### BATCH-ADR-005: Intermediate WAV files use a temp directory
+2. **The orchestration is not yet host-agnostic.**
+   `Program.cs` coordinates config loading, validation, conversion, model loading, transcription, filtering, and output writing directly.
 
-- **Context:** In single-file mode, `wavFilePath` is a fixed configured path. In batch mode, each file needs its own WAV.
-- **Decision:** Generate intermediate WAV files in `batch.tempDirectory` (defaults to system temp). Clean up after each file completes unless `batch.keepIntermediateFiles` is `true`.
-- **Consequences:** Disk usage stays bounded. Debugging is possible by enabling `keepIntermediateFiles`.
+3. **The current execution model is file-path + config driven, not request/response driven.**
+   MCP tools need strongly defined request and response contracts.
+
+4. **The current app writes user-facing output to stdout.**
+   This is acceptable for CLI mode, but it is dangerous for **stdio-based MCP**, because MCP protocol messages also use standard I/O.
+
+### Key design consequence
+
+Do **not** bolt MCP directly into the current `Program.cs` flow.
+
+The correct professional approach is:
+
+- keep the current CLI host
+- extract reusable application services
+- add a dedicated MCP host on top of the reusable core
 
 ---
 
-## Configuration Schema
+## 3. Product Goal
 
-The processing mode and batch settings are configured inside the `transcription` section of `appsettings.json`:
+After this feature is implemented, the application should support two host modes:
+
+1. **CLI mode** — current behavior remains available
+2. **MCP server mode** — AI clients can discover and invoke transcription capabilities as MCP tools/resources/prompts
+
+This should make WhisperNETConsole usable as a **local AI tool server** for transcription workflows.
+
+---
+
+## 4. Success Criteria
+
+The feature is successful when all of the following are true:
+
+- existing console transcription still works
+- MCP server starts successfully over **stdio**
+- at least one MCP client can connect and list tools
+- the MCP server can transcribe a local audio file
+- the MCP server can run startup validation
+- the MCP server can optionally run batch transcription
+- the MCP server returns structured results instead of only console text
+- no protocol corruption happens because of accidental stdout logging
+- file access is constrained to safe configured roots
+- cancellation and long-running progress are handled cleanly
+
+---
+
+## 5. Recommended Scope for v1
+
+### In scope
+
+- local MCP server over **stdio**
+- optional HTTP transport as a second step
+- reusable transcription application layer
+- MCP tools for:
+  - startup validation
+  - single-file transcription
+  - batch transcription
+  - supported language inspection
+  - model/config inspection
+- MCP resources for read-only context
+- MCP prompts for discoverability and guided use
+- logging to **stderr** / file instead of stdout in MCP mode
+- path validation / allowed-roots policy
+- integration tests for at least one MCP client workflow
+
+### Out of scope for v1
+
+- remote multi-user SaaS hosting
+- authentication / OAuth for local stdio mode
+- real-time transcription streaming
+- speaker diarization
+- transcript editing via MCP
+- arbitrary shell command execution
+- exposing raw `ffmpeg` command injection to clients
+- automatic watching of folders for newly arrived files
+
+---
+
+## 6. Core Architecture Decision
+
+## ADR-MCP-001: Use a separate MCP host, not a dual-purpose console protocol mode
+
+### Decision
+
+Create a **dedicated MCP server project** and a **shared application core** instead of embedding MCP protocol handling directly into the current console application's `Program.cs`.
+
+### Why
+
+- MCP stdio mode must not write arbitrary text to stdout
+- current CLI flow is user-console oriented
+- MCP requires request/response contracts and structured schemas
+- keeping CLI and MCP separate reduces regression risk
+- testing becomes much easier
+
+### Consequences
+
+- some refactoring is required up front
+- code quality improves significantly
+- future HTTP transport becomes much easier
+
+---
+
+## 7. Target Repository Shape
+
+### Recommended target structure
+
+```text
+WhisperNETConsole.sln
+
+/src
+  /WhisperNET.Application
+    /Audio
+    /Configuration
+    /Contracts
+    /Execution
+    /Processing
+    /Services
+    WhisperNET.Application.csproj
+
+  /WhisperNET.Cli
+    Program.cs
+    WhisperNET.Cli.csproj
+
+  /WhisperNET.McpServer
+    Program.cs
+    /Configuration
+    /Tools
+    /Resources
+    /Prompts
+    /Logging
+    WhisperNET.McpServer.csproj
+
+/tests
+  /WhisperNET.Application.Tests
+  /WhisperNET.McpServer.Tests
+```
+
+### Acceptable incremental fallback
+
+If a full restructuring is too much for the first pass:
+
+- keep the existing console project
+- add `WhisperNET.McpServer` as a new project
+- expose internal reusable logic via shared facades or `InternalsVisibleTo`
+- still move protocol-safe orchestration out of the current console entry point
+
+The fallback is acceptable, but the **preferred** path is a shared application layer.
+
+---
+
+## 8. New Architectural Building Blocks
+
+## 8.1 Application Facade Layer
+
+Introduce a reusable application layer that is independent from CLI and MCP.
+
+### Required interfaces
+
+```text
+IStartupValidationFacade
+ITranscriptionFacade
+IModelInspectionFacade
+ILanguageInfoFacade
+IPathPolicy
+IResultLocator
+```
+
+### Required request/response contracts
+
+```text
+StartupValidationRequest
+StartupValidationResult
+StartupCheckDto
+
+TranscribeFileRequest
+TranscribeFileResult
+
+BatchTranscribeRequest
+BatchTranscribeResult
+BatchFileResult
+
+ModelInfoResult
+SupportedLanguageDto
+TranscriptReadResult
+```
+
+### Design rule
+
+The application layer must return **structured DTOs**, not only console strings.
+
+---
+
+## 8.2 Host-Agnostic Orchestration
+
+Move the end-to-end flow out of `Program.cs` into orchestration services such as:
+
+```text
+TranscriptionExecutionService
+BatchTranscriptionExecutionService
+StartupValidationExecutionService
+```
+
+Each service should:
+
+- accept strongly typed request objects
+- return strongly typed result objects
+- avoid direct console output
+- support `CancellationToken`
+- optionally emit progress through an abstraction
+
+---
+
+## 8.3 Progress Reporting Abstraction
+
+The existing app already has console progress behavior. MCP needs a different progress sink.
+
+Create an abstraction such as:
+
+```csharp
+public interface IProgressReporter
+{
+    ValueTask ReportAsync(string stage, double? percentage, string message, CancellationToken ct);
+}
+```
+
+Implementations:
+
+- `ConsoleProgressReporter` for CLI
+- `McpProgressReporter` for MCP tools
+- `NullProgressReporter` for tests or silent execution
+
+---
+
+## 8.4 Path Safety Layer
+
+Add a strict path policy because MCP clients will pass file paths as tool arguments.
+
+### Rules
+
+- normalize every incoming path with `Path.GetFullPath`
+- reject empty / relative / traversal-based paths when policy requires absolute paths
+- restrict access to configured `allowedRoots`
+- separate input roots and output roots if needed
+- reject output writes outside allowed roots
+- reject shell-like path fragments that are not valid paths
+- do not expose arbitrary file system browsing beyond the allowed policy
+
+---
+
+## 9. MCP Server Capability Design
+
+MCP servers can expose **tools**, **resources**, and **prompts**.
+
+For `WhisperNETConsole`, the best design is:
+
+- **tools** = actions the AI may invoke
+- **resources** = read-only context the AI may inspect
+- **prompts** = user-selectable guided workflows
+
+---
+
+## 10. MCP Tools for v1
+
+## 10.1 `validate_environment`
+
+### Purpose
+Run startup validation and return structured diagnostic results.
+
+### Input
+
+- optional `configurationPath`
+- optional `detailed`
+
+### Output
+
+- final outcome
+- full check list
+- warnings / failures
+- resolved config path
+
+### Notes
+
+This should be marked as:
+
+- read-only
+- idempotent
+- closed-world
+
+---
+
+## 10.2 `transcribe_file`
+
+### Purpose
+Transcribe a single local audio file.
+
+### Input
+
+- `inputPath`
+- optional `resultFilePath`
+- optional `configurationPath`
+- optional `forceLanguages`
+- optional `overwriteExistingResult`
+
+### Output
+
+- success/failure
+- detected language
+- result file path
+- number of accepted segments
+- duration / elapsed time
+- warnings
+- optionally transcript preview
+
+### Rules
+
+- must validate path safety before execution
+- must not allow arbitrary output location outside allowed roots
+- must support cancellation
+- should support MCP progress notifications
+
+---
+
+## 10.3 `transcribe_batch`
+
+### Purpose
+Run batch transcription over a directory.
+
+### Input
+
+- `inputDirectory`
+- `outputDirectory`
+- optional `filePattern`
+- optional `summaryFilePath`
+- optional `stopOnFirstError`
+- optional `keepIntermediateFiles`
+- optional `configurationPath`
+
+### Output
+
+- total files discovered
+- succeeded / failed / skipped counts
+- summary file path
+- per-file structured result list
+
+### Rules
+
+- must be optional via configuration flag `mcp.allowBatch`
+- must enforce `maxBatchFiles`
+- must support progress reporting per file and overall batch
+
+---
+
+## 10.4 `get_supported_languages`
+
+### Purpose
+Return supported languages from effective configuration/runtime.
+
+### Input
+
+- optional `configurationPath`
+
+### Output
+
+- configured languages
+- display names
+- tie-break priorities
+
+### Notes
+
+Read-only, safe, fast.
+
+---
+
+## 10.5 `inspect_model`
+
+### Purpose
+Return structured information about the configured Whisper model.
+
+### Output
+
+- model path
+- model type
+- whether file exists
+- file size
+- whether startup validation can load it
+- whether it would need download/re-download
+
+---
+
+## 10.6 `read_transcript`
+
+### Purpose
+Read a produced transcript file under allowed roots.
+
+### Input
+
+- `path`
+- optional `maxCharacters`
+
+### Output
+
+- transcript path
+- content preview
+- total length
+
+### Notes
+
+This is useful when a model wants to inspect the generated transcript after tool execution.
+
+---
+
+## 11. MCP Resources for v1
+
+Resources should be **read-only** and help the model understand the environment.
+
+### Recommended resources
+
+1. `whisper://config/effective`
+   - resolved effective configuration snapshot
+
+2. `whisper://languages/supported`
+   - list of configured / supported languages
+
+3. `whisper://model/current`
+   - current model status
+
+4. `whisper://runs/last-summary`
+   - last execution summary if available
+
+5. `whisper://transcripts/{name}`
+   - transcript content for known generated artifacts
+
+### Important note
+
+Do not overexpose the filesystem as generic resources.
+Keep resources bounded and domain-specific.
+
+---
+
+## 12. MCP Prompts for v1
+
+Prompts are useful for discoverability and guided workflows.
+
+### Recommended prompts
+
+1. `transcribe-local-audio`
+   - asks for audio path and desired output location
+
+2. `batch-transcribe-folder`
+   - asks for folder path and output directory
+
+3. `diagnose-transcription-setup`
+   - runs environment validation and suggests next steps
+
+4. `inspect-last-transcript`
+   - helps review a generated transcript
+
+---
+
+## 13. New Configuration Section
+
+Add a dedicated MCP configuration section.
+
+### Example
 
 ```json
 {
-  "transcription": {
-    "processingMode": "single",
-
-    "inputFilePath": "artifacts/input.m4a",
-    "wavFilePath": "artifacts/output.wav",
-    "resultFilePath": "artifacts/result.txt",
-
-    "batch": {
-      "inputDirectory": "artifacts/input",
-      "outputDirectory": "artifacts/output",
-      "tempDirectory": "",
-      "filePattern": "*.m4a",
-      "stopOnFirstError": false,
-      "keepIntermediateFiles": false,
-      "summaryFilePath": "artifacts/batch-summary.txt"
+  "mcp": {
+    "enabled": true,
+    "transport": "stdio",
+    "serverName": "whispernet",
+    "serverVersion": "1.0.0",
+    "allowBatch": true,
+    "allowedInputRoots": [
+      "/absolute/path/to/artifacts/input",
+      "/absolute/path/to/audio"
+    ],
+    "allowedOutputRoots": [
+      "/absolute/path/to/artifacts/output",
+      "/absolute/path/to/transcripts"
+    ],
+    "maxBatchFiles": 100,
+    "requireAbsolutePaths": true,
+    "resources": {
+      "enabled": true,
+      "exposeLastRun": true
     },
-
-    "...other existing settings..."
+    "prompts": {
+      "enabled": true
+    },
+    "logging": {
+      "minimumLevel": "Information",
+      "writeToStdErr": true,
+      "writeToFile": false,
+      "logFilePath": "artifacts/logs/mcp.log"
+    },
+    "http": {
+      "enabled": false,
+      "basePath": "/mcp",
+      "urls": [
+        "http://localhost:5238"
+      ]
+    }
   }
 }
 ```
 
-| Setting                      | Type     | Default                        | Description                                                    |
-|------------------------------|----------|--------------------------------|----------------------------------------------------------------|
-| `processingMode`             | `string` | `"single"`                     | `"single"` for one file, `"batch"` for directory processing.  |
-| `batch.inputDirectory`       | `string` | required when mode is `batch`  | Directory to scan for input audio files.                       |
-| `batch.outputDirectory`      | `string` | required when mode is `batch`  | Directory where per-file result `.txt` files are written.      |
-| `batch.tempDirectory`        | `string` | system temp                    | Directory for intermediate `.wav` files.                       |
-| `batch.filePattern`          | `string` | `"*.m4a"`                      | Glob pattern for file discovery.                               |
-| `batch.stopOnFirstError`     | `bool`   | `false`                        | Stop the entire batch on the first file failure.               |
-| `batch.keepIntermediateFiles` | `bool`   | `false`                        | Retain intermediate `.wav` files after processing.             |
-| `batch.summaryFilePath`      | `string` | `"batch-summary.txt"`          | Path for the batch completion summary report.                  |
+### Validation rules
 
-When `processingMode` is `"single"` or absent, single-file paths (`inputFilePath`, `wavFilePath`, `resultFilePath`) are required and the `batch` section is ignored. When `processingMode` is `"batch"`, single-file paths are optional and the `batch` section is required.
+- `transport` must be `stdio` or `http`
+- input and output roots must be non-empty when path restriction is enabled
+- `maxBatchFiles` must be positive
+- if HTTP is enabled, `basePath` and `urls` must be valid
+- if `writeToFile` is enabled, `logFilePath` must be writable
 
 ---
 
-## Implementation Plan
+## 14. Logging Requirements
 
-### Phase 1: Foundation (Configuration and File Discovery)
+## Critical rule
 
-#### Task 1.1: Add batch configuration model
-- **File:** `Configuration/TranscriptionOptions.cs`
-- **What:** Add `BatchConfiguration` class for JSON deserialization and `BatchOptions` record for validated runtime options.
-- **Validation rules:**
-  - When `processingMode` is `"batch"`: `batch.inputDirectory` and `batch.outputDirectory` are required and must be non-empty.
-  - `filePattern` must be non-empty (defaults to `*.m4a`).
-  - `tempDirectory` defaults to `Path.GetTempPath()` when empty.
-  - `summaryFilePath` must be non-empty.
-- **Wire into:** `TranscriptionSettingsRoot` and `TranscriptionOptions`.
-- **Backward-compatible:** When `processingMode` is `"single"` or absent, existing behavior is unchanged.
+When the server runs in **stdio MCP mode**, the implementation must **never** write arbitrary messages to stdout.
 
-#### Task 1.2: Add file discovery service
-- **File:** `Services/FileDiscoveryService.cs` (new)
-- **What:** Static class with method `DiscoverInputFiles(BatchOptions options, CancellationToken ct)`.
-- **Behavior:**
-  - Scan `inputDirectory` for files matching `filePattern` (non-recursive).
-  - Sort files alphabetically for deterministic ordering.
-  - Return `IReadOnlyList<DiscoveredFile>` where `DiscoveredFile` is a record containing `InputPath`, `OutputPath`, `TempWavPath`.
-  - Compute output path as `{outputDirectory}/{fileNameWithoutExtension}.txt`.
-  - Compute temp WAV path as `{tempDirectory}/{fileNameWithoutExtension}_{guid}.wav`.
-  - Throw if no files are found.
+### Required behavior
 
-#### Task 1.3: Add batch startup validation
-- **File:** `Services/StartupValidationService.cs`
-- **What:** Add batch-specific checks alongside existing checks.
-- **New checks (when batch mode is active):**
-  - `inputDirectory` exists.
-  - `outputDirectory` exists and is writable.
-  - `tempDirectory` exists and is writable.
-  - At least one file matches `filePattern` in `inputDirectory`.
-- **Existing checks modified:**
-  - Skip `CheckInputFile` for single `inputFilePath` (not used in batch mode).
-  - Reuse all other checks (ffmpeg, model, languages, Whisper runtime).
+- protocol frames use stdio transport
+- all operational logs go to `stderr` or a file
+- progress bars / ANSI console rendering used by CLI must not be reused as-is in MCP mode
+- MCP tool progress must be sent through MCP progress notifications, not via console output
 
-### Phase 2: Core Batch Orchestration
+### Refactoring implication
 
-#### Task 2.1: Extract single-file pipeline into a reusable method
-- **File:** `Program.cs`
-- **What:** Extract the current transcription pipeline (convert → load model → load WAV → select language → write output) into a static method:
-  ```csharp
-  private static async Task<FileProcessingResult> ProcessSingleFileAsync(
-      string inputPath,
-      string wavPath,
-      string outputPath,
-      WhisperFactory whisperFactory,
-      TranscriptionOptions options,
-      CancellationToken cancellationToken)
-  ```
-- **Return type:** `FileProcessingResult` record with `InputPath`, `OutputPath`, `Status` (Success/Failed/Skipped), `ErrorMessage?`, `Duration`, `DetectedLanguage`.
-- **Key:** This method does NOT create the `WhisperFactory` — it receives it as a parameter (factory is shared across the batch).
-
-#### Task 2.2: Implement batch orchestration loop
-- **File:** `Program.cs`
-- **What:** Add a batch execution path in `Main()`:
-  ```
-  if processingMode == "batch":
-      1. Run batch startup validation
-      2. Create WhisperFactory once (shared)
-      3. Discover input files
-      4. For each discovered file:
-          a. Print "Processing file X of Y: {fileName}"
-          b. Call ProcessSingleFileAsync
-          c. Record result
-          d. Clean up temp WAV (unless keepIntermediateFiles)
-          e. If failed and stopOnFirstError → break
-      5. Write batch summary
-      6. Print summary to console
-      7. Return exit code (0 if all succeeded, 1 if any failed)
-  else:
-      existing single-file flow (unchanged)
-  ```
-
-#### Task 2.3: Implement batch summary writer
-- **File:** `Services/BatchSummaryWriter.cs` (new)
-- **What:** Static class that writes a human-readable summary report.
-- **Summary format:**
-  ```
-  Batch Processing Summary
-  ========================
-  Total files:     10
-  Succeeded:       8
-  Failed:          1
-  Skipped:         1
-  Total duration:  00:05:32
-
-  Results:
-  [OK]      recording1.m4a → recording1.txt (English, 00:00:45)
-  [OK]      recording2.m4a → recording2.txt (Russian, 00:01:12)
-  [FAILED]  recording3.m4a — Conversion failed: ffmpeg exit code 1
-  [SKIPPED] recording4.m4a — File is empty (0 bytes)
-  ...
-  ```
-
-### Phase 3: Progress Reporting
-
-#### Task 3.1: Extend progress service for batch context
-- **File:** `Services/ConsoleProgressService.cs`
-- **What:** Add batch-level context to the progress display.
-- **New information shown:**
-  - `[File 3/10]` prefix before per-file progress.
-  - Current file name.
-  - Batch elapsed time.
-- **Implementation:** Add a `SetBatchContext(int fileIndex, int totalFiles, string fileName)` method. When batch context is set, the progress line includes the batch prefix.
-- **Single-file mode:** When no batch context is set, behavior is identical to current.
-
-### Phase 4: Error Handling and Cleanup
-
-#### Task 4.1: Per-file error isolation
-- **File:** `Program.cs` (batch loop)
-- **What:** Wrap each `ProcessSingleFileAsync` call in a try/catch that:
-  - Catches `OperationCanceledException` → propagate (user cancelled the batch).
-  - Catches all other exceptions → record as failed, continue to next file (unless `stopOnFirstError`).
-  - Ensures temp WAV is cleaned up even on failure.
-
-#### Task 4.2: File-level pre-validation
-- **File:** `Services/FileDiscoveryService.cs`
-- **What:** During discovery, mark files as `Skipped` if:
-  - File size is 0 bytes.
-  - File is not readable (permission check).
-- **Consequence:** Skipped files appear in the summary but are never processed.
-
-### Phase 5: Testing
-
-#### Task 5.1: Unit tests for batch configuration
-- **File:** `tests/WisperTestApp.UnitTests/BatchConfigurationTests.cs` (new)
-- **Tests:**
-  - Default `processingMode` → `IsBatchMode` is `false`, batch section is ignored.
-  - Batch enabled without `inputDirectory` → throws validation error.
-  - Batch enabled without `outputDirectory` → throws validation error.
-  - Valid batch config → all options populated correctly.
-  - Default values applied when optional fields are missing.
-
-#### Task 5.2: Unit tests for file discovery
-- **File:** `tests/WisperTestApp.UnitTests/FileDiscoveryServiceTests.cs` (new)
-- **Tests:**
-  - Directory with matching files → returns sorted list.
-  - Directory with no matching files → throws.
-  - Empty files are marked as skipped.
-  - Output and temp paths are generated correctly.
-  - Custom file pattern filters correctly.
-
-#### Task 5.3: Unit tests for batch summary
-- **File:** `tests/WisperTestApp.UnitTests/BatchSummaryWriterTests.cs` (new)
-- **Tests:**
-  - All succeeded → summary shows correct counts.
-  - Mixed results → summary shows correct counts and per-file status.
-  - Empty batch → summary handles edge case.
-
-#### Task 5.4: End-to-end batch tests
-- **File:** `tests/WisperTestApp.EndToEndTests/BatchProcessingTests.cs` (new)
-- **Tests:**
-  - Batch mode disabled → single-file behavior unchanged.
-  - Batch mode with valid directory → processes all files.
-  - Batch mode with missing directory → startup validation fails.
-  - Batch mode with `stopOnFirstError` → stops after first failure.
-
-### Phase 6: Documentation
-
-#### Task 6.1: Update PRD.md
-- Move "Batch folder processing" from Non-Goals to Functional Requirements.
-- Add functional requirements section for batch processing.
-
-#### Task 6.2: Update ARCHITECTURE.md
-- Add batch ADRs.
-- Update runtime flow diagram to show batch branching.
-- Add batch-related components to the component view.
-
-#### Task 6.3: Update README.md
-- Add batch configuration example.
-- Add usage instructions for batch mode.
-
-#### Task 6.4: Update appsettings.example.json
-- Add the `batch` section with example values.
+All current direct console writes must be behind an abstraction or environment-specific host behavior.
 
 ---
 
-## File Change Summary
+## 15. Security Requirements
 
-| File                                         | Action   | Description                                        |
-|----------------------------------------------|----------|----------------------------------------------------|
-| `Configuration/TranscriptionOptions.cs`      | Modify   | Add `BatchConfiguration`, `BatchOptions`, wiring   |
-| `Program.cs`                                 | Modify   | Extract single-file method, add batch loop          |
-| `Services/FileDiscoveryService.cs`           | New      | File discovery and path generation                  |
-| `Services/BatchSummaryWriter.cs`             | New      | Batch summary report generation                     |
-| `Services/ConsoleProgressService.cs`         | Modify   | Add batch context to progress display               |
-| `Services/StartupValidationService.cs`       | Modify   | Add batch-specific validation checks                |
-| `appsettings.json`                           | Modify   | Add `batch` section (disabled by default)           |
-| `appsettings.example.json`                   | Modify   | Add `batch` section with example values             |
-| `PRD.md`                                     | Modify   | Move batch to Functional Requirements               |
-| `ARCHITECTURE.md`                            | Modify   | Add batch ADRs and updated diagrams                 |
-| `README.md`                                  | Modify   | Add batch usage documentation                       |
-| `tests/.../BatchConfigurationTests.cs`       | New      | Batch config validation tests                       |
-| `tests/.../FileDiscoveryServiceTests.cs`     | New      | File discovery tests                                |
-| `tests/.../BatchSummaryWriterTests.cs`       | New      | Summary report tests                                |
-| `tests/.../BatchProcessingTests.cs`          | New      | End-to-end batch tests                              |
+### Mandatory controls
+
+- allow access only to configured local roots
+- reject path traversal attempts
+- do not expose arbitrary shell execution
+- do not allow raw ffmpeg command strings from the model
+- return sanitized error messages
+- avoid leaking sensitive local paths beyond what is necessary
+- redact secrets / environment variables from logs
+
+### Destructive behavior policy
+
+For MCP metadata:
+
+- inspection tools: read-only
+- transcription tools: not read-only, but non-destructive relative to source input
+- transcript-reading tools: read-only
 
 ---
 
-## Implementation Order and Dependencies
+## 16. Implementation Phases
 
-```
-Phase 1 (Foundation)
-  Task 1.1 (Config) ─────────┐
-  Task 1.2 (Discovery) ──────┤
-  Task 1.3 (Validation) ─────┘
-          │
-Phase 2 (Orchestration)
-  Task 2.1 (Extract method) ─┐
-  Task 2.2 (Batch loop) ─────┤ depends on Phase 1
-  Task 2.3 (Summary writer) ─┘
-          │
-Phase 3 (Progress)
-  Task 3.1 (Batch progress) ── depends on Phase 2
-          │
-Phase 4 (Error Handling)
-  Task 4.1 (Error isolation) ─┐ depends on Phase 2
-  Task 4.2 (Pre-validation) ──┘
-          │
-Phase 5 (Testing)
-  Tasks 5.1-5.4 ─────────────── depends on Phases 1-4
-          │
-Phase 6 (Documentation)
-  Tasks 6.1-6.4 ─────────────── depends on Phases 1-5
+## Phase 0 — Baseline and Preparation
+
+### Tasks
+
+- create a new branch for MCP work
+- document current CLI behavior that must remain unchanged
+- inventory all direct `Console.WriteLine` / `Console.Error.WriteLine` usage
+- inventory all places where file paths are accepted or constructed
+
+### Deliverable
+
+A clear list of CLI-only behaviors vs reusable application logic.
+
+---
+
+## Phase 1 — Extract Reusable Application Core
+
+### Tasks
+
+- create `WhisperNET.Application` project
+- move configuration, audio, processing, and core services into reusable assemblies/namespaces
+- introduce DTO contracts for request/response execution
+- move orchestration out of `Program.cs` into host-agnostic execution services
+- keep batch and single-file flows available through the same application layer
+
+### Deliverable
+
+A reusable application service that can be invoked from both CLI and MCP.
+
+---
+
+## Phase 2 — Preserve and Rewire CLI Host
+
+### Tasks
+
+- create or adapt `WhisperNET.Cli`
+- keep current startup and config loading behavior
+- adapt console progress and validation output to use host-specific reporters
+- verify no regression in existing single and batch execution modes
+
+### Deliverable
+
+Current console app still works after refactoring.
+
+---
+
+## Phase 3 — Create MCP Server Host
+
+### Tasks
+
+- create `WhisperNET.McpServer` project
+- add NuGet package `ModelContextProtocol` for stdio support
+- add `ModelContextProtocol.AspNetCore` only if HTTP transport is also enabled in this iteration
+- configure MCP server registration and transport
+- register tool classes, prompt classes, resource handlers
+- load shared application services through DI
+
+### Required package baseline
+
+- `ModelContextProtocol` `1.1.0`
+- `ModelContextProtocol.AspNetCore` `1.1.0` only if HTTP transport is needed
+
+### Deliverable
+
+An MCP host that starts and is discoverable by an MCP client.
+
+---
+
+## Phase 4 — Implement Tool Layer
+
+### Tasks
+
+- add `WhisperMcpTools` class/classes
+- implement explicit request validation inside each tool
+- add structured descriptions for tool methods and parameters
+- support `CancellationToken`
+- support progress reporting where useful
+- return structured content for main execution tools
+
+### Design rules
+
+- validate all tool inputs explicitly
+- do not rely only on data annotations
+- convert application results into MCP-friendly structured responses
+- use clear descriptions because models depend on them
+
+---
+
+## Phase 5 — Implement Resources and Prompts
+
+### Tasks
+
+- add resources for config, model, languages, and last-run information
+- add prompt templates for guided workflows
+- make prompts optional via configuration
+
+### Deliverable
+
+Better discoverability and a more useful server UX in MCP-capable clients.
+
+---
+
+## Phase 6 — Add Safe Logging and Diagnostics
+
+### Tasks
+
+- route logs to stderr in stdio mode
+- route logs to file if configured
+- capture structured execution metadata
+- add correlation/request IDs where reasonable
+- create a small health/startup diagnostic path for MCP startup troubleshooting
+
+---
+
+## Phase 7 — Testing
+
+### Unit tests
+
+- path policy validation
+- config validation
+- DTO mapping
+- error sanitization
+- tool argument validation
+
+### Integration tests
+
+- server starts over stdio
+- tools are listed successfully
+- `validate_environment` works
+- `transcribe_file` works on a small fixture
+- batch path validation works
+- cancellation works
+
+### Manual tests
+
+- test with MCP Inspector
+- test with VS Code / GitHub Copilot `mcp.json`
+- verify no stdout pollution
+
+---
+
+## Phase 8 — Documentation and Developer Experience
+
+### Tasks
+
+- update `README.md`
+- add `MCP.md` or MCP section to README
+- add sample `mcp.json`
+- add example workflow screenshots later if desired
+- document required environment variables and absolute path recommendations
+
+---
+
+## 17. Concrete File-Level Work Plan
+
+## Files to create
+
+```text
+/src/WhisperNET.Application/Contracts/*.cs
+/src/WhisperNET.Application/Execution/*.cs
+/src/WhisperNET.Application/Security/PathPolicy.cs
+/src/WhisperNET.McpServer/Program.cs
+/src/WhisperNET.McpServer/Tools/WhisperMcpTools.cs
+/src/WhisperNET.McpServer/Resources/WhisperMcpResources.cs
+/src/WhisperNET.McpServer/Prompts/WhisperMcpPrompts.cs
+/src/WhisperNET.McpServer/Configuration/McpOptions.cs
+/tests/WhisperNET.McpServer.Tests/*
 ```
 
+## Files to modify
+
+```text
+Program.cs
+Configuration/TranscriptionOptions.cs
+Services/StartupValidationService.cs
+Services/LanguageSelectionService.cs
+Services/ModelService.cs
+Services/OutputWriter.cs
+Services/ConsoleProgressService.cs
+README.md
+appsettings.example.json
+```
+
+### Important note
+
+Some of the current files may move into the new shared application project rather than remain in their exact current path.
+
 ---
 
-## Risks and Mitigations
+## 18. Example MCP Server Registration (Target Shape)
 
-| Risk                                              | Mitigation                                                         |
-|---------------------------------------------------|--------------------------------------------------------------------|
-| Memory growth across many files                   | Process files sequentially; load/unload WAV samples per file       |
-| Native Whisper runtime instability across files    | Reuse factory (ADR-010); do not dispose/recreate between files     |
-| Disk space from intermediate WAV files             | Clean up after each file; configurable `keepIntermediateFiles`     |
-| Output file name collisions                        | Use deterministic naming `{stem}.txt`; fail if output already exists |
-| Long batch runs with no visibility                 | Batch progress reporting; per-file status output                   |
-| Configuration complexity                           | Batch section is optional; disabled by default; clear defaults     |
+> This is design guidance, not final production code.
+
+```csharp
+var builder = Host.CreateApplicationBuilder(args);
+
+builder.Services.Configure<McpOptions>(builder.Configuration.GetSection("mcp"));
+
+builder.Services.AddSingleton<IPathPolicy, PathPolicy>();
+builder.Services.AddSingleton<IStartupValidationFacade, StartupValidationFacade>();
+builder.Services.AddSingleton<ITranscriptionFacade, TranscriptionFacade>();
+builder.Services.AddSingleton<IModelInspectionFacade, ModelInspectionFacade>();
+builder.Services.AddSingleton<ILanguageInfoFacade, LanguageInfoFacade>();
+
+builder.Services
+    .AddMcpServer(options =>
+    {
+        options.ServerInfo = new()
+        {
+            Name = "whispernet",
+            Version = "1.0.0"
+        };
+    })
+    .WithStdioServerTransport()
+    .WithTools<WhisperMcpTools>()
+    .WithPrompts<WhisperMcpPrompts>();
+
+var app = builder.Build();
+await app.RunAsync();
+```
+
+### Optional HTTP transport (phase 2)
+
+```csharp
+builder.Services
+    .AddMcpServer()
+    .WithHttpTransport()
+    .WithTools<WhisperMcpTools>();
+
+var app = webBuilder.Build();
+app.MapMcp("/mcp");
+app.Run();
+```
 
 ---
 
-## Success Criteria
+## 19. Example MCP Tool Shape
 
-- Single-file mode works identically when `processingMode` is `"single"` or absent
-- All `.m4a` files in `inputDirectory` are discovered and processed
-- Each file produces an independent result `.txt` in `outputDirectory`
-- Whisper model is loaded once and reused across all files
-- Failed files are recorded; remaining files continue processing
-- Batch summary report is generated with per-file status
-- Console shows batch-level progress (`[File X/Y]`)
-- Ctrl+C cancels the batch gracefully without corrupting completed outputs
-- All existing unit and end-to-end tests continue to pass
-- New unit and end-to-end tests cover batch-specific behavior
+> This is target-shape pseudocode.
+
+```csharp
+[McpServerToolType]
+public sealed class WhisperMcpTools(
+    ITranscriptionFacade transcriptionFacade,
+    IStartupValidationFacade startupValidationFacade,
+    IPathPolicy pathPolicy)
+{
+    [McpServerTool(
+        Name = "transcribe_file",
+        Title = "Transcribe Local Audio File",
+        ReadOnly = false,
+        Destructive = false,
+        Idempotent = false,
+        OpenWorld = false,
+        UseStructuredContent = true)]
+    [Description("Transcribes a local audio file using the existing WhisperNET pipeline and writes a transcript to a safe output path.")]
+    public async Task<TranscribeFileResult> TranscribeFileAsync(
+        [Description("Absolute path to a local audio file under allowed input roots.")] string inputPath,
+        [Description("Optional absolute path for the resulting transcript file under allowed output roots.")] string? resultFilePath = null,
+        CancellationToken cancellationToken = default,
+        IProgress<ProgressNotificationValue>? progress = null)
+    {
+        // Validate input explicitly
+        // Enforce path policy
+        // Call reusable transcription facade
+        // Return structured result
+    }
+}
+```
+
+---
+
+## 20. Example `.vscode/mcp.json`
+
+```json
+{
+  "servers": {
+    "WhisperNET": {
+      "type": "stdio",
+      "command": "dotnet",
+      "args": [
+        "run",
+        "--project",
+        "src/WhisperNET.McpServer/WhisperNET.McpServer.csproj"
+      ],
+      "env": {
+        "TRANSCRIPTION_SETTINGS_PATH": "/absolute/path/to/appsettings.json"
+      }
+    }
+  }
+}
+```
+
+### Important
+
+Use **absolute paths** for configuration and local folders whenever possible.
+
+---
+
+## 21. Acceptance Criteria
+
+## Functional
+
+- MCP client can connect successfully
+- tool list is visible
+- `validate_environment` returns structured checks
+- `transcribe_file` produces a transcript file and structured result
+- `transcribe_batch` works when enabled
+- `read_transcript` can read an allowed transcript file
+- resources and prompts are discoverable when enabled
+
+## Technical
+
+- no stdout protocol corruption in stdio mode
+- CLI mode still works
+- long-running tools accept cancellation
+- structured logging works
+- path policy blocks unsafe file access
+- tests pass
+
+## Operational
+
+- README documents setup clearly
+- sample `mcp.json` works
+- startup diagnostics are understandable
+
+---
+
+## 22. Main Risks and Mitigations
+
+| Risk | Why it matters | Mitigation |
+|---|---|---|
+| Stdout pollution | Breaks stdio MCP protocol | Route logs to stderr/file only in MCP mode |
+| Tight coupling to `Program.cs` | Hard to reuse current logic | Extract orchestration into application layer |
+| Unsafe file path access | MCP tools receive model-supplied arguments | Enforce strict allowed-roots path policy |
+| Batch execution too broad | Large runs may consume time/resources | Add `maxBatchFiles`, batch toggle, cancellation |
+| Verbose CLI progress reused in MCP | Breaks protocol and adds noise | Introduce progress abstraction |
+| Weak tool descriptions | Models use tools incorrectly | Add precise descriptions on tool methods and parameters |
+| Missing runtime validation | Schema alone is not enough | Validate explicitly inside each tool |
+
+---
+
+## 23. Final Recommendation
+
+For a professional implementation, the MCP feature should be built as a **new host over a reusable shared transcription core**, not as a thin wrapper around the current console entry point.
+
+That is the cleanest path to:
+
+- keep current CLI behavior intact
+- make the system testable
+- avoid stdio protocol corruption
+- support future HTTP transport
+- expose transcription safely to AI clients
+
+---
+
+## 24. Definition of Done
+
+This roadmap is complete when the repository contains:
+
+- a reusable shared transcription core
+- a working CLI host
+- a working MCP server host
+- tested stdio MCP integration
+- safe path handling
+- structured tool outputs
+- updated documentation
+
