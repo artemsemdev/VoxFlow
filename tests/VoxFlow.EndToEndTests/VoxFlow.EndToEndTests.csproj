@@ -22,7 +22,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\WisperTestApp.csproj" />
+    <ProjectReference Include="..\..\VoxFlow.csproj" />
     <Compile Include="..\TestSupport\*.cs" Link="TestSupport\%(Filename)%(Extension)" />
   </ItemGroup>
 </Project>

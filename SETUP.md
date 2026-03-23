@@ -18,7 +18,7 @@ ffmpeg -version
 ## Project Structure
 
 ```
-WisperTestApp/
+VoxFlow/
   Program.cs                    # Application entry point
   Configuration/                # Settings loading and validation
   Audio/                        # ffmpeg conversion and WAV loading
@@ -31,8 +31,8 @@ WisperTestApp/
   models/                       # Local Whisper model files
   artifacts/                    # Default input/output directory
   tests/
-    WisperTestApp.UnitTests/
-    WisperTestApp.EndToEndTests/
+    VoxFlow.UnitTests/
+    VoxFlow.EndToEndTests/
     TestSupport/                # Shared test utilities
 ```
 
@@ -208,7 +208,7 @@ This reduces background noise and removes long silent stretches before transcrip
 
 ```bash
 git clone <repository-url>
-cd WisperTestApp
+cd VoxFlow
 dotnet restore
 dotnet build
 ```
@@ -255,13 +255,13 @@ Transcript output format:
 Run unit tests:
 
 ```bash
-dotnet test tests/WisperTestApp.UnitTests/WisperTestApp.UnitTests.csproj
+dotnet test tests/VoxFlow.UnitTests/VoxFlow.UnitTests.csproj
 ```
 
 Run end-to-end tests:
 
 ```bash
-dotnet test tests/WisperTestApp.EndToEndTests/WisperTestApp.EndToEndTests.csproj
+dotnet test tests/VoxFlow.EndToEndTests/VoxFlow.EndToEndTests.csproj
 ```
 
 Run all tests:

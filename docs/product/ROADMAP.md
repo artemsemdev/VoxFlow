@@ -1,8 +1,8 @@
-# ROADMAP — Add MCP Server to WhisperNETConsole
+# ROADMAP — Add MCP Server to VoxFlow
 
 ## 1. Objective
 
-Add a **local MCP server** on top of `WhisperNETConsole` so AI clients such as ChatGPT, Claude, GitHub Copilot, Cursor, and VS Code can discover and invoke the application's transcription capabilities through the **Model Context Protocol (MCP)**.
+Add a **local MCP server** on top of `VoxFlow` so AI clients such as ChatGPT, Claude, GitHub Copilot, Cursor, and VS Code can discover and invoke the application's transcription capabilities through the **Model Context Protocol (MCP)**.
 
 The server must expose the application's existing local-only Whisper transcription workflow as safe, structured, reusable MCP tools without breaking the current console application behavior.
 
@@ -12,7 +12,7 @@ The server must expose the application's existing local-only Whisper transcripti
 
 ### What the current application already does well
 
-`WhisperNETConsole` is already a strong candidate for MCP enablement because it has a clear local-only workflow and a stable domain:
+`VoxFlow` is already a strong candidate for MCP enablement because it has a clear local-only workflow and a stable domain:
 
 - local file-based audio transcription
 - `ffmpeg` preprocessing
@@ -69,7 +69,7 @@ After this feature is implemented, the application should support two host modes
 1. **CLI mode** — current behavior remains available
 2. **MCP server mode** — AI clients can discover and invoke transcription capabilities as MCP tools/resources/prompts
 
-This should make WhisperNETConsole usable as a **local AI tool server** for transcription workflows.
+This should make VoxFlow usable as a **local AI tool server** for transcription workflows.
 
 ---
 
@@ -151,7 +151,7 @@ Create a **dedicated MCP server project** and a **shared application core** inst
 ### Recommended target structure
 
 ```text
-WhisperNETConsole.sln
+VoxFlow.sln
 
 /src
   /WhisperNET.Application
@@ -297,7 +297,7 @@ Add a strict path policy because MCP clients will pass file paths as tool argume
 
 MCP servers can expose **tools**, **resources**, and **prompts**.
 
-For `WhisperNETConsole`, the best design is:
+For `VoxFlow`, the best design is:
 
 - **tools** = actions the AI may invoke
 - **resources** = read-only context the AI may inspect

@@ -8,7 +8,7 @@ internal static class TestProjectPaths
 
     public static string RepositoryRoot => RepositoryRootPath.Value;
 
-    public static string AppProjectPath => Path.Combine(RepositoryRoot, "WisperTestApp.csproj");
+    public static string AppProjectPath => Path.Combine(RepositoryRoot, "VoxFlow.csproj");
 
     private static string FindRepositoryRoot()
     {
@@ -17,7 +17,7 @@ internal static class TestProjectPaths
         while (currentDirectory is not null)
         {
             // Walk upward from the test output directory until the app project is found.
-            var candidateProjectPath = Path.Combine(currentDirectory.FullName, "WisperTestApp.csproj");
+            var candidateProjectPath = Path.Combine(currentDirectory.FullName, "VoxFlow.csproj");
             if (File.Exists(candidateProjectPath))
             {
                 return currentDirectory.FullName;
