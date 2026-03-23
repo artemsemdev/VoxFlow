@@ -1,4 +1,4 @@
 using System.Runtime.CompilerServices;
 
-[assembly: InternalsVisibleTo("WisperTestApp.UnitTests")]
-[assembly: InternalsVisibleTo("WisperTestApp.EndToEndTests")]
+[assembly: InternalsVisibleTo("VoxFlow.UnitTests")]
+[assembly: InternalsVisibleTo("VoxFlow.EndToEndTests")]

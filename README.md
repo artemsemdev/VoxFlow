@@ -35,8 +35,8 @@ A .NET 9 console application with a staged pipeline: configuration loading, star
 | Document | Purpose |
 |---|---|
 | [SETUP.md](SETUP.md) | Technical setup, local development, and operations |
-| [PRD.md](PRD.md) | Product requirements document |
+| [PRD.md](docs/product/PRD.md) | Product requirements document |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Architecture decisions and system design |
-| [ROADMAP.md](ROADMAP.md) | Feature implementation roadmap |
+| [ROADMAP.md](docs/product/ROADMAP.md) | Feature implementation roadmap |
 
 For technical setup, local development, and operations, please see [SETUP.md](SETUP.md).
