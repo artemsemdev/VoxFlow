@@ -2,11 +2,14 @@
 
 > C4 Level 2 — The single-process container and its internal module boundaries.
 
-## Why "Container" for a Console App
+## Why Two Containers
 
-In C4 terminology, a container is a separately deployable/runnable unit. VoxFlow is a single container — one .NET 9 console process. There is no multi-container deployment. This is deliberate: a local transcription tool does not benefit from process separation, message passing, or distributed coordination.
+In C4 terminology, a container is a separately deployable/runnable unit. VoxFlow now has two containers:
 
-The value of the container view here is showing the **internal module boundaries** within that single process.
+1. **VoxFlow CLI** — the original console application, invoked directly by operators
+2. **WhisperNET.McpServer** — a separate .NET 9 console process that exposes VoxFlow's capabilities via the Model Context Protocol (MCP) over stdio transport
+
+The MCP server references VoxFlow's application core via `InternalsVisibleTo` and uses application facades to bridge between MCP tool invocations and the existing static services. This avoids restructuring the original codebase while providing a DI-friendly host for the MCP SDK.
 
 ## Container Diagram
 
@@ -35,6 +38,10 @@ flowchart TB
             filter["TranscriptionFilter<br/><i>Segment acceptance rules</i>"]
         end
 
+        subgraph facade_layer["Application Facade Layer"]
+            facades["IStartupValidationFacade<br/>ITranscriptionFacade<br/>IModelInspectionFacade<br/>ILanguageInfoFacade<br/>ITranscriptReaderFacade<br/><i>Instance-based wrappers around static services</i>"]
+        end
+
         subgraph output_layer["Output Layer"]
             writer["OutputWriter<br/><i>Timestamped transcript files</i>"]
             discovery["FileDiscoveryService<br/><i>Batch file enumeration</i>"]
@@ -46,10 +53,36 @@ flowchart TB
         end
     end
 
+    subgraph mcp_container["WhisperNET.McpServer Process (.NET 9)"]
+        direction TB
+
+        subgraph mcp_host["MCP Host Layer"]
+            mcp_program["Program.cs<br/><i>DI composition root,<br/>stdio transport setup</i>"]
+        end
+
+        subgraph mcp_tools["MCP Tool Layer"]
+            tools["WhisperMcpTools<br/><i>6 MCP tools</i>"]
+            resources["WhisperMcpResourceTools<br/><i>Configuration inspector</i>"]
+            prompts["WhisperMcpPrompts<br/><i>4 guided workflows</i>"]
+        end
+
+        subgraph mcp_security["Security Layer"]
+            pathpolicy["PathPolicy<br/><i>Input/output root enforcement</i>"]
+        end
+
+        subgraph mcp_config["Configuration"]
+            mcp_options["McpOptions<br/><i>Server identity, path policy,<br/>batch limits, logging</i>"]
+        end
+    end
+
     subgraph external["External Dependencies"]
         ffmpeg["ffmpeg process"]
         whisper["Whisper.net<br/>+ libwhisper native"]
         fs["Local File System"]
+    end
+
+    subgraph clients["AI Clients"]
+        ai["Claude / ChatGPT /<br/>GitHub Copilot / VS Code"]
     end
 
     program --> options
@@ -63,6 +96,16 @@ flowchart TB
     program --> summary
     lang --> filter
     lang --> progress
+
+    ai -->|stdio MCP| mcp_program
+    mcp_program --> mcp_options
+    tools --> pathpolicy
+    tools --> facades
+    facades --> startup
+    facades --> convert
+    facades --> model
+    facades --> lang
+    facades --> writer
 
     convert -.->|spawns| ffmpeg
     model -.->|P/Invoke| whisper
@@ -91,24 +134,29 @@ The internal structure follows these conventions:
 | **Native runtime calls are confined to ModelService and LanguageSelectionService.** Whisper.net is used through WhisperFactory, not directly by other modules. | By convention |
 | **File system writes are confined to OutputWriter, BatchSummaryWriter, and ModelService.** Other modules read but do not write files. | By convention |
 
-## Why Static Services
+## Why Static Services (VoxFlow CLI)
 
-All services are static classes rather than instance types behind interfaces. This is a deliberate trade-off:
+The VoxFlow CLI retains static services. This remains appropriate for the CLI host:
 
 **The case for static services:**
-- The application has exactly one execution path — there is no polymorphism needed at runtime.
+- The CLI has exactly one execution path — there is no polymorphism needed at runtime.
 - Constructor injection adds ceremony without benefit when there is no composition root or container.
 - Static methods make dependencies explicit at the call site rather than hiding them behind interface abstractions.
 - Test coverage is achieved through integration tests, test fixtures, and module boundaries — not mocks.
 
-**The cost accepted:**
-- Harder to unit test in isolation (some modules depend on file system or ffmpeg availability).
-- If the application grows significantly (e.g., MCP server integration), this would likely evolve toward interfaces and DI. The [ROADMAP](../product/ROADMAP.md) already identifies this as a future refactoring step.
+## Application Facades (MCP Server Bridge)
 
-**Why the cost is acceptable now:**
-- The test suite already achieves meaningful coverage through generated fixtures and fake ffmpeg.
-- The application is small enough that the dependency graph is fully visible in `Program.cs`.
-- Premature abstraction would obscure the simplicity of the actual flow.
+The MCP server needs DI-compatible services for the MCP SDK's constructor injection. Rather than restructuring the VoxFlow core, **application facades** bridge the gap:
+
+- Each facade implements an interface (e.g., `ITranscriptionFacade`) and wraps the existing static services
+- Facades are registered as singletons in the MCP server's DI container
+- This `InternalsVisibleTo` + facade approach is the pragmatic first step documented in the [ROADMAP](../product/ROADMAP.md)
+- A future evolution toward a shared application core with extracted interfaces remains possible without breaking the existing CLI host
+
+**Why facades instead of full refactoring:**
+- The CLI host continues to work unchanged — no regression risk
+- The MCP server gets testable, DI-friendly service contracts
+- The application layer contracts (DTOs) are host-agnostic, so both hosts can evolve independently
 
 ## Layer Interactions
 

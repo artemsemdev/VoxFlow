@@ -2,7 +2,9 @@
 
 ## Overview
 
-VoxFlow is a single-process .NET 9 console application for fully local, privacy-first audio transcription. It orchestrates a staged pipeline: configuration loading, preflight validation, audio preprocessing via ffmpeg, Whisper inference via local model, post-processing filters, and file output.
+VoxFlow is a fully local, privacy-first audio transcription system. The core is a .NET 9 console application that orchestrates a staged pipeline: configuration loading, preflight validation, audio preprocessing via ffmpeg, Whisper inference via local model, post-processing filters, and file output.
+
+A companion MCP server (`WhisperNET.McpServer`) exposes the transcription pipeline to AI clients (Claude, ChatGPT, GitHub Copilot, VS Code) via the Model Context Protocol over stdio transport.
 
 This document provides the architectural overview. Detailed views are in [`docs/architecture/`](docs/architecture/).
 
@@ -31,14 +33,18 @@ C4Context
     title System Context — VoxFlow
 
     Person(user, "Operator", "Runs transcription locally")
+    Person(ai_client, "AI Client", "Claude, ChatGPT, GitHub Copilot, VS Code")
 
     System(app, "VoxFlow", ".NET 9 console app — orchestrates local audio transcription")
+    System(mcp, "WhisperNET.McpServer", "MCP server — exposes VoxFlow via Model Context Protocol")
 
     System_Ext(ffmpeg, "ffmpeg", "Audio conversion and filtering")
     System_Ext(whisper, "Whisper.net + native runtime", "Local speech-to-text inference")
     SystemDb_Ext(fs, "Local File System", "Audio files, models, transcripts, config")
 
     Rel(user, app, "Invokes via CLI")
+    Rel(ai_client, mcp, "Invokes via MCP stdio")
+    Rel(mcp, app, "References application core")
     Rel(app, ffmpeg, "Spawns process for .m4a → .wav conversion")
     Rel(app, whisper, "Loads model, runs inference in-process")
     Rel(app, fs, "Reads config/audio, writes transcripts")
@@ -75,6 +81,14 @@ In batch mode, the pipeline after model loading repeats per file, with error iso
 | OutputWriter | Services/ | Timestamped transcript file writing |
 | FileDiscoveryService | Services/ | Batch input file discovery and path mapping |
 | BatchSummaryWriter | Services/ | Per-file result summary for batch runs |
+| **MCP Server** | **src/WhisperNET.McpServer/** | |
+| WhisperMcpTools | Tools/ | 6 MCP tools exposing transcription capabilities |
+| WhisperMcpPrompts | Prompts/ | 4 guided workflow prompts for AI clients |
+| WhisperMcpResourceTools | Resources/ | Configuration inspection tool |
+| Application Facades | Facades/ | Instance-based wrappers bridging static services to DI |
+| Application Contracts | Contracts/ | Host-agnostic DTOs for request/response types |
+| PathPolicy | Security/ | Input/output root enforcement for MCP tool arguments |
+| McpOptions | Configuration/ | MCP-specific server configuration |
 
 ## Key Architectural Decisions
 
@@ -88,17 +102,27 @@ The full decision log is in [06-decision-log.md](docs/architecture/06-decision-l
 | ADR-008 | Fail fast before expensive work | Startup validation prevents wasted compute on invalid configurations |
 | ADR-011 | Sequential batch processing | Predictable memory; no native runtime contention; appropriate for local tool |
 | ADR-014 | Continue-on-error in batch | One bad file should not discard work done on other files |
+| ADR-016 | MCP server as separate host with InternalsVisibleTo | Pragmatic integration; avoids restructuring CLI for DI |
+| ADR-017 | Stdio-only MCP transport | Local-first security; no network surface area |
+| ADR-018 | Path policy for MCP tool arguments | Prevents directory traversal from AI client inputs |
 
 ## Boundary Map
 
 ```mermaid
 flowchart TB
     subgraph trust["Trust Boundary — Local Machine"]
-        subgraph app["Application Process"]
+        subgraph app["Application Process (VoxFlow CLI)"]
             orchestrator["Program<br/>(Orchestrator)"]
             config["TranscriptionOptions<br/>(Immutable Config)"]
             validation["StartupValidation<br/>(Preflight)"]
             pipeline["Processing Pipeline<br/>(Conversion → Inference → Filter → Output)"]
+        end
+
+        subgraph mcp["MCP Server Process (WhisperNET.McpServer)"]
+            mcp_host["MCP Host<br/>(DI + stdio transport)"]
+            mcp_tools["MCP Tools + Prompts"]
+            pathpolicy["PathPolicy<br/>(Path Safety)"]
+            facades["Application Facades<br/>(Service Wrappers)"]
         end
 
         subgraph external["External Local Processes"]
@@ -121,6 +145,10 @@ flowchart TB
     orchestrator --> config
     orchestrator --> validation
     orchestrator --> pipeline
+    mcp_host --> mcp_tools
+    mcp_tools --> pathpolicy
+    mcp_tools --> facades
+    facades -->|InternalsVisibleTo| pipeline
     pipeline -->|spawns process| ffmpeg
     pipeline -->|in-process call| whisper
     pipeline -->|reads| input
@@ -130,7 +158,7 @@ flowchart TB
     config -->|reads| settings
 ```
 
-Everything stays within the local machine trust boundary. There is no network boundary to cross.
+Everything stays within the local machine trust boundary. There is no network boundary to cross. The MCP server adds a path safety boundary (`PathPolicy`) between AI client inputs and the file system.
 
 ## Testing Strategy
 
@@ -138,6 +166,7 @@ The architecture supports testability through module isolation:
 
 - **Unit tests** cover configuration validation, startup reporting, WAV parsing, transcript filtering, language selection logic, output formatting, file discovery, and batch summary generation.
 - **End-to-end tests** validate full application startup, transcription flow entry, batch processing, and error handling using generated WAV fixtures and fake ffmpeg executables.
+- **MCP server tests** cover path policy validation, MCP configuration binding, application contract DTOs, and facade behavior (transcript reading with real file I/O).
 - **Test support utilities** (`tests/TestSupport/`) provide deterministic test infrastructure: temporary directories, generated settings files, WAV fixtures, and mock ffmpeg.
 
 All tests run locally without network access, consistent with the local-only architecture.

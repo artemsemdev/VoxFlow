@@ -19,20 +19,32 @@ ffmpeg -version
 
 ```
 VoxFlow/
-  Program.cs                    # Application entry point
+  Program.cs                    # Application entry point (CLI)
   Configuration/                # Settings loading and validation
   Audio/                        # ffmpeg conversion and WAV loading
   Processing/                   # Transcript filtering
   Services/                     # Model loading, language selection, progress UI,
                                 # output writing, startup validation,
                                 # file discovery, batch summary
+  Contracts/                    # Host-agnostic DTOs (shared with MCP server)
+  Facades/                      # Application facades (bridging static services to DI)
+  Security/                     # Path policy for MCP tool argument validation
   appsettings.json              # Active configuration
   appsettings.example.json      # Reference template
   models/                       # Local Whisper model files
   artifacts/                    # Default input/output directory
+  src/
+    WhisperNET.McpServer/       # MCP server project
+      Configuration/            # MCP-specific options (McpOptions)
+      Tools/                    # MCP tools (6 tools)
+      Prompts/                  # MCP prompts (4 guided workflows)
+      Resources/                # MCP resource tools (config inspector)
+      Program.cs                # MCP server entry point (DI + stdio)
+      appsettings.json          # MCP server configuration
   tests/
     VoxFlow.UnitTests/
     VoxFlow.EndToEndTests/
+    WhisperNET.McpServer.Tests/ # MCP server unit tests
     TestSupport/                # Shared test utilities
 ```
 
@@ -204,6 +216,90 @@ This reduces background noise and removes long silent stretches before transcrip
 | `consoleProgress.progressBarWidth` | `32` | Width of the progress bar |
 | `consoleProgress.refreshIntervalMilliseconds` | `120` | Progress bar refresh interval |
 
+## MCP Server Configuration
+
+The MCP server (`WhisperNET.McpServer`) exposes VoxFlow's transcription capabilities to AI clients via the Model Context Protocol.
+
+### MCP Server Settings
+
+The MCP server loads configuration from `src/WhisperNET.McpServer/appsettings.json` under the `mcp` key:
+
+```json
+{
+  "mcp": {
+    "enabled": true,
+    "transport": "stdio",
+    "serverName": "whispernet",
+    "serverVersion": "1.0.0",
+    "allowBatch": true,
+    "allowedInputRoots": [],
+    "allowedOutputRoots": [],
+    "maxBatchFiles": 100,
+    "requireAbsolutePaths": true
+  }
+}
+```
+
+| Setting | Default | Description |
+|---|---|---|
+| `serverName` | `whispernet` | MCP server identity name |
+| `serverVersion` | `1.0.0` | MCP server version |
+| `allowBatch` | `true` | Enable/disable batch transcription tool |
+| `allowedInputRoots` | `[]` | Allowed input root directories (empty = any absolute path) |
+| `allowedOutputRoots` | `[]` | Allowed output root directories (empty = any absolute path) |
+| `maxBatchFiles` | `100` | Maximum files per batch invocation |
+| `requireAbsolutePaths` | `true` | Require absolute paths in MCP tool arguments |
+
+### Path Safety
+
+When `allowedInputRoots` and `allowedOutputRoots` are empty, any absolute path is accepted. To restrict file access:
+
+```json
+{
+  "mcp": {
+    "allowedInputRoots": ["/Users/me/audio"],
+    "allowedOutputRoots": ["/Users/me/transcripts"]
+  }
+}
+```
+
+### VS Code MCP Client Configuration
+
+To use the MCP server from VS Code, add to `.vscode/mcp.json`:
+
+```json
+{
+  "servers": {
+    "whispernet": {
+      "type": "stdio",
+      "command": "dotnet",
+      "args": ["run", "--project", "src/WhisperNET.McpServer"]
+    }
+  }
+}
+```
+
+### Available MCP Tools
+
+| Tool | Description |
+|------|-------------|
+| `validate_environment` | Run startup validation and return diagnostics |
+| `transcribe_file` | Transcribe a single audio file |
+| `transcribe_batch` | Batch transcribe a directory of files |
+| `get_supported_languages` | Return configured supported languages |
+| `inspect_model` | Inspect Whisper model status |
+| `read_transcript` | Read a previously produced transcript |
+| `get_effective_config` | Return resolved configuration snapshot |
+
+### Available MCP Prompts
+
+| Prompt | Description |
+|--------|-------------|
+| `transcribe-local-audio` | Guide through single-file transcription |
+| `batch-transcribe-folder` | Guide through batch transcription |
+| `diagnose-transcription-setup` | Diagnose environment issues |
+| `inspect-last-transcript` | Review a transcript file |
+
 ## Local Installation
 
 ```bash
@@ -232,6 +328,14 @@ dotnet run
 
 ```bash
 dotnet run
+```
+
+### MCP Server mode
+
+Run the MCP server directly (typically launched by an AI client):
+
+```bash
+dotnet run --project src/WhisperNET.McpServer
 ```
 
 ### Output
@@ -264,13 +368,19 @@ Run end-to-end tests:
 dotnet test tests/VoxFlow.EndToEndTests/VoxFlow.EndToEndTests.csproj
 ```
 
+Run MCP server tests:
+
+```bash
+dotnet test tests/WhisperNET.McpServer.Tests/WhisperNET.McpServer.Tests.csproj
+```
+
 Run all tests:
 
 ```bash
 dotnet test
 ```
 
-Tests do not require real audio files or a checked-in Whisper model. They generate temporary settings, create a fake `ffmpeg` executable, and use generated WAV fixtures.
+Tests do not require real audio files or a checked-in Whisper model. They generate temporary settings, create a fake `ffmpeg` executable, and use generated WAV fixtures. MCP server tests cover path policy, configuration, contracts, and facade behavior.
 
 ## Common Troubleshooting
 

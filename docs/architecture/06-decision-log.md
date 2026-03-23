@@ -21,6 +21,9 @@
 | [013](#adr-013) | One result file per input file | Accepted |
 | [014](#adr-014) | Continue-on-error with batch summary | Accepted |
 | [015](#adr-015) | Temp directory for intermediate WAVs | Accepted |
+| [016](#adr-016) | MCP server as separate host with InternalsVisibleTo | Accepted |
+| [017](#adr-017) | Stdio-only MCP transport | Accepted |
+| [018](#adr-018) | Path policy for MCP tool arguments | Accepted |
 
 ---
 
@@ -325,3 +328,75 @@
 
 **Trade-offs accepted:**
 - Temporary files are deleted immediately after processing. If the user needs to inspect the WAV for debugging, they must enable `keepIntermediateFiles` before the run — they cannot recover WAVs after the fact.
+
+---
+
+## ADR-016
+
+### MCP server as a separate host with InternalsVisibleTo
+
+**Status:** Accepted
+
+**Context:** The [ROADMAP](../product/ROADMAP.md) calls for exposing VoxFlow transcription capabilities to AI clients (Claude, ChatGPT, GitHub Copilot, VS Code) via the Model Context Protocol. The MCP SDK (`ModelContextProtocol` NuGet v1.1.0) requires a DI-based composition root with constructor injection, while VoxFlow uses static services.
+
+**Decision:** Create a separate .NET 9 console application (`WhisperNET.McpServer`) that references `VoxFlow.csproj` and accesses internal types via `InternalsVisibleTo`. Application facades bridge static services to DI-compatible interfaces. Host-agnostic DTOs decouple MCP tool schemas from internal service signatures.
+
+**Alternatives considered:**
+
+| Alternative | Why rejected |
+|------------|-------------|
+| Full project restructuring (extract shared library) | High-risk refactoring for a first integration; the CLI host would need to change for no user-facing benefit |
+| Public API surface on VoxFlow | Would expose internal types permanently; harder to evolve |
+| Process-level IPC (pipe VoxFlow CLI output to MCP server) | Fragile string parsing; loses type safety; harder to test |
+| Embed MCP host in the VoxFlow CLI | Would couple the CLI to MCP SDK dependencies; Console.SetOut redirect would break existing CLI output |
+
+**Trade-offs accepted:**
+- `InternalsVisibleTo` creates a compile-time coupling between VoxFlow and the MCP server. Internal API changes in VoxFlow can break the MCP server. This is acceptable because both projects are in the same repository and tested together.
+- Application facades add a thin wrapper layer. This is minimal overhead and provides the boundary needed for future evolution toward a shared application core.
+
+---
+
+## ADR-017
+
+### Stdio-only MCP transport
+
+**Status:** Accepted
+
+**Context:** The MCP specification supports both stdio and HTTP/SSE transports. VoxFlow is a local-only, privacy-first tool.
+
+**Decision:** Support only stdio transport for the MCP server. The AI client launches the MCP server as a child process and communicates over stdin/stdout.
+
+**Alternatives considered:**
+
+| Alternative | Why rejected |
+|------------|-------------|
+| HTTP/SSE transport | Introduces network surface area; conflicts with local-only design principle; requires port management and security headers |
+| Both stdio and HTTP | Doubles the transport surface; no current requirement for remote access |
+
+**Trade-offs accepted:**
+- The MCP server can only be used by local AI clients that support stdio transport. Remote AI clients cannot connect. This is consistent with VoxFlow's local-only architecture.
+- Console output from VoxFlow services must be redirected to stderr (`Console.SetOut(Console.Error)`) to protect the stdout MCP protocol stream.
+
+---
+
+## ADR-018
+
+### Path policy for MCP tool arguments
+
+**Status:** Accepted
+
+**Context:** MCP tools accept file paths as arguments from AI clients. Unlike the CLI (where the operator provides paths directly), MCP tool arguments come from a semi-trusted source — an AI model that may hallucinate paths or be manipulated.
+
+**Decision:** Implement `PathPolicy` to validate all file paths from MCP tool arguments against configurable allowed input/output root directories. Reject paths that use traversal patterns, are not absolute (when configured), or fall outside allowed roots.
+
+**Alternatives considered:**
+
+| Alternative | Why rejected |
+|------------|-------------|
+| No path validation (trust AI client) | Security risk; AI clients may provide arbitrary paths |
+| Sandbox via file system permissions | OS-level enforcement is coarser; does not provide application-level error messages |
+| Allowlist of specific files | Too restrictive; users need directory-level access for batch workflows |
+
+**Trade-offs accepted:**
+- When allowed roots are empty (`[]`), any absolute path is accepted. This is the permissive default for local-only use. Operators can restrict roots in `appsettings.json` for tighter security.
+- Path validation adds a small overhead to every tool invocation. This is negligible compared to the transcription pipeline.

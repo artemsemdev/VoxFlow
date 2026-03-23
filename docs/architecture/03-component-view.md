@@ -288,3 +288,95 @@ Model file missing?          → Download
 **Related types:**
 - `FileProcessingResult` (record) — file path, status, language, duration, error
 - `FileProcessingStatus` (enum) — Success, Failed, Skipped
+
+---
+
+## MCP Server Components
+
+> These components live in the `WhisperNET.McpServer` project — a separate .NET 9 console application that references VoxFlow via `InternalsVisibleTo`.
+
+### Application Contracts (DTOs)
+
+**File:** `Contracts/ApplicationContracts.cs`
+
+**Responsibility:** Host-agnostic request/response types that decouple MCP tool arguments from internal service signatures.
+
+**Key types:**
+- `TranscribeFileRequest` / `TranscribeFileResultDto` — single-file transcription contract
+- `BatchTranscribeRequest` / `BatchTranscribeResultDto` — batch transcription contract
+- `StartupValidationResultDto` / `StartupCheckDto` — validation report contract
+- `ModelInfoResultDto` — model inspection contract
+- `SupportedLanguageDto` — language info contract
+- `TranscriptReadResultDto` — transcript reading contract
+
+---
+
+### Application Facades
+
+**Files:** `Facades/IApplicationFacades.cs`, `Facades/*.cs`
+
+**Responsibility:** Instance-based wrappers around VoxFlow's static services, registered in the MCP server's DI container.
+
+| Facade | Wraps | Purpose |
+|--------|-------|---------|
+| `IStartupValidationFacade` | `StartupValidationService` | Run preflight checks, map to DTOs |
+| `ITranscriptionFacade` | Full pipeline (convert → model → load → infer → filter → write) | Orchestrate single-file and batch transcription |
+| `IModelInspectionFacade` | `ModelService` / `WhisperFactory` | Inspect model status without downloading |
+| `ILanguageInfoFacade` | `TranscriptionOptions` | Map configured languages to DTOs |
+| `ITranscriptReaderFacade` | File I/O + `IPathPolicy` | Read transcript files with path validation |
+
+---
+
+### PathPolicy (Security)
+
+**File:** `Security/PathPolicy.cs`
+
+**Responsibility:** Enforce allowed input/output root directories for file paths provided by AI clients.
+
+**Key behaviors:**
+- Validates paths are absolute (when `requireAbsolutePaths` is configured)
+- Rejects path traversal patterns (`../`, `..\\`)
+- Normalizes and checks paths against configured allowed root directories
+- Provides `SanitizePath()` for safe error messages (no raw user paths in errors)
+
+---
+
+### WhisperMcpTools (MCP Tools)
+
+**File:** `src/WhisperNET.McpServer/Tools/WhisperMcpTools.cs`
+
+**Responsibility:** Expose VoxFlow transcription capabilities as MCP tools discoverable by AI clients.
+
+**6 tools:** `validate_environment`, `transcribe_file`, `transcribe_batch`, `get_supported_languages`, `inspect_model`, `read_transcript`
+
+Each tool validates paths via `IPathPolicy`, delegates to the appropriate facade, and returns JSON-serialized results.
+
+---
+
+### WhisperMcpPrompts (MCP Prompts)
+
+**File:** `src/WhisperNET.McpServer/Prompts/WhisperMcpPrompts.cs`
+
+**Responsibility:** Provide guided workflow instructions for AI clients using VoxFlow.
+
+**4 prompts:** `transcribe-local-audio`, `batch-transcribe-folder`, `diagnose-transcription-setup`, `inspect-last-transcript`
+
+---
+
+### WhisperMcpResourceTools (MCP Resource Tools)
+
+**File:** `src/WhisperNET.McpServer/Resources/WhisperMcpResources.cs`
+
+**Responsibility:** Expose read-only VoxFlow configuration as an MCP tool.
+
+**1 tool:** `get_effective_config` — returns the resolved configuration snapshot as JSON.
+
+---
+
+### McpOptions (MCP Configuration)
+
+**File:** `src/WhisperNET.McpServer/Configuration/McpOptions.cs`
+
+**Responsibility:** MCP-specific configuration loaded from the `mcp` section of `appsettings.json`.
+
+**Key settings:** server name/version, allowed input/output roots, batch limits, path policy, resource/prompt toggles, logging.

@@ -13,6 +13,8 @@ Provide a local C# console application that:
 - transcribes the audio with a local Whisper model
 - writes timestamped transcript lines to a local text file
 
+Additionally, expose the transcription pipeline to AI clients through a Model Context Protocol (MCP) server, enabling tools like Claude, ChatGPT, GitHub Copilot, and VS Code to discover and invoke transcription capabilities programmatically.
+
 The product must stay local-only and must not depend on cloud transcription APIs.
 
 ## Product Goals
@@ -24,6 +26,7 @@ The product must stay local-only and must not depend on cloud transcription APIs
 - Allow graceful cancellation of long-running work
 - Reduce hallucinated transcript output caused by silence and noise
 - Keep the system testable and maintainable
+- Expose transcription capabilities to AI clients via MCP protocol
 
 ## Non-Goals
 
@@ -36,6 +39,8 @@ The product must stay local-only and must not depend on cloud transcription APIs
 - Recursive subdirectory scanning for batch mode
 - Watch mode or file system monitoring
 - Merging batch results into a single output file
+- HTTP/SSE MCP transport (stdio only for local-first security)
+- MCP server as a long-lived daemon (runs only when launched by an MCP client)
 
 ## External Contract
 
@@ -282,6 +287,55 @@ Progress reporting:
 - batch mode must show file-level progress (`[File X/Y]`) alongside per-file transcription progress
 - single-file mode progress must remain unchanged
 
+### 12. MCP Server Integration
+
+The product must expose its transcription pipeline to AI clients through a Model Context Protocol (MCP) server running over stdio transport.
+
+**MCP Server Architecture:**
+
+- The MCP server is a separate .NET 9 console application (`WhisperNET.McpServer`) that references the VoxFlow application core
+- Communication uses stdio transport (stdin/stdout for protocol frames, stderr for diagnostics)
+- The server uses `InternalsVisibleTo` to access VoxFlow's internal types via application facades
+- All stdout writes are redirected to stderr to protect the MCP protocol stream
+
+**MCP Tools (6 tools):**
+
+| Tool | Description |
+|------|-------------|
+| `validate_environment` | Run startup validation and return structured diagnostic results |
+| `transcribe_file` | Transcribe a single local audio file through the full pipeline |
+| `transcribe_batch` | Batch transcribe a directory of audio files (requires batch mode enabled) |
+| `get_supported_languages` | Return configured supported languages |
+| `inspect_model` | Return Whisper model status, path, loadability, and download requirements |
+| `read_transcript` | Read a previously produced transcript file |
+
+**MCP Prompts (4 prompts):**
+
+| Prompt | Description |
+|--------|-------------|
+| `transcribe-local-audio` | Guide through transcribing a single local audio file |
+| `batch-transcribe-folder` | Guide through batch transcribing all audio files in a folder |
+| `diagnose-transcription-setup` | Diagnose the transcription environment and suggest fixes |
+| `inspect-last-transcript` | Review a generated transcript file |
+
+**MCP Resource Tools (1 tool):**
+
+| Tool | Description |
+|------|-------------|
+| `get_effective_config` | Return the resolved effective configuration snapshot |
+
+**Security requirements:**
+
+- Path safety: All file paths from MCP tool arguments must be validated against configurable allowed input/output root directories
+- Absolute paths are required by default (`requireAbsolutePaths` option)
+- Path traversal attacks (e.g., `../`) must be rejected
+- Batch mode can be disabled via configuration (`allowBatch` option)
+- Maximum batch file count is configurable (`maxBatchFiles` option)
+
+**Configuration:**
+
+The MCP server loads its configuration from `appsettings.json` under the `mcp` section, with settings for server identity, path policy, batch limits, resource/prompt toggles, and logging.
+
 ## Reliability Requirements
 
 - fail early on invalid configuration
@@ -323,6 +377,10 @@ The solution must include unit coverage for:
 - batch configuration loading and validation
 - file discovery and path generation
 - batch summary report formatting
+- MCP path policy validation (allowed roots, traversal rejection, absolute path enforcement)
+- MCP configuration defaults and custom value binding
+- application contract DTO construction and immutability
+- application facade behavior (transcript reading, path validation, truncation)
 
 ### End-to-End Tests
 
@@ -357,3 +415,7 @@ The current end-to-end tests use:
 - a batch summary report is generated with per-file status
 - batch-level progress is shown alongside per-file progress
 - unit and end-to-end tests pass
+- MCP server starts and registers tools, prompts, and resource tools
+- AI clients (Claude, ChatGPT, VS Code, etc.) can discover and invoke transcription tools via stdio MCP
+- path safety enforcement rejects all paths outside configured allowed roots
+- MCP server tests cover path policy, configuration, contracts, and facade behavior

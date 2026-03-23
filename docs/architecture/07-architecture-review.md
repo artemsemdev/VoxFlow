@@ -52,18 +52,29 @@ Each architectural boundary has corresponding test coverage:
 
 The test support utilities (`FakeFfmpegFactory`, `TestWaveFileFactory`, `TemporaryDirectory`, `TestSettingsFileFactory`) are thoughtful — they provide deterministic test infrastructure without requiring mocking frameworks.
 
+### 6. MCP integration reuses the pipeline without restructuring it
+
+The MCP server (`WhisperNET.McpServer`) references the VoxFlow application core via `InternalsVisibleTo` and wraps static services with instance-based facades. This is a pragmatic integration pattern:
+
+- The VoxFlow CLI continues to work unchanged — zero regression risk
+- Application facades provide DI-compatible interfaces for the MCP SDK
+- Host-agnostic DTOs decouple MCP tool schemas from internal service signatures
+- Path safety enforcement (`PathPolicy`) is an MCP-specific concern that does not pollute the CLI
+
+This validates the architecture's extensibility: a second host was added without modifying any existing module.
+
 ## Deliberate Simplicity
 
 These are areas where the design intentionally avoids added complexity:
 
-### Static services instead of interfaces + DI
+### Static services in VoxFlow CLI
 
-All services are static classes. There is no `ITranscriptionFilter` or `IAudioConversionService`. This is appropriate because:
-- There is one execution path with no runtime polymorphism
+The VoxFlow CLI retains all static services. The MCP server introduces interfaces and DI through facades, but the CLI host remains unchanged. This is appropriate because:
+- The CLI has one execution path with no runtime polymorphism
 - Dependencies are visible at call sites in `Program.cs`
-- The codebase is small enough that the full dependency graph fits in one file
+- The MCP server's facade layer provides the interface boundary where it is needed
 
-**When this would change:** If the MCP server integration (ROADMAP) introduces a second host, shared services would move behind interfaces so both hosts can compose them differently.
+**Evolution path:** If a third host is added, the natural next step is extracting a shared `VoxFlow.Core` library with interfaces. The facade interfaces already define the contracts.
 
 ### No dependency injection container
 
@@ -92,7 +103,9 @@ These are not weaknesses — they are design boundaries that would shift under d
 
 | Trigger | Current State | Evolution |
 |---------|--------------|-----------|
-| MCP server integration | Static services, no DI | Extract shared application core; introduce interfaces for host-agnostic composition |
+| ~~MCP server integration~~ | ~~Static services, no DI~~ | **Done** — MCP server added as separate host with facades and DI (ADR-016) |
+| Third host or shared library | InternalsVisibleTo + facades | Extract `VoxFlow.Core` library; promote facade interfaces to shared contracts |
+| HTTP/SSE MCP transport | Stdio-only | Add HTTP transport option; requires auth, CORS, port management |
 | Parallel batch processing | Sequential loop | Producer-consumer pipeline; ffmpeg conversion overlapped with inference |
 | Multiple transcription backends | Whisper.net hardcoded | Backend interface; factory-based selection |
 | Structured output formats | Plain text only | Output format strategy; JSON/CSV writers alongside plain text |
@@ -107,11 +120,11 @@ How to know the architecture is working:
 
 | Indicator | What to watch | Current status |
 |-----------|---------------|----------------|
-| **Change locality** | A new feature touches ≤ 2 modules | Batch mode was added by creating 2 new services + loop in Program.cs; existing modules were unchanged |
+| **Change locality** | A new feature touches ≤ 2 modules | Batch mode added 2 new services; MCP server added as separate project with facades — no existing modules modified |
 | **Test independence** | Unit tests run without external dependencies | All unit tests use generated fixtures and fake externals |
 | **Startup time** | Validation completes in < 5 seconds | 15+ checks complete in 1–3 seconds |
 | **Failure clarity** | Every failure produces an actionable message | Startup validation, filter skip reasons, batch summary all provide specific messages |
-| **Dependency count** | External dependencies stay minimal | 2 runtime dependencies (ffmpeg, Whisper.net); no framework dependencies |
+| **Dependency count** | External dependencies stay minimal | CLI: 2 runtime deps (ffmpeg, Whisper.net); MCP server adds ModelContextProtocol SDK + Microsoft.Extensions.Hosting |
 
 ## Conclusion
 

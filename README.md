@@ -24,11 +24,14 @@ A fully local, privacy-first audio transcription tool that converts speech recor
 - **Audio preprocessing** -- built-in noise reduction and silence removal improve transcript quality before the model runs
 - **Configurable quality controls** -- fine-tune segment filtering, hallucination suppression, and confidence thresholds to match your audio characteristics
 - **Startup validation** -- a preflight check verifies all paths, dependencies, and model availability before processing begins
+- **MCP server integration** -- expose transcription capabilities to AI clients (Claude, ChatGPT, GitHub Copilot, VS Code) via the Model Context Protocol
 - **Fully offline** -- no network calls, no API keys, no data leaves the machine
 
 ## High-Level Architecture
 
 A .NET 9 console application with a staged pipeline: configuration loading, startup validation, ffmpeg-based audio conversion, local Whisper model inference via Whisper.net 1.9.0, post-processing filters, and file output.
+
+A companion MCP server (`WhisperNET.McpServer`) exposes 6 tools, 4 prompts, and 1 resource tool to AI clients over stdio transport, with path safety enforcement for all file operations.
 
 ## Project Documentation
 

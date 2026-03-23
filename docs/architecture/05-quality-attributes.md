@@ -124,6 +124,26 @@
 
 **Trade-off accepted:** Sequential batch processing means total time scales linearly with file count. Parallel processing could reduce wall-clock time on multi-core machines, but would require careful native runtime management and memory budgeting that is not justified for a local tool. If throughput becomes important, this would be the first design constraint to revisit (see ADR-011).
 
+## MCP Server Security
+
+**Scenario:** An AI client invokes `transcribe_file` with a path like `../../etc/passwd`.
+
+**Response:** `PathPolicy.ValidateInputPath()` rejects the path before any file system access occurs. The tool returns a JSON error: `"Input path validation failed: Path traversal is not allowed."` No file is read.
+
+**How enforced:**
+- `PathPolicy` normalizes paths and checks against configurable allowed input/output root directories
+- Absolute paths are required by default (`requireAbsolutePaths` option)
+- Path traversal patterns (`../`, `..\\`) are rejected
+- `SanitizePath()` strips sensitive path components from error messages
+- Batch mode can be disabled entirely via `allowBatch` configuration
+- Maximum batch file count is capped via `maxBatchFiles`
+
+**Scenario:** An MCP tool writes diagnostic output to stdout, corrupting the MCP protocol stream.
+
+**Response:** `Console.SetOut(Console.Error)` at MCP server startup redirects all `Console.WriteLine` calls to stderr. The stdout channel is reserved exclusively for MCP JSON-RPC frames.
+
+**Trade-off accepted:** Diagnostic output from VoxFlow services is redirected to stderr, which may not be visible to all MCP clients. This is acceptable because protocol integrity is more important than diagnostic visibility — clients can access diagnostics through the `validate_environment` tool instead.
+
 ## Quality Attribute Trade-off Matrix
 
 | Decision | Attribute Gained | Attribute Traded | Why acceptable |
@@ -135,3 +155,7 @@
 | ffmpeg as external process | Maintainability | Deployment dependency | ffmpeg is ubiquitous; validated at startup |
 | Continue-on-error batch | Reliability (partial results) | Fail-fast purity | One bad file should not discard good work |
 | Console output verbosity | Operability | Quiet operation | Diagnosability is more important for this use case |
+| MCP stdio-only transport | Privacy, simplicity | Remote access | Local-first security; no network surface area |
+| InternalsVisibleTo for MCP | Pragmatic integration | Clean module boundary | Avoids premature restructuring; facades provide the boundary |
+| Path policy enforcement | Security | Convenience (any path) | Prevents directory traversal from AI client tool arguments |
+| Console.SetOut redirect | Protocol integrity | Diagnostic visibility | MCP protocol requires clean stdout; diagnostics via tools instead |
