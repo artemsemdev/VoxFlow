@@ -27,7 +27,7 @@
 | [019](#adr-019) | Extract shared VoxFlow.Core library with DI | Accepted |
 | [020](#adr-020) | Use IProgress&lt;T&gt; for host-agnostic progress reporting | Accepted |
 | [021](#adr-021) | Blazor Hybrid for macOS desktop UI | Accepted |
-| [022](#adr-022) | Contextual flow navigation for desktop | Accepted |
+| [022](#adr-022) | ViewModel-driven desktop state flow | Accepted |
 | [023](#adr-023) | Eliminate InternalsVisibleTo in favor of shared library | Accepted |
 
 ---
@@ -493,26 +493,26 @@
 
 ## ADR-022
 
-### Contextual flow navigation for desktop
+### ViewModel-driven desktop state flow
 
 **Status:** Accepted
 
-**Context:** The desktop app has a linear workflow: first-run validation → file selection → transcription → result review. The navigation model should reflect this flow without introducing unnecessary abstraction.
+**Context:** The desktop app has a small single-window workflow: startup initialization, ready state, running state, failure recovery, and completion. The UI needs clear state transitions without overbuilding router/navigation infrastructure.
 
-**Decision:** Use a contextual flow model where the current Blazor page IS the application state. There is no separate state machine abstraction. Navigation between pages drives the workflow forward. The `AppViewModel` mediates between pages and Core services.
+**Decision:** Use a lightweight ViewModel-driven state model. `Routes.razor` only handles startup initialization and retry on fatal initialization errors. After initialization, `MainLayout.razor` switches between `ReadyView`, `RunningView`, `FailedView`, and `CompleteView` based on `AppViewModel.CurrentState`.
 
 **Alternatives considered:**
 
 | Alternative | Why rejected |
 |------------|-------------|
-| Formal state machine (Stateless library) | Adds a dependency and abstraction layer for a linear flow that does not have complex state transitions |
-| Router-based navigation (URL-driven) | Web-style routing adds unnecessary indirection for a single-window desktop app |
+| Formal state machine (Stateless library) | Adds a dependency and abstraction layer for a small workflow with simple transitions |
+| Router-based navigation (URL-driven) | URL-style routing adds indirection to a single-window desktop app that does not expose deep links |
 | Tab-based layout | The workflow is sequential, not parallel; tabs suggest simultaneous access to all screens |
-| Single-page with show/hide sections | Becomes unwieldy as the number of sections grows; harder to manage lifecycle |
+| Single-page with show/hide sections | Becomes harder to reason about as startup, running, failure, and completion states diverge |
 
 **Trade-offs accepted:**
-- The contextual flow model works well for linear workflows but would need revisiting if the app develops complex branching navigation (e.g., simultaneous batch monitoring + settings editing).
-- Page state is managed in the `AppViewModel`, which means the ViewModel grows with the number of pages. This is acceptable for the current screen count (5 screens).
+- The current state model works well for one primary flow but should be revisited if Desktop grows into multi-task workflows such as batch monitoring or concurrent jobs.
+- `AppViewModel` owns more UI state than a pure routing model would, but the trade-off is acceptable at the current scope (`Ready`, `Running`, `Failed`, `Complete`, plus a startup-error surface).
 
 ---
 

@@ -1,17 +1,17 @@
 # Container View
 
-> C4 Level 2 — The single-process container and its internal module boundaries.
+> C4 Level 2 — Deployable containers and their primary boundaries.
 
 ## Why Four Containers
 
-In C4 terminology, a container is a separately deployable/runnable unit. VoxFlow has four containers:
+In C4 terminology, a container is a separately deployable or runnable unit. VoxFlow currently has four:
 
-1. **VoxFlow.Core** — shared .NET 9 class library containing all transcription services, interfaces, models, and DI registration. All business logic lives here.
-2. **VoxFlow.Cli** — thin console application host that uses Core via dependency injection
-3. **VoxFlow.McpServer** — MCP server host that injects Core interfaces directly for AI client access over stdio transport
-4. **VoxFlow.Desktop** — macOS MAUI Blazor Hybrid desktop application that provides a visual transcription workflow using Core services
+1. **VoxFlow.Core** — shared .NET 9 class library containing configuration, validation, transcription, batch processing, output writing, and DI registration
+2. **VoxFlow.Cli** — thin console host over Core
+3. **VoxFlow.McpServer** — stdio MCP host over Core with path-policy enforcement
+4. **VoxFlow.Desktop** — macOS MAUI Blazor Hybrid host for the single-file visual workflow
 
-All three host projects share `VoxFlow.Core` through a single `AddVoxFlowCore()` DI registration entry point. Host projects contain only host-specific concerns: CLI argument handling, MCP transport/security, or Blazor UI pages.
+All three hosts register the same shared Core services through `AddVoxFlowCore()`. The Desktop host also adds host-only services for configuration merging and, on Intel Mac Catalyst, a local CLI bridge that swaps in a Desktop-specific `ITranscriptionService` implementation.
 
 ## Container Diagram
 
@@ -25,11 +25,11 @@ flowchart TB
         end
 
         subgraph config_layer["Configuration Layer"]
-            options["TranscriptionOptions<br/><i>Immutable runtime config<br/>from JSON + env override</i>"]
+            options["TranscriptionOptions<br/><i>Immutable runtime config</i>"]
         end
 
         subgraph validation_layer["Validation Layer"]
-            startup["StartupValidationService<br/><i>Preflight checks with<br/>pass/warn/fail/skip</i>"]
+            validation["ValidationService<br/><i>Preflight checks with<br/>pass/warn/fail/skip</i>"]
         end
 
         subgraph processing["Processing Layer"]
@@ -47,42 +47,32 @@ flowchart TB
         end
 
         subgraph di_reg["DI Registration"]
-            addcore["AddVoxFlowCore()<br/><i>Single entry point for<br/>all service registration</i>"]
+            addcore["AddVoxFlowCore()<br/><i>Single registration entry point</i>"]
         end
     end
 
     subgraph cli_container["VoxFlow.Cli Process (.NET 9)"]
         direction TB
         cli_program["Program.cs<br/><i>Entry point, flow control,<br/>cancellation, exit codes</i>"]
-        cli_progress["ConsoleProgressService<br/><i>ANSI progress bar + spinner</i>"]
+        cli_progress["CliProgressHandler<br/><i>Console progress rendering</i>"]
     end
 
     subgraph mcp_container["VoxFlow.McpServer Process (.NET 9)"]
         direction TB
-
-        subgraph mcp_host["MCP Host Layer"]
-            mcp_program["Program.cs<br/><i>DI composition root,<br/>stdio transport setup</i>"]
-        end
-
-        subgraph mcp_tools["MCP Tool Layer"]
-            tools["WhisperMcpTools<br/><i>6 MCP tools</i>"]
-            resources["WhisperMcpResourceTools<br/><i>Configuration inspector</i>"]
-            prompts["WhisperMcpPrompts<br/><i>4 guided workflows</i>"]
-        end
-
-        subgraph mcp_security["Security Layer"]
-            pathpolicy["PathPolicy<br/><i>Input/output root enforcement</i>"]
-        end
-
-        subgraph mcp_config["Configuration"]
-            mcp_options["McpOptions<br/><i>Server identity, path policy,<br/>batch limits, logging</i>"]
-        end
+        mcp_program["Program.cs<br/><i>DI composition root,<br/>stdio transport setup</i>"]
+        tools["WhisperMcpTools / Prompts / Resources"]
+        pathpolicy["PathPolicy<br/><i>Input/output root enforcement</i>"]
+        mcp_options["McpOptions"]
     end
 
     subgraph desktop_container["VoxFlow.Desktop Process (.NET 9 MAUI Blazor Hybrid)"]
         direction TB
-        desktop_vm["AppViewModel<br/><i>Application state management</i>"]
-        desktop_pages["Blazor Pages<br/><i>Welcome, FileSelect,<br/>Transcription, Result, Settings</i>"]
+        routes["Routes.razor<br/><i>Startup init + retry surface</i>"]
+        layout["MainLayout.razor<br/><i>State-based shell</i>"]
+        desktop_vm["AppViewModel<br/><i>Ready / Running / Failed / Complete</i>"]
+        desktop_config["DesktopConfigurationService<br/><i>Merged config snapshots</i>"]
+        desktop_bridge["DesktopCliTranscriptionService<br/><i>Intel-only CLI bridge</i>"]
+        desktop_views["ReadyView / RunningView / FailedView / CompleteView / DropZone"]
     end
 
     subgraph external["External Dependencies"]
@@ -98,6 +88,9 @@ flowchart TB
     cli_program -->|DI| addcore
     mcp_program -->|DI| addcore
     desktop_vm -->|DI| addcore
+    routes --> desktop_vm
+    layout --> desktop_views
+    desktop_views --> desktop_vm
 
     cli_program --> cli_progress
     ai -->|stdio MCP| mcp_program
@@ -105,82 +98,85 @@ flowchart TB
     tools --> pathpolicy
     tools --> ifaces
 
-    desktop_pages --> desktop_vm
     desktop_vm --> ifaces
+    desktop_vm --> desktop_bridge
+    desktop_vm --> desktop_config
+    desktop_bridge --> desktop_config
+    desktop_bridge -->|launches locally on Intel| cli_program
+    routes --> layout
 
-    ifaces --> startup
+    ifaces --> validation
     ifaces --> convert
     ifaces --> model
     ifaces --> lang
     ifaces --> writer
-
+    ifaces --> discovery
+    ifaces --> summary
     lang --> filter
 
+    validation -.-> ffmpeg
+    validation -.-> whisper
     convert -.->|spawns| ffmpeg
-    model -.->|P/Invoke| whisper
-    lang -.->|P/Invoke| whisper
-    startup -.->|probes| ffmpeg
-    startup -.->|probes| whisper
+    model -.-> whisper
+    lang -.-> whisper
 
-    options -.->|reads| fs
-    convert -.->|reads/writes| fs
-    loader -.->|reads| fs
-    model -.->|reads/writes| fs
-    writer -.->|writes| fs
-    discovery -.->|reads| fs
-    summary -.->|writes| fs
+    options -.-> fs
+    desktop_config -.-> fs
+    convert -.-> fs
+    loader -.-> fs
+    model -.-> fs
+    writer -.-> fs
+    discovery -.-> fs
+    summary -.-> fs
 ```
 
 ## Module Boundary Rules
 
-The internal structure follows these conventions:
-
 | Rule | Enforcement |
 |------|-------------|
-| **Host projects delegate to Core interfaces.** No host project contains business logic — only host-specific concerns (CLI output, MCP transport, Blazor UI). | By convention; visible in project references |
-| **All service registration goes through `AddVoxFlowCore()`.** Hosts must not register Core services individually. | By convention; single DI entry point |
-| **Configuration is immutable after load.** TranscriptionOptions is sealed with read-only properties. No module modifies configuration at runtime. | Compiler-enforced (sealed class, init-only properties) |
-| **External process calls are confined to AudioConversionService.** Only one module spawns child processes. | By convention |
-| **Native runtime calls are confined to ModelService and LanguageSelectionService.** Whisper.net is used through WhisperFactory, not directly by other modules. | By convention |
-| **File system writes are confined to OutputWriter, BatchSummaryWriter, and ModelService.** Other modules read but do not write files. | By convention |
-| **Progress reporting uses `IProgress<ProgressUpdate>`.** Core services must not reference console, Blazor, or any host-specific output mechanism. | Compiler-enforced (Core has no host dependencies) |
+| **Host projects delegate business logic to Core interfaces.** Host code is limited to UI, process control, transport, path policy, or host-specific configuration handling. | By convention; visible in project references and host code |
+| **All Core registration goes through `AddVoxFlowCore()`.** Hosts must not hand-wire Core internals. | By convention; single DI entry point |
+| **Configuration is immutable after load.** `TranscriptionOptions` is a sealed runtime snapshot. | Compiler-enforced |
+| **Core external process execution is confined to `AudioConversionService`.** Desktop host code may additionally spawn a local CLI helper on Intel Mac Catalyst. | By convention |
+| **Native Whisper runtime calls stay inside Core services.** Hosts never call Whisper APIs directly. | By convention |
+| **Core file writes are confined to `OutputWriter`, `BatchSummaryWriter`, and `ModelService`.** Desktop host code may also write merged temp config snapshots and user override files. | By convention |
+| **Progress reporting uses `IProgress<ProgressUpdate>`.** Core has no dependency on console, Blazor, or MCP output mechanisms. | Compiler-enforced by project boundaries |
 
 ## Shared Core with Dependency Injection
 
-With three host projects (CLI, MCP Server, Desktop), all transcription logic has been extracted into `VoxFlow.Core` as instance-based services implementing interfaces. The previous static services and application facades have been replaced.
+With three hosts sharing one pipeline, `VoxFlow.Core` is the right home for all transcription business logic. `AddVoxFlowCore()` registers the shared service set used by CLI, MCP, and Desktop.
 
-**Why DI is now justified:**
-- Three hosts need the same services — duplication or `InternalsVisibleTo` hacks are worse than a shared DI registration
-- `AddVoxFlowCore()` provides a single entry point for all service registration, ensuring consistent behavior across hosts
-- Interfaces (`ITranscriptionService`, `IValidationService`, etc.) enable mock-friendly testing
-- `IProgress<ProgressUpdate>` allows each host to render progress in its own way (console ANSI, Blazor UI, etc.)
+Desktop adds two host-only layers on top:
 
-**What changed from the previous architecture:**
-- Static services replaced with instance-based DI services implementing interfaces
-- Application facades eliminated — MCP server injects Core interfaces directly
-- `InternalsVisibleTo` removed — all types consumed by hosts are public in `VoxFlow.Core`
-- Each host project contains only host-specific concerns (entry point, transport, UI)
+- `DesktopConfigurationService`, which merges bundled defaults, user overrides, and optional override files into a temporary config snapshot
+- `DesktopCliTranscriptionService`, which replaces the default `ITranscriptionService` on Intel Mac Catalyst and launches `VoxFlow.Cli` locally
+
+That keeps the compatibility workaround in the Desktop host instead of leaking platform-specific branching into Core.
 
 ## Layer Interactions
 
-```
-  Host (CLI / MCP / Desktop)
-       │
-       ├── AddVoxFlowCore()    registers all Core services
-       │
-       └── Core Interfaces     host calls service interfaces via DI
-               │
-               ├── Configuration    loaded once, passed as parameter
-               │
-               ├── Validation       runs before processing, reads config
-               │
-               ├── Processing       sequential stages, each stage independent
-               │       │
-               │       └── filter is called by language service (not orchestrator)
-               │
-               ├── Output           writes results after processing completes
-               │
-               └── Progress         IProgress<ProgressUpdate> → host-specific rendering
+```text
+Host (CLI / MCP / Desktop)
+    |
+    +-- AddVoxFlowCore()          registers shared Core services
+    |
+    +-- Host-specific layer
+    |      CLI: progress + exit codes
+    |      MCP: stdio transport + path policy
+    |      Desktop: config merge + UI state + optional CLI bridge
+    |
+    +-- Core interfaces           host calls service contracts via DI
+           |
+           +-- Configuration      load immutable runtime options
+           +-- Validation         run startup checks
+           +-- Processing         convert -> load model -> infer -> filter
+           +-- Output             write transcript or batch summary
+           +-- Progress           report via IProgress<ProgressUpdate>
 ```
 
-Each host project drives control flow through Core service interfaces. Processing layer modules do not call each other except for the LanguageSelectionService → TranscriptionFilter dependency, which represents a direct pipeline stage relationship (inference produces segments, filter accepts/rejects them). Progress reporting flows from Core to host via `IProgress<ProgressUpdate>`, allowing each host to render progress appropriately (console ANSI for CLI, Blazor UI updates for Desktop, suppressed for MCP).
+## Container-Specific Notes
+
+- **CLI** is the canonical terminal host. It exercises the shared pipeline directly and is also reused by Desktop as a local helper on Intel Mac Catalyst.
+- **MCP Server** is intentionally thin: it validates paths, delegates to Core, and keeps stdout clean for protocol traffic.
+- **Desktop** is a single-file user workflow today. Batch processing exists in Core but is not exposed in the UI.
+- **Desktop on Intel** is no longer a pure in-process container at transcription time. It remains a local-only system, but the Desktop process launches the CLI container to keep Whisper execution on the known-good path for that platform.

@@ -49,7 +49,9 @@ The latest docs in `docs/product/` and `docs/architecture/` define some broader 
 Notes:
 
 - Runtime transcription is local, but the first model download requires network access unless you place the GGML model file manually.
-- The Desktop project now supports both `maccatalyst-x64` and `maccatalyst-arm64`, and defaults to the current `dotnet` process architecture.
+- The Desktop project targets both `maccatalyst-x64` and `maccatalyst-arm64`, and defaults to the current `dotnet` process architecture.
+- Apple Silicon Desktop runs the shared Core transcription pipeline in-process.
+- Intel Mac Catalyst Desktop uses a local CLI bridge for transcription so the UI follows the same working path as `VoxFlow.Cli`.
 
 Environment checks:
 
@@ -120,10 +122,11 @@ Important:
 2. User overrides at `~/Library/Application Support/VoxFlow/appsettings.json`
 3. An explicit override path only when a caller passes one programmatically
 
-Current limitation:
+Desktop-specific notes:
 
-- The Settings panel UI can load values, but `Save` is not wired to persist overrides yet.
-- For now, persistent Desktop overrides should be edited manually in `~/Library/Application Support/VoxFlow/appsettings.json`.
+- Persistent Desktop overrides are file-based. Edit `~/Library/Application Support/VoxFlow/appsettings.json` directly.
+- `DesktopConfigurationService` writes a temporary merged snapshot before startup and before any CLI-bridge invocation.
+- When the Intel CLI bridge is active, the startup snapshot disables in-process Whisper-specific validation checks (`checkModelLoadability`, `checkWhisperRuntime`, `checkLanguageSupport`) so the app can start and delegate transcription to CLI. The actual CLI transcription run still uses the full merged config.
 
 Example Desktop override file:
 
@@ -186,6 +189,8 @@ Build the Desktop app:
 ```bash
 dotnet build src/VoxFlow.Desktop/VoxFlow.Desktop.csproj -f net9.0-maccatalyst --no-restore
 ```
+
+Desktop builds automatically invoke the `BuildDesktopCliBridge` target first, which builds `src/VoxFlow.Cli` for `net9.0`. This keeps the Intel Mac Desktop bridge aligned with the current CLI code without adding an executable project reference.
 
 Package the Desktop app:
 
@@ -259,6 +264,7 @@ Recommended before first launch:
 - Create `~/Library/Application Support/VoxFlow/appsettings.json`
 - Override bundled defaults only if you want different output/model locations
 - Use absolute paths in overrides when you want fully explicit locations
+- On Intel Mac, expect Desktop transcription to launch `VoxFlow.Cli` under the hood after file selection. On Apple Silicon, the Desktop app transcribes in-process.
 
 ## Real Desktop UI Automation
 
@@ -339,19 +345,21 @@ Diagnostics on failure:
 
 Current Desktop flow:
 
-- First-run validation checks `ffmpeg`, model state, and writable paths
-- Missing model can be downloaded from the UI
-- The intended file-entry paths are drag-and-drop and `Browse Files`
+- App startup runs through `Routes.razor`, loads a merged Desktop config, and validates the resolved options before the main shell renders
+- The main UI flow is driven by `AppViewModel` state: `Ready`, `Running`, `Failed`, `Complete`
+- `ReadyView` shows a blocking validation banner only when startup validation contains failures; `Browse Files` and the `DropZone` surface are disabled in that state
+- The intended file-entry paths are native drag-and-drop and `Browse Files`; current end-to-end automation covers the `Browse Files` path against the real macOS Open dialog
 - Current UI scope is single-file transcription
-- Result view supports opening the output folder and copying the transcript preview
-- Settings are exposed through the Desktop settings panel
+- `RunningView` shows progress stage, message, percentage, elapsed time, and current language when available
+- `CompleteView` supports opening the output folder and copying the transcript preview
+- `FailedView` supports retrying the same file or returning to the ready screen
+- Intel Mac Catalyst uses `DesktopCliTranscriptionService` to spawn the local CLI host with a merged temp config; Apple Silicon keeps transcription in-process
 
 Current Desktop limitations:
 
 - Batch processing is implemented in `VoxFlow.Core`, but not exposed as a Desktop UI workflow yet
-- Settings persistence from the UI is not implemented yet
-- The direct `ReadyView` browse flow is covered by headless tests, but the full `Routes`-based Desktop shell still has open integration failures around `Browse Files`
-- Native drag-and-drop and the system file picker are still best treated as active stabilization areas until the integrated Desktop shell is green end-to-end
+- The current Desktop UI does not expose a settings editor; persistent overrides remain file-based in `~/Library/Application Support/VoxFlow/appsettings.json`
+- Intel bridge execution depends on a usable local `dotnet` host and a buildable or already-built `VoxFlow.Cli`
 - MCP setup, MCP diagnostics, and MCP controls are intentionally outside the current Desktop UI scope
 
 ### MCP Server
@@ -418,18 +426,22 @@ Desktop UI integration fixtures currently used in the repo:
 - `artifacts/Input/Test 1.m4a`
 - `artifacts/Input/Test 2.m4a`
 
-Current verified result as of March 24, 2026:
+Recommended local smoke checks:
 
-- `VoxFlow.Core.Tests`: 50 passed
-- `VoxFlow.Cli.Tests`: 6 passed
-- `VoxFlow.McpServer.Tests`: 31 passed
-- `VoxFlow.Desktop.Tests`: 28 passed, 2 failed, 2 skipped
+```bash
+dotnet test tests/VoxFlow.Core.Tests/VoxFlow.Core.Tests.csproj --no-restore
+dotnet test tests/VoxFlow.Cli.Tests/VoxFlow.Cli.Tests.csproj --no-restore
+dotnet test tests/VoxFlow.McpServer.Tests/VoxFlow.McpServer.Tests.csproj --no-restore
+dotnet test tests/VoxFlow.Desktop.Tests/VoxFlow.Desktop.Tests.csproj --no-restore
+./scripts/run-desktop-ui-tests.sh --filter HappyPath_UserSelectsFile_SeesRunningState_AndGetsResult
+```
 
-Current Desktop UI interpretation:
+Most recent Desktop E2E baseline:
 
-- The direct `ReadyView` browse path passes with real audio and completes transcription
-- CLI and Core processing both succeed on `Test 1.m4a` and `Test 2.m4a`
-- The remaining two failures are both `Routes_BrowseFile_WithRealAudio_CompletesTranscription(...)`, which localizes the open issue to the integrated Desktop root shell rather than the transcription pipeline itself
+- the integrated Desktop shell launches successfully
+- `Browse Files` reaches the native picker and starts transcription
+- the UI transitions through `Ready -> Running -> Complete`
+- transcript output is created and surfaced back in the Desktop result view
 
 ## Troubleshooting
 
@@ -441,17 +453,28 @@ The checked-in root config and host configs currently default to `processingMode
 
 This usually means a user override file switched Desktop back to `processingMode: "batch"` or provided batch-only relative paths. Review `~/Library/Application Support/VoxFlow/appsettings.json` and prefer single-file settings unless you are explicitly testing batch behavior outside the Desktop UI.
 
-### Desktop shows `Ready to Transcribe`, but `Browse Files` or drag-and-drop does not start transcription
+### Desktop shows a startup warning banner and `Browse Files` is disabled
 
-This is a known integration issue in the current Desktop shell. The repo's headless UI tests show that the direct `ReadyView -> DropZone -> AppViewModel -> VoxFlow.Core` path works with real audio, but the fully integrated `Routes`-based shell still has open `Browse Files` failures. Reproduce the current state with:
+The Desktop app now keeps you on the ready screen when startup validation returns blocking failures. Read the message shown in the banner first; it is built from the failed validation checks. Common causes are:
+
+- `ffmpeg` is not on `PATH`
+- the configured output or model directories are not writable
+- a user override switched Desktop back to an invalid batch-oriented config
+
+Review `~/Library/Application Support/VoxFlow/appsettings.json`, then rerun the Desktop app. You can inspect the same checks from CLI with:
 
 ```bash
-dotnet test tests/VoxFlow.Desktop.Tests/VoxFlow.Desktop.Tests.csproj \
-  --filter FullyQualifiedName~DesktopUiComponentTests \
-  --no-restore
+TRANSCRIPTION_SETTINGS_PATH=$PWD/appsettings.example.json \
+dotnet run --project src/VoxFlow.Cli/VoxFlow.Cli.csproj
 ```
 
-If you need a stable transcription baseline while debugging the UI shell, use `VoxFlow.Cli` against the same input files and config.
+### Desktop on Intel Mac says `Running CLI transcription pipeline...`
+
+This is expected. On `maccatalyst-x64`, the Desktop host uses `DesktopCliTranscriptionService` and launches `VoxFlow.Cli` as a local helper process. If transcription then fails immediately:
+
+- make sure `dotnet` is available in the environment used to start the app
+- rebuild Desktop, which also rebuilds the CLI bridge target
+- if needed, build CLI directly with `dotnet build src/VoxFlow.Cli/VoxFlow.Cli.csproj --no-restore`
 
 ### Local packaged app triggers macOS trust warnings
 
@@ -468,10 +491,6 @@ Install `ffmpeg` and make sure it is on `PATH`, or set `transcription.ffmpegExec
 ### Model download is slow or blocked
 
 Place the model file manually at the configured `modelFilePath`. The runtime will reuse an existing valid model and only download when the file is missing, empty, or unloadable.
-
-### Desktop Settings save does not persist changes
-
-This is a current implementation gap, not user error. Edit `~/Library/Application Support/VoxFlow/appsettings.json` manually for persistent Desktop overrides.
 
 ### `*.SdkResolver.*.proj.Backup.tmp` files appear next to `VoxFlow.Desktop.csproj`
 

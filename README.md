@@ -2,7 +2,7 @@
 
 ## Executive Summary
 
-VoxFlow is a fully local, privacy-first audio transcription system that converts speech recordings into timestamped text transcripts without sending data to any external service. It ships as a shared .NET 9 transcription core with three hosts: CLI, macOS Desktop, and MCP. Transcription runs entirely on-device via Whisper.net.
+VoxFlow is a fully local, privacy-first audio transcription system that converts speech recordings into timestamped text transcripts without sending data to any external service. It ships as a shared .NET 9 transcription core with three hosts: CLI, macOS Desktop, and MCP. Transcription runs entirely on-device via Whisper.net, and the Desktop app can fall back to the same local CLI pipeline on Intel Mac Catalyst when the in-process Whisper runtime is not viable.
 
 ## The Problem & The Solution
 
@@ -33,17 +33,18 @@ VoxFlow is a .NET 9 solution with one shared processing library and three hosts:
 
 - `VoxFlow.Core` -- shared configuration, validation, transcription, batch processing, and output pipeline
 - `VoxFlow.Cli` -- thin command-line host over `VoxFlow.Core`
-- `VoxFlow.Desktop` -- macOS MAUI Blazor Hybrid desktop host for single-file transcription workflow
+- `VoxFlow.Desktop` -- macOS MAUI Blazor Hybrid desktop host for single-file transcription workflow; on Intel Mac Catalyst it delegates transcription to a local CLI bridge
 - `VoxFlow.McpServer` -- stdio MCP host exposing transcription tools to AI clients
 
 The shared pipeline remains configuration loading, startup validation, ffmpeg-based audio conversion, local Whisper inference via Whisper.net 1.9.0, post-processing filters, and file output.
 
 ## Current Repository Status
 
-- CLI and Core processing are verified locally, including real sample inputs in `artifacts/Input/Test 1.m4a` and `artifacts/Input/Test 2.m4a`.
-- Desktop now has headless Razor UI/component tests covering startup, validation, progress, settings, copy-to-clipboard, `DropZone`, and real-audio browse flow at the `ReadyView` level.
-- Desktop also has a dedicated macOS real-UI automation suite in `tests/VoxFlow.Desktop.UiTests` that launches the built `.app`, drives the native window through Accessibility and the system Open dialog, and verifies end-to-end user flows against the actual application.
-- Desktop is still under stabilization. The integrated `Routes`-based root shell currently has open UI integration failures around the full `Browse Files` flow, even though the direct `ReadyView -> DropZone -> AppViewModel -> VoxFlow.Core` path is passing.
+- CLI, Core, and MCP all run against the shared `VoxFlow.Core` pipeline and are covered by dedicated test projects.
+- Desktop is a macOS MAUI Blazor Hybrid single-file transcription app with four runtime states: `Ready`, `Running`, `Failed`, and `Complete`.
+- Desktop has both headless component tests in `tests/VoxFlow.Desktop.Tests` and real macOS UI automation in `tests/VoxFlow.Desktop.UiTests`.
+- The real Desktop happy path is green end-to-end: app launch, `Browse Files`, running state, transcript completion, and result actions are exercised against the actual `.app`.
+- On Intel Mac Catalyst, Desktop routes transcription through the local `VoxFlow.Cli` host so the UI uses the same working transcription pipeline as CLI while keeping all processing on-device.
 
 ## Project Documentation
 

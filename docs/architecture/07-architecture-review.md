@@ -4,7 +4,7 @@
 
 ## Executive Summary
 
-VoxFlow is a multi-host .NET 9 system for fully local audio transcription. The architecture consists of a shared core library (`VoxFlow.Core`) consumed by three host applications: a CLI for command-line workflows, an MCP server for AI client integration, and a macOS Blazor Hybrid desktop app for visual transcription workflows. All hosts share the same transcription services via dependency injection, ensuring consistent behavior.
+VoxFlow is a multi-host .NET 9 system for fully local audio transcription. The architecture consists of a shared core library (`VoxFlow.Core`) consumed by three host applications: a CLI for command-line workflows, an MCP server for AI client integration, and a macOS Blazor Hybrid desktop app for visual transcription workflows. All hosts share the same core pipeline and service contracts via dependency injection, while the Desktop host can swap in a local CLI bridge on Intel Mac Catalyst without forking the transcription logic.
 
 The design demonstrates intentional architectural evolution. What started as a single console application grew to accommodate MCP integration (via facades and InternalsVisibleTo) and then evolved to a proper shared library when a third host (Desktop) justified the restructuring. Boundaries are drawn at meaningful points, trade-offs are explicit, and the codebase is testable through interface-based DI.
 
@@ -58,7 +58,7 @@ All three hosts (CLI, MCP Server, Desktop) use `VoxFlow.Core` via a single `AddV
 
 - **CLI:** Console progress rendering, exit code mapping
 - **MCP Server:** Stdio transport, path policy enforcement, MCP tool/prompt definitions
-- **Desktop:** Blazor pages, AppViewModel, macOS native shell
+- **Desktop:** Blazor UI, AppViewModel, Desktop config merge, macOS native shell, Intel CLI bridge
 
 This validates the architecture's extensibility: three hosts share the same pipeline without any business logic duplication, facade layers, or `InternalsVisibleTo` hacks.
 
@@ -116,10 +116,10 @@ How to know the architecture is working:
 | Indicator | What to watch | Current status |
 |-----------|---------------|----------------|
 | **Change locality** | A new feature touches ≤ 2 modules | Desktop added as new host project — Core unchanged; MCP migration to shared Core touched only host-level code |
-| **Host independence** | Adding a new host requires only host-specific code | Three hosts (CLI, MCP, Desktop) share Core via `AddVoxFlowCore()` with no Core modifications per host |
+| **Host independence** | Adding a new host requires only host-specific code | Three hosts (CLI, MCP, Desktop) share Core via `AddVoxFlowCore()`; Desktop-specific Intel compatibility lives in the Desktop host rather than Core |
 | **Test independence** | Unit tests run without external dependencies | All unit tests use generated fixtures, fake externals, and interface mocks |
 | **Startup time** | Validation completes in < 5 seconds | 15+ checks complete in 1–3 seconds |
-| **Failure clarity** | Every failure produces an actionable message | Startup validation, filter skip reasons, batch summary, and desktop first-run screen all provide specific messages |
+| **Failure clarity** | Every failure produces an actionable message | Startup validation, filter skip reasons, batch summary, Desktop warning banners, failure screens, and CLI-bridge error parsing all provide specific messages |
 | **Dependency count** | External dependencies stay minimal | Core: 2 runtime deps (ffmpeg, Whisper.net); hosts add their specific deps (MCP SDK, MAUI, etc.) |
 
 ## Conclusion

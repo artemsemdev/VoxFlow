@@ -10,7 +10,7 @@ Provide a local C# audio transcription system with three product surfaces:
 
 1. **CLI** — a console application that reads a local `.m4a` file, converts it to a filtered `.wav` file with `ffmpeg`, transcribes the audio with a local Whisper model, and writes timestamped transcript lines to a local text file
 2. **MCP Server** — exposes the transcription pipeline to AI clients through a Model Context Protocol server, enabling tools like Claude, ChatGPT, GitHub Copilot, and VS Code to discover and invoke transcription capabilities programmatically
-3. **Desktop App** — a macOS Blazor Hybrid desktop application that provides a visual transcription workflow with file selection, progress display, and result review
+3. **Desktop App** — a macOS Blazor Hybrid desktop application that provides a visual transcription workflow with startup validation, file selection, progress display, failure recovery, and result review
 
 All three surfaces share a common core library (`VoxFlow.Core`) with dependency injection, ensuring consistent behavior across hosts.
 
@@ -48,7 +48,7 @@ The product must stay local-only and must not depend on cloud transcription APIs
 
 - Single-file mode: local `.m4a` source file
 - Batch mode: directory of `.m4a` files matching a configurable file pattern
-- Desktop app: file picker or drag-and-drop selection of local `.m4a` files
+- Desktop app: ready-screen file selection of local audio files through `Browse Files` or drag-and-drop
 
 ### Intermediate Output
 
@@ -76,10 +76,16 @@ Example:
 
 ## Runtime Configuration
 
-The application must load runtime settings from:
+Core hosts load runtime settings from:
 
 - `appsettings.json`, or
 - a path provided through `TRANSCRIPTION_SETTINGS_PATH`
+
+Desktop-specific configuration behavior:
+
+- the Desktop host first builds a merged config from bundled `src/VoxFlow.Desktop/appsettings.json` plus `~/Library/Application Support/VoxFlow/appsettings.json`
+- the merged snapshot is then handed to Core configuration loading
+- on Intel Mac Catalyst, Desktop startup validation may suppress in-process Whisper-specific checks so the app can delegate transcription to the CLI bridge
 
 The following settings must be configurable:
 
@@ -121,6 +127,12 @@ Checks may include:
 - configured language-code support
 
 If the final startup outcome is `FAILED`, transcription must not start.
+
+Desktop-specific behavior:
+
+- startup validation runs during app initialization
+- blocking failures keep the Desktop app on the ready screen, show a warning banner, and disable file selection
+- fatal initialization exceptions surface through a startup-error screen with retry
 
 ### 2. Audio Conversion
 
@@ -218,15 +230,15 @@ The application must show clear runtime progress during transcription.
 The progress UI must show:
 
 - overall percentage complete
-- overall percentage left
-- current language candidate
+- current stage / activity text
 - elapsed time
-- current activity text
+- current language when available
 
-The UI must support:
+Host-specific rendering:
 
 - colored ANSI output in interactive terminals
 - readable fallback output when stdout is redirected
+- a Desktop running screen that maps `ProgressUpdate` values into a visual progress bar and status text
 
 ### 9. Cancellation
 
@@ -343,19 +355,21 @@ The product must provide a macOS desktop application built with .NET MAUI Blazor
 
 **Architecture:**
 
-- The desktop app (`VoxFlow.Desktop`) is a separate host that uses `VoxFlow.Core` via dependency injection, sharing the same service interfaces as CLI and MCP
-- Navigation uses a contextual flow model where the screen is the state — there is no separate state machine abstraction; the current Blazor page represents the current application state
+- The desktop app (`VoxFlow.Desktop`) is a separate host that uses `VoxFlow.Core` via dependency injection, sharing the same configuration, validation, and transcription contracts as CLI and MCP
+- Desktop startup uses `DesktopConfigurationService` to merge bundled defaults with `~/Library/Application Support/VoxFlow/appsettings.json`
+- UI flow is driven by `AppViewModel` state (`Ready`, `Running`, `Failed`, `Complete`); `Routes.razor` is only responsible for startup initialization and retry after fatal initialization errors
 - Progress reporting uses `IProgress<ProgressUpdate>` to bridge Core services to the Blazor UI without host-specific coupling
+- On Intel Mac Catalyst, Desktop swaps in a local CLI-backed `ITranscriptionService` so the UI uses the same working local pipeline as `VoxFlow.Cli`
 
 **Screens and workflow:**
 
 | Screen | Purpose |
 |--------|---------|
-| Welcome / First Run | Dependency check, model download, environment validation |
-| File Selection | File picker and drag-and-drop for `.m4a` input files |
-| Transcription | Real-time progress display during pipeline execution |
-| Result | Transcript review with copy and export options |
-| Settings | Configuration for model, language, and paths |
+| Startup Error | Retry app initialization if configuration loading throws |
+| Ready | Show validation status, warning banner when blocked, and file-entry actions |
+| Running | Show real-time progress during pipeline execution |
+| Failed | Show the transcription error and offer retry / choose-different-file actions |
+| Complete | Show transcript preview with copy and open-folder actions |
 
 **UI requirements:**
 
@@ -363,24 +377,27 @@ The product must provide a macOS desktop application built with .NET MAUI Blazor
 - Responsive layout for different window sizes
 - Clear error states with actionable messages
 - Visible progress during long-running operations
+- Native file selection through the system picker
+- Desktop drag-and-drop support for local audio files
+- No dedicated settings editor is required in the current Desktop scope; persistent overrides remain file-based
 
-### 14. First-Run Bootstrap
+### 14. Desktop Startup and Platform Compatibility
 
-The desktop app must guide users through a first-run experience that validates the environment and prepares dependencies.
+The desktop app must initialize reliably on both Apple Silicon and Intel Mac Catalyst while keeping transcription fully local.
 
-**First-run checks:**
+**Startup checks:**
 
 - ffmpeg availability and version
-- Whisper model presence and loadability
-- Model download with progress if model is missing
+- model presence and reuse readiness
 - Output directory writability
 
 **Behavior:**
 
-- First-run validation runs automatically on initial launch
-- Users can re-run validation from the Settings screen
-- The app must not proceed to transcription until all critical dependencies are satisfied
-- Non-critical warnings (e.g., non-default model type) are displayed but do not block progress
+- Startup validation runs automatically on app initialization
+- The app must not begin transcription when blocking validation checks fail
+- On Apple Silicon, Desktop may use the shared Core transcription pipeline directly
+- On Intel Mac Catalyst, Desktop must route transcription through a local CLI bridge so the UI reuses the current working CLI path
+- The Desktop build must ensure the CLI host is built and available for the Intel bridge path
 
 ## Reliability Requirements
 
@@ -448,9 +465,10 @@ The solution must include process-level tests for:
 The solution must include basic verification for:
 
 - desktop app launches without crash
-- first-run validation screen displays dependency status
+- ready screen renders after initialization
+- blocking startup validation shows a warning banner and disables file selection
 - single-file transcription completes and displays result
-- settings screen loads and reflects current configuration
+- failure flow supports retry and return to ready
 
 ### End-to-End Test Infrastructure
 
@@ -480,5 +498,5 @@ The current end-to-end tests use:
 - AI clients (Claude, ChatGPT, VS Code, etc.) can discover and invoke transcription tools via stdio MCP
 - path safety enforcement rejects all paths outside configured allowed roots
 - MCP server tests cover path policy, configuration, and Core service integration
-- desktop app launches, validates environment, and completes single-file transcription
+- desktop app launches, reaches the ready state, and completes single-file transcription
 - all three hosts (CLI, MCP, Desktop) share VoxFlow.Core without duplication
