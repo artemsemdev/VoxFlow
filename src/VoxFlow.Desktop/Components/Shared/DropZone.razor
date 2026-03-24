@@ -1,23 +1,28 @@
 @using VoxFlow.Desktop.Platform
-@inject IJSRuntime JSRuntime
-@implements IAsyncDisposable
 
-<div id="@_elementId"
-     class="drop-zone @(_isDragOver ? "drag-over" : "")"
-     @ondragenter="HandleDragEnter"
-     @ondragover="HandleDragOver"
-     @ondragover:preventDefault
-     @ondragleave="HandleDragLeave"
-     @ondrop="HandleDrop"
-     @ondrop:preventDefault>
+<div class="drop-zone"
+     role="button"
+     tabindex="0"
+     @onclick="BrowseFiles"
+     @onkeydown="HandleKeyDown">
 
     <span class="drop-icon">🎤</span>
     <span class="drop-label">@(Label ?? "Drop audio file here")</span>
-    <span class="drop-hint">Supports M4A, WAV, MP3, and other audio formats</span>
-    <button class="btn btn-secondary btn-sm mt-2" @onclick="BrowseFiles">
+    <span class="drop-hint">Drop a file anywhere in the window or click to browse</span>
+    <button class="btn btn-secondary btn-sm mt-2"
+            @onclick="BrowseFiles"
+            @onclick:stopPropagation="true">
         Browse Files
     </button>
 </div>
+
+@if (!string.IsNullOrWhiteSpace(_selectionError))
+{
+    <div class="message message-error mt-4">
+        <span class="message-icon">\u2717</span>
+        <span>@_selectionError</span>
+    </div>
+}
 
 @code {
     [Parameter]
@@ -26,63 +31,31 @@
     [Parameter]
     public string? Label { get; set; }
 
-    private bool _isDragOver;
-    private readonly string _elementId = $"dropzone-{Guid.NewGuid():N}";
-    private DotNetObjectReference<DropZone>? _dotNetRef;
-
-    protected override async Task OnAfterRenderAsync(bool firstRender)
-    {
-        if (firstRender)
-        {
-            _dotNetRef = DotNetObjectReference.Create(this);
-            await JSRuntime.InvokeVoidAsync("voxFlowInterop.initDropZone", _elementId, _dotNetRef);
-        }
-    }
-
-    [JSInvokable]
-    public async Task OnFileDropped(string fileName)
-    {
-        if (!string.IsNullOrWhiteSpace(fileName))
-        {
-            await OnFileSelected.InvokeAsync(fileName);
-            StateHasChanged();
-        }
-    }
-
-    private void HandleDragEnter()
-    {
-        _isDragOver = true;
-    }
-
-    private void HandleDragOver()
-    {
-        // Keep drag-over state active; preventDefault handled via directive
-    }
-
-    private void HandleDragLeave()
-    {
-        _isDragOver = false;
-    }
-
-    private async Task HandleDrop()
-    {
-        _isDragOver = false;
-        // Actual file handling is done via JS interop in OnFileDropped
-        await Task.CompletedTask;
-    }
+    private string? _selectionError;
 
     private async Task BrowseFiles()
     {
-        var filePath = await MacFilePicker.PickAudioFileAsync();
-        if (!string.IsNullOrWhiteSpace(filePath))
+        _selectionError = null;
+
+        try
         {
-            await OnFileSelected.InvokeAsync(filePath);
+            var filePath = await MacFilePicker.PickAudioFileAsync();
+            if (!string.IsNullOrWhiteSpace(filePath))
+            {
+                await OnFileSelected.InvokeAsync(filePath);
+            }
+        }
+        catch (Exception ex)
+        {
+            _selectionError = $"File picker failed: {ex.Message}";
         }
     }
 
-    public async ValueTask DisposeAsync()
+    private async Task HandleKeyDown(KeyboardEventArgs args)
     {
-        _dotNetRef?.Dispose();
-        await ValueTask.CompletedTask;
+        if (args.Key is "Enter" or " ")
+        {
+            await BrowseFiles();
+        }
     }
 }

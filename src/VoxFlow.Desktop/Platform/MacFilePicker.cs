@@ -9,14 +9,18 @@ public static class MacFilePicker
             { DevicePlatform.MacCatalyst, new[] { "public.audio" } }
         });
 
+    private static readonly PickOptions AudioPickOptions = new()
+    {
+        PickerTitle = "Select audio file to transcribe",
+        FileTypes = AudioFileTypes
+    };
+
     public static async Task<string?> PickAudioFileAsync()
     {
-        var result = await FilePicker.Default.PickAsync(new PickOptions
+        return await MainThread.InvokeOnMainThreadAsync(async () =>
         {
-            PickerTitle = "Select audio file to transcribe",
-            FileTypes = AudioFileTypes
+            var result = await FilePicker.Default.PickAsync(AudioPickOptions);
+            return result?.FullPath;
         });
-
-        return result?.FullPath;
     }
 }
