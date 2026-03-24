@@ -6,8 +6,14 @@
 
 ```mermaid
 flowchart LR
-    subgraph Host["VoxFlow"]
-        program["Program"]
+    subgraph Core["VoxFlow.Core (shared library)"]
+        iTranscription["ITranscriptionService"]
+        iValidation["IValidationService"]
+        iConfig["IConfigurationService"]
+        iBatch["IBatchTranscriptionService"]
+        iReader["ITranscriptReader"]
+        addcore["AddVoxFlowCore()"]
+
         config["TranscriptionOptions"]
         startup["StartupValidationService"]
         convert["AudioConversionService"]
@@ -15,10 +21,25 @@ flowchart LR
         loader["WavAudioLoader"]
         select["LanguageSelectionService"]
         filter["TranscriptionFilter"]
-        progress["ConsoleProgressService"]
         output["OutputWriter"]
         discovery["FileDiscoveryService"]
         summary["BatchSummaryWriter"]
+    end
+
+    subgraph Cli["VoxFlow.Cli"]
+        cli_program["Program.cs"]
+        cli_progress["ConsoleProgressService"]
+    end
+
+    subgraph Mcp["VoxFlow.McpServer"]
+        mcp_program["Program.cs"]
+        mcp_tools["WhisperMcpTools"]
+        mcp_pathpolicy["PathPolicy"]
+    end
+
+    subgraph Desktop["VoxFlow.Desktop"]
+        desktop_vm["AppViewModel"]
+        desktop_pages["Blazor Pages"]
     end
 
     subgraph External["External Dependencies"]
@@ -27,17 +48,28 @@ flowchart LR
         files["Local File System"]
     end
 
-    program --> config
-    program --> startup
-    program --> convert
-    program --> modelsvc
-    program --> loader
-    program --> select
-    program --> discovery
-    program --> summary
+    cli_program -->|DI| addcore
+    mcp_program -->|DI| addcore
+    desktop_vm -->|DI| addcore
+
+    cli_program --> iTranscription
+    cli_program --> iValidation
+    mcp_tools --> iTranscription
+    mcp_tools --> iValidation
+    mcp_tools --> mcp_pathpolicy
+    desktop_vm --> iTranscription
+    desktop_vm --> iValidation
+    desktop_pages --> desktop_vm
+
+    iTranscription --> convert
+    iTranscription --> modelsvc
+    iTranscription --> loader
+    iTranscription --> select
+    iTranscription --> output
+    iValidation --> startup
+    iBatch --> discovery
+    iBatch --> summary
     select --> filter
-    select --> progress
-    program --> output
 
     startup -.-> files
     startup -.-> ffmpeg
@@ -54,18 +86,46 @@ flowchart LR
 
 ## Component Details
 
-### Program (Orchestrator)
+### Core Service Interfaces
 
-**File:** `Program.cs`
+**File:** `VoxFlow.Core/Interfaces/`
 
-**Responsibility:** Top-level orchestration. Selects single-file or batch flow, manages cancellation (Ctrl+C → CancellationTokenSource), and maps outcomes to exit codes.
+**Responsibility:** Define the contracts that all host projects use to access transcription functionality via dependency injection.
+
+| Interface | Responsibility |
+|-----------|---------------|
+| `ITranscriptionService` | Orchestrate single-file transcription pipeline (convert, model, load, infer, filter, write) |
+| `IValidationService` | Run preflight checks and return structured validation reports |
+| `IConfigurationService` | Load and provide immutable runtime configuration |
+| `IBatchTranscriptionService` | Orchestrate batch file processing with error isolation and summary |
+| `ITranscriptReader` | Read previously produced transcript files |
+
+---
+
+### AddVoxFlowCore (DI Registration)
+
+**File:** `VoxFlow.Core/DependencyInjection/ServiceCollectionExtensions.cs`
+
+**Responsibility:** Single entry point for registering all Core services in any host's DI container.
 
 **Key behaviors:**
-- Loads configuration via `TranscriptionOptions.Load()`
-- Runs startup validation; exits on failure
-- In single-file mode: runs the full pipeline once
-- In batch mode: loads model once, then loops over discovered files with error isolation
-- Cleans up intermediate WAV files after each file completes
+- Registers all service interfaces with their implementations
+- Configures TranscriptionOptions from configuration
+- Ensures consistent service lifetimes across hosts
+- Called by CLI, MCP Server, and Desktop hosts identically
+
+---
+
+### Program — CLI Host (Orchestrator)
+
+**File:** `VoxFlow.Cli/Program.cs`
+
+**Responsibility:** Thin CLI entry point. Sets up DI via `AddVoxFlowCore()`, manages cancellation (Ctrl+C → CancellationTokenSource), and maps outcomes to exit codes.
+
+**Key behaviors:**
+- Registers Core services and console-specific progress reporting
+- Delegates to `ITranscriptionService` or `IBatchTranscriptionService` via DI
+- Provides `ConsoleProgressService` as the `IProgress<ProgressUpdate>` implementation
 
 **Exit codes:** 0 (success), 1 (failure), 130 (cancelled)
 
@@ -293,39 +353,7 @@ Model file missing?          → Download
 
 ## MCP Server Components
 
-> These components live in the `WhisperNET.McpServer` project — a separate .NET 9 console application that references VoxFlow via `InternalsVisibleTo`.
-
-### Application Contracts (DTOs)
-
-**File:** `Contracts/ApplicationContracts.cs`
-
-**Responsibility:** Host-agnostic request/response types that decouple MCP tool arguments from internal service signatures.
-
-**Key types:**
-- `TranscribeFileRequest` / `TranscribeFileResultDto` — single-file transcription contract
-- `BatchTranscribeRequest` / `BatchTranscribeResultDto` — batch transcription contract
-- `StartupValidationResultDto` / `StartupCheckDto` — validation report contract
-- `ModelInfoResultDto` — model inspection contract
-- `SupportedLanguageDto` — language info contract
-- `TranscriptReadResultDto` — transcript reading contract
-
----
-
-### Application Facades
-
-**Files:** `Facades/IApplicationFacades.cs`, `Facades/*.cs`
-
-**Responsibility:** Instance-based wrappers around VoxFlow's static services, registered in the MCP server's DI container.
-
-| Facade | Wraps | Purpose |
-|--------|-------|---------|
-| `IStartupValidationFacade` | `StartupValidationService` | Run preflight checks, map to DTOs |
-| `ITranscriptionFacade` | Full pipeline (convert → model → load → infer → filter → write) | Orchestrate single-file and batch transcription |
-| `IModelInspectionFacade` | `ModelService` / `WhisperFactory` | Inspect model status without downloading |
-| `ILanguageInfoFacade` | `TranscriptionOptions` | Map configured languages to DTOs |
-| `ITranscriptReaderFacade` | File I/O + `IPathPolicy` | Read transcript files with path validation |
-
----
+> These components live in the `VoxFlow.McpServer` project — a separate .NET 9 console application that injects `VoxFlow.Core` interfaces directly via DI.
 
 ### PathPolicy (Security)
 
@@ -343,19 +371,19 @@ Model file missing?          → Download
 
 ### WhisperMcpTools (MCP Tools)
 
-**File:** `src/WhisperNET.McpServer/Tools/WhisperMcpTools.cs`
+**File:** `VoxFlow.McpServer/Tools/WhisperMcpTools.cs`
 
 **Responsibility:** Expose VoxFlow transcription capabilities as MCP tools discoverable by AI clients.
 
 **6 tools:** `validate_environment`, `transcribe_file`, `transcribe_batch`, `get_supported_languages`, `inspect_model`, `read_transcript`
 
-Each tool validates paths via `IPathPolicy`, delegates to the appropriate facade, and returns JSON-serialized results.
+Each tool validates paths via `IPathPolicy`, delegates to the appropriate Core service interface, and returns JSON-serialized results.
 
 ---
 
 ### WhisperMcpPrompts (MCP Prompts)
 
-**File:** `src/WhisperNET.McpServer/Prompts/WhisperMcpPrompts.cs`
+**File:** `VoxFlow.McpServer/Prompts/WhisperMcpPrompts.cs`
 
 **Responsibility:** Provide guided workflow instructions for AI clients using VoxFlow.
 
@@ -365,7 +393,7 @@ Each tool validates paths via `IPathPolicy`, delegates to the appropriate facade
 
 ### WhisperMcpResourceTools (MCP Resource Tools)
 
-**File:** `src/WhisperNET.McpServer/Resources/WhisperMcpResources.cs`
+**File:** `VoxFlow.McpServer/Resources/WhisperMcpResources.cs`
 
 **Responsibility:** Expose read-only VoxFlow configuration as an MCP tool.
 
@@ -375,8 +403,40 @@ Each tool validates paths via `IPathPolicy`, delegates to the appropriate facade
 
 ### McpOptions (MCP Configuration)
 
-**File:** `src/WhisperNET.McpServer/Configuration/McpOptions.cs`
+**File:** `VoxFlow.McpServer/Configuration/McpOptions.cs`
 
 **Responsibility:** MCP-specific configuration loaded from the `mcp` section of `appsettings.json`.
 
 **Key settings:** server name/version, allowed input/output roots, batch limits, path policy, resource/prompt toggles, logging.
+
+---
+
+## Desktop Components
+
+> These components live in the `VoxFlow.Desktop` project — a .NET 9 MAUI Blazor Hybrid macOS application that uses `VoxFlow.Core` via DI.
+
+### AppViewModel (Application State)
+
+**Responsibility:** Manages application state and mediates between Blazor pages and Core service interfaces. Implements `IProgress<ProgressUpdate>` to bridge Core progress reporting to the Blazor UI.
+
+**Key behaviors:**
+- Injects Core service interfaces via constructor DI
+- Manages navigation flow between screens (the current Blazor page is the application state)
+- Translates `ProgressUpdate` events into UI-bindable properties
+- Handles file selection from picker and drag-and-drop
+
+---
+
+### Blazor Pages (UI Screens)
+
+**Responsibility:** Render the visual transcription workflow as Blazor components within the MAUI native shell.
+
+| Page | Responsibility |
+|------|---------------|
+| Welcome / First Run | Display dependency validation status; trigger model download |
+| File Selection | File picker and drag-and-drop for `.m4a` input |
+| Transcription | Real-time progress display during pipeline execution |
+| Result | Transcript review with copy and export |
+| Settings | Model, language, and path configuration |
+
+**Design note:** Navigation follows a contextual flow model — the screen IS the state. There is no separate state machine abstraction. The current Blazor page represents the current application state, and navigation between pages drives the workflow forward. Dark theme is applied consistently across all pages.

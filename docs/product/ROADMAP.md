@@ -6,9 +6,12 @@ Turn the current local transcription CLI and MCP server into a packaged macOS ap
 
 ## Current Baseline
 
-- CLI transcription pipeline exists.
+- CLI transcription pipeline exists (migrated to `VoxFlow.Cli` using Core via DI).
 - Batch mode exists.
-- MCP server exists.
+- MCP server exists (migrated to `VoxFlow.McpServer` using Core interfaces directly).
+- Shared core library (`VoxFlow.Core`) extracted with DI registration via `AddVoxFlowCore()`.
+- Desktop app (`VoxFlow.Desktop`) in active development — macOS MAUI Blazor Hybrid.
+- Phase 1 implementation is in progress.
 - Core constraints are already clear:
   - local-only processing,
   - stable text output,
@@ -16,6 +19,16 @@ Turn the current local transcription CLI and MCP server into a packaged macOS ap
   - no cloud fallback,
   - no meeting bot behavior,
   - no full editor.
+
+### Phase 1 Technology Decisions
+
+| Decision | Choice | ADR |
+|----------|--------|-----|
+| Shared library architecture | `VoxFlow.Core` with instance-based DI services | ADR-019 |
+| Progress reporting | `IProgress<ProgressUpdate>` for host-agnostic callbacks | ADR-020 |
+| Desktop UI framework | .NET MAUI Blazor Hybrid | ADR-021 |
+| Desktop navigation | Contextual flow (screen IS the state) | ADR-022 |
+| MCP integration | Direct Core interface injection (facades eliminated) | ADR-023 |
 
 ## Practical Rules
 

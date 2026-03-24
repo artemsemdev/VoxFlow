@@ -6,7 +6,7 @@
 
 | ADR | Decision | Status |
 |-----|----------|--------|
-| [001](#adr-001) | Local-only console architecture | Accepted |
+| [001](#adr-001) | Local-only console architecture | Superseded by ADR-019 |
 | [002](#adr-002) | File-based stable contract | Accepted |
 | [003](#adr-003) | Configuration-driven behavior | Accepted |
 | [004](#adr-004) | ffmpeg as external audio preprocessing | Accepted |
@@ -21,9 +21,14 @@
 | [013](#adr-013) | One result file per input file | Accepted |
 | [014](#adr-014) | Continue-on-error with batch summary | Accepted |
 | [015](#adr-015) | Temp directory for intermediate WAVs | Accepted |
-| [016](#adr-016) | MCP server as separate host with InternalsVisibleTo | Accepted |
+| [016](#adr-016) | MCP server as separate host with InternalsVisibleTo | Superseded by ADR-023 |
 | [017](#adr-017) | Stdio-only MCP transport | Accepted |
 | [018](#adr-018) | Path policy for MCP tool arguments | Accepted |
+| [019](#adr-019) | Extract shared VoxFlow.Core library with DI | Accepted |
+| [020](#adr-020) | Use IProgress&lt;T&gt; for host-agnostic progress reporting | Accepted |
+| [021](#adr-021) | Blazor Hybrid for macOS desktop UI | Accepted |
+| [022](#adr-022) | Contextual flow navigation for desktop | Accepted |
+| [023](#adr-023) | Eliminate InternalsVisibleTo in favor of shared library | Accepted |
 
 ---
 
@@ -31,11 +36,13 @@
 
 ### Use a local-only console architecture
 
-**Status:** Accepted
+**Status:** Superseded by [ADR-019](#adr-019)
 
 **Context:** The product requirement is fully local, privacy-first audio transcription. No audio data should leave the machine.
 
 **Decision:** Build a single-process .NET 9 console application. No web server, no API, no cloud integration, no IPC.
+
+**Superseded:** The system is no longer console-only. ADR-019 introduces a shared `VoxFlow.Core` library with three host applications (CLI, MCP Server, Desktop). The local-only and privacy-first principles remain unchanged — the architecture evolved from a single console app to a multi-host architecture sharing a common core.
 
 **Alternatives considered:**
 
@@ -335,11 +342,13 @@
 
 ### MCP server as a separate host with InternalsVisibleTo
 
-**Status:** Accepted
+**Status:** Superseded by [ADR-023](#adr-023)
 
 **Context:** The [ROADMAP](../product/ROADMAP.md) calls for exposing VoxFlow transcription capabilities to AI clients (Claude, ChatGPT, GitHub Copilot, VS Code) via the Model Context Protocol. The MCP SDK (`ModelContextProtocol` NuGet v1.1.0) requires a DI-based composition root with constructor injection, while VoxFlow uses static services.
 
 **Decision:** Create a separate .NET 9 console application (`WhisperNET.McpServer`) that references `VoxFlow.csproj` and accesses internal types via `InternalsVisibleTo`. Application facades bridge static services to DI-compatible interfaces. Host-agnostic DTOs decouple MCP tool schemas from internal service signatures.
+
+**Superseded:** The introduction of `VoxFlow.Core` as a shared library (ADR-019) eliminated the need for `InternalsVisibleTo` and application facades. The MCP server now injects Core interfaces directly via DI, just like the CLI and Desktop hosts. See ADR-023 for details.
 
 **Alternatives considered:**
 
@@ -400,3 +409,133 @@
 **Trade-offs accepted:**
 - When allowed roots are empty (`[]`), any absolute path is accepted. This is the permissive default for local-only use. Operators can restrict roots in `appsettings.json` for tighter security.
 - Path validation adds a small overhead to every tool invocation. This is negligible compared to the transcription pipeline.
+
+---
+
+## ADR-019
+
+### Extract shared VoxFlow.Core library with DI
+
+**Status:** Accepted
+
+**Context:** With three host applications (CLI, MCP Server, Desktop), the previous approach of static services in a single project with `InternalsVisibleTo` for the MCP server was no longer sustainable. Each host needs the same transcription services, and duplicating or bridging them via facades creates maintenance burden and fragile coupling.
+
+**Decision:** Extract all business logic into a shared `VoxFlow.Core` class library. Convert static services to instance-based services implementing interfaces. Register all services through a single `AddVoxFlowCore()` extension method. Each host project references `VoxFlow.Core` and calls `AddVoxFlowCore()` in its DI setup.
+
+**Alternatives considered:**
+
+| Alternative | Why rejected |
+|------------|-------------|
+| Keep static services, add more facades | Facades for three hosts would triple the wrapper layer; maintenance cost exceeds DI overhead |
+| Shared project (linked files) | Does not provide a clean compilation boundary; harder to reason about dependencies |
+| NuGet package for Core | Over-engineering for a single repository; adds packaging and versioning complexity |
+| Keep InternalsVisibleTo for all hosts | Breaks encapsulation further; any internal change can break any host |
+
+**Trade-offs accepted:**
+- DI adds ceremony (interface definitions, registration code, constructor injection) compared to direct static method calls. This is now justified by three hosts sharing the same services.
+- Existing static method call patterns in `Program.cs` were replaced with service interface calls. This changes the code style but improves testability via mocking.
+
+**Supersedes:** [ADR-001](#adr-001) (no longer console-only architecture)
+
+---
+
+## ADR-020
+
+### Use IProgress&lt;T&gt; for host-agnostic progress reporting
+
+**Status:** Accepted
+
+**Context:** The CLI renders progress as an ANSI progress bar in the console. The Desktop app renders progress as a Blazor UI update. The MCP server suppresses progress. Core services must report progress without knowing which host is consuming it.
+
+**Decision:** Core services accept `IProgress<ProgressUpdate>` as a parameter. Each host provides its own implementation: `ConsoleProgressService` for CLI, a Blazor-bound handler for Desktop, and a no-op for MCP.
+
+**Alternatives considered:**
+
+| Alternative | Why rejected |
+|------------|-------------|
+| Events / delegates on service classes | Couples Core services to a specific eventing pattern; harder to compose |
+| IObservable&lt;T&gt; / Rx | Adds Reactive Extensions dependency for a simple one-way notification pattern |
+| Shared progress service interface in Core | Would require Core to define UI-aware abstractions; `IProgress<T>` is already in the BCL |
+| No progress from Core (host polls) | Polling is wasteful and introduces latency in progress updates |
+
+**Trade-offs accepted:**
+- `IProgress<T>` is push-based, so Core services must call `Report()` at appropriate intervals. If a host does not care about progress, it still receives (and discards) the callbacks. The overhead is negligible.
+- `ProgressUpdate` must be a Core-defined type that carries enough information for any host to render, without being tied to any host's rendering model.
+
+---
+
+## ADR-021
+
+### Blazor Hybrid for macOS desktop UI
+
+**Status:** Accepted
+
+**Context:** The product needs a macOS desktop application for visual transcription workflow. The team has .NET expertise and the Core library is already .NET 9.
+
+**Decision:** Use .NET MAUI Blazor Hybrid to build the desktop application. Blazor components run inside a native macOS WebView, providing web-standard UI with native shell integration.
+
+**Alternatives considered:**
+
+| Alternative | Why rejected |
+|------------|-------------|
+| Native SwiftUI / AppKit | Requires Swift/Obj-C expertise; cannot share .NET types with Core |
+| Electron + TypeScript | Adds Node.js runtime; cannot share .NET types without IPC bridge |
+| Avalonia UI | Mature cross-platform .NET UI, but less ecosystem support than MAUI; Blazor Hybrid allows web skill reuse |
+| MAUI without Blazor (XAML) | XAML tooling for macOS is less mature; Blazor provides better component model for this workflow |
+| Terminal UI (Spectre.Console) | Would not satisfy the "desktop app" requirement; limited interaction model |
+
+**Trade-offs accepted:**
+- Blazor Hybrid renders in a WebView, which has slightly higher resource usage than native UI. For a developer tool with simple screens, this is acceptable.
+- MAUI macOS support is less mature than iOS/Android. Some platform-specific workarounds may be needed.
+- Dark theme requires explicit CSS/styling rather than automatic OS theme inheritance. This is managed with a custom dark theme stylesheet.
+
+---
+
+## ADR-022
+
+### Contextual flow navigation for desktop
+
+**Status:** Accepted
+
+**Context:** The desktop app has a linear workflow: first-run validation → file selection → transcription → result review. The navigation model should reflect this flow without introducing unnecessary abstraction.
+
+**Decision:** Use a contextual flow model where the current Blazor page IS the application state. There is no separate state machine abstraction. Navigation between pages drives the workflow forward. The `AppViewModel` mediates between pages and Core services.
+
+**Alternatives considered:**
+
+| Alternative | Why rejected |
+|------------|-------------|
+| Formal state machine (Stateless library) | Adds a dependency and abstraction layer for a linear flow that does not have complex state transitions |
+| Router-based navigation (URL-driven) | Web-style routing adds unnecessary indirection for a single-window desktop app |
+| Tab-based layout | The workflow is sequential, not parallel; tabs suggest simultaneous access to all screens |
+| Single-page with show/hide sections | Becomes unwieldy as the number of sections grows; harder to manage lifecycle |
+
+**Trade-offs accepted:**
+- The contextual flow model works well for linear workflows but would need revisiting if the app develops complex branching navigation (e.g., simultaneous batch monitoring + settings editing).
+- Page state is managed in the `AppViewModel`, which means the ViewModel grows with the number of pages. This is acceptable for the current screen count (5 screens).
+
+---
+
+## ADR-023
+
+### Eliminate InternalsVisibleTo in favor of shared library
+
+**Status:** Accepted
+
+**Context:** The MCP server previously accessed VoxFlow internals via `InternalsVisibleTo` and bridged static services with application facades (ADR-016). With `VoxFlow.Core` extracted as a shared library (ADR-019), this indirection is no longer needed.
+
+**Decision:** Remove `InternalsVisibleTo` from all projects. Remove application facades from the MCP server. The MCP server now injects `VoxFlow.Core` interfaces directly, exactly like the CLI and Desktop hosts. All types consumed by host projects are public in `VoxFlow.Core`.
+
+**What was removed:**
+- `InternalsVisibleTo` assembly attributes
+- `IStartupValidationFacade`, `ITranscriptionFacade`, `IModelInspectionFacade`, `ILanguageInfoFacade`, `ITranscriptReaderFacade` facade interfaces and implementations
+- Application contract DTOs that existed only to bridge facades to MCP tools
+
+**What replaced them:**
+- Core service interfaces (`ITranscriptionService`, `IValidationService`, etc.) consumed directly by MCP tools
+- Core model types used directly in MCP tool responses
+
+**Trade-offs accepted:**
+- MCP tools now depend on Core interfaces rather than MCP-specific facade interfaces. If Core interfaces change, MCP tools must update. This is the same coupling that CLI and Desktop have, which is acceptable for a single-repository project.
+
+**Supersedes:** [ADR-016](#adr-016) (InternalsVisibleTo + facades eliminated)

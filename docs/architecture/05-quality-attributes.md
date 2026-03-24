@@ -73,13 +73,23 @@
 2. Ensure ffmpeg supports the format (it already does)
 3. No changes needed to inference, filtering, or output — those stages work with WAV samples regardless of the original format
 
+**Scenario:** A developer needs to add a fourth host (e.g., a web API).
+
+**Response:** The change is straightforward:
+1. Create a new host project that references `VoxFlow.Core`
+2. Call `AddVoxFlowCore()` in the DI setup
+3. Inject Core service interfaces and implement host-specific concerns (HTTP transport, auth, etc.)
+4. No changes to Core or existing hosts required
+
 **How enforced:**
+- **Shared Core library:** All business logic lives in `VoxFlow.Core`. Host projects contain only host-specific concerns.
+- **Interface-based DI:** Core services implement interfaces (`ITranscriptionService`, `IValidationService`, etc.), enabling loose coupling between hosts and business logic.
+- **Single DI entry point:** `AddVoxFlowCore()` ensures consistent service registration across all hosts.
 - **Module-per-responsibility:** Each module has a single clear purpose. AudioConversionService handles format conversion; WavAudioLoader handles WAV parsing; neither knows about the other's internals.
 - **Immutable configuration:** TranscriptionOptions is sealed. No module can accidentally modify another module's behavior by mutating shared state.
-- **Small dependency surface:** Only two external dependencies (ffmpeg, Whisper.net). No framework-level dependencies (no ASP.NET, no DI container, no ORM).
-- **Explicit dependencies:** Static methods make call-site dependencies visible. `Program.cs` reads as a straightforward sequence of function calls.
+- **Host-agnostic progress:** `IProgress<ProgressUpdate>` decouples Core from any specific output mechanism.
 
-**Trade-off accepted:** Static services mean no interface-based polymorphism. If the application grows significantly (e.g., multiple transcription backends), this would need to evolve toward interfaces and DI. The ROADMAP already identifies this as a step for the MCP server integration.
+**Trade-off accepted:** DI and interfaces add some ceremony compared to the previous static service approach. This is now justified by three hosts sharing the same Core, and the overhead is minimal given the clear organizational benefits.
 
 ## Testability
 
@@ -103,10 +113,11 @@
 | End-to-end batch | Full batch pipeline | Fake ffmpeg + temp directories |
 
 **How enforced:**
-- `InternalsVisibleTo` in AssemblyInfo.cs exposes internal members to test projects
+- Core service interfaces enable mock-friendly unit testing — any host interaction with Core can be tested by mocking the interface
 - Test support utilities in `tests/TestSupport/` provide deterministic fixtures
 - FakeFfmpegFactory creates a mock ffmpeg that produces valid WAV output without real audio processing
 - TemporaryDirectory (IDisposable) ensures clean test isolation
+- DI registration can be verified by calling `AddVoxFlowCore()` and resolving interfaces
 
 **Trade-off accepted:** Some modules (AudioConversionService, ModelService) are harder to unit test in isolation because they interact with external processes or native libraries. These are covered by end-to-end tests instead. This is a reasonable trade-off for a codebase of this size — test coverage does not require 100% unit test isolation.
 
@@ -150,12 +161,13 @@
 |----------|-----------------|------------------|----------------|
 | Local-only processing | Privacy | Convenience (manual setup) | Core requirement; setup is one-time |
 | Fail-fast validation | Reliability | Startup latency (~1-3s) | Prevents minutes of wasted compute |
-| Static services | Simplicity, readability | Extensibility via polymorphism | Appropriate for current scope |
+| Shared Core with DI | Maintainability, testability | Simplicity of static calls | Three hosts justify the DI overhead; interfaces enable mocking |
 | Sequential batch | Stability, predictability | Throughput | Local tool; wall-clock time acceptable |
 | ffmpeg as external process | Maintainability | Deployment dependency | ffmpeg is ubiquitous; validated at startup |
 | Continue-on-error batch | Reliability (partial results) | Fail-fast purity | One bad file should not discard good work |
 | Console output verbosity | Operability | Quiet operation | Diagnosability is more important for this use case |
 | MCP stdio-only transport | Privacy, simplicity | Remote access | Local-first security; no network surface area |
-| InternalsVisibleTo for MCP | Pragmatic integration | Clean module boundary | Avoids premature restructuring; facades provide the boundary |
+| IProgress&lt;T&gt; for progress | Host-agnostic Core | Slight indirection | Each host renders progress differently; Core must not know how |
 | Path policy enforcement | Security | Convenience (any path) | Prevents directory traversal from AI client tool arguments |
 | Console.SetOut redirect | Protocol integrity | Diagnostic visibility | MCP protocol requires clean stdout; diagnostics via tools instead |
+| Blazor Hybrid for Desktop | Cross-platform UI potential, web skills reuse | Native UI fidelity | Acceptable for a developer tool; dark theme provides good macOS integration |

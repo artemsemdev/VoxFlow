@@ -4,9 +4,9 @@
 
 ## Executive Summary
 
-VoxFlow is a single-process .NET 9 console application that performs fully local audio transcription. The architecture is appropriate for its problem: a local developer tool with strong privacy requirements, no network dependencies at runtime, and predictable operational behavior.
+VoxFlow is a multi-host .NET 9 system for fully local audio transcription. The architecture consists of a shared core library (`VoxFlow.Core`) consumed by three host applications: a CLI for command-line workflows, an MCP server for AI client integration, and a macOS Blazor Hybrid desktop app for visual transcription workflows. All hosts share the same transcription services via dependency injection, ensuring consistent behavior.
 
-The design demonstrates intentional architectural choices rather than accidental simplicity. Boundaries are drawn at meaningful points, trade-offs are explicit, and the codebase is testable without over-abstraction.
+The design demonstrates intentional architectural evolution. What started as a single console application grew to accommodate MCP integration (via facades and InternalsVisibleTo) and then evolved to a proper shared library when a third host (Desktop) justified the restructuring. Boundaries are drawn at meaningful points, trade-offs are explicit, and the codebase is testable through interface-based DI.
 
 ## What the Architecture Gets Right
 
@@ -52,36 +52,29 @@ Each architectural boundary has corresponding test coverage:
 
 The test support utilities (`FakeFfmpegFactory`, `TestWaveFileFactory`, `TemporaryDirectory`, `TestSettingsFileFactory`) are thoughtful — they provide deterministic test infrastructure without requiring mocking frameworks.
 
-### 6. MCP integration reuses the pipeline without restructuring it
+### 6. Multi-host architecture shares Core without duplication
 
-The MCP server (`WhisperNET.McpServer`) references the VoxFlow application core via `InternalsVisibleTo` and wraps static services with instance-based facades. This is a pragmatic integration pattern:
+All three hosts (CLI, MCP Server, Desktop) use `VoxFlow.Core` via a single `AddVoxFlowCore()` DI registration. Each host contains only its specific concerns:
 
-- The VoxFlow CLI continues to work unchanged — zero regression risk
-- Application facades provide DI-compatible interfaces for the MCP SDK
-- Host-agnostic DTOs decouple MCP tool schemas from internal service signatures
-- Path safety enforcement (`PathPolicy`) is an MCP-specific concern that does not pollute the CLI
+- **CLI:** Console progress rendering, exit code mapping
+- **MCP Server:** Stdio transport, path policy enforcement, MCP tool/prompt definitions
+- **Desktop:** Blazor pages, AppViewModel, macOS native shell
 
-This validates the architecture's extensibility: a second host was added without modifying any existing module.
+This validates the architecture's extensibility: three hosts share the same pipeline without any business logic duplication, facade layers, or `InternalsVisibleTo` hacks.
 
 ## Deliberate Simplicity
 
 These are areas where the design intentionally avoids added complexity:
 
-### Static services in VoxFlow CLI
+### DI is lightweight and justified
 
-The VoxFlow CLI retains all static services. The MCP server introduces interfaces and DI through facades, but the CLI host remains unchanged. This is appropriate because:
-- The CLI has one execution path with no runtime polymorphism
-- Dependencies are visible at call sites in `Program.cs`
-- The MCP server's facade layer provides the interface boundary where it is needed
+The system now uses dependency injection with `Microsoft.Extensions.DependencyInjection`, but keeps the DI usage simple:
+- One registration entry point (`AddVoxFlowCore()`) — no complex module systems or auto-registration
+- Constructor injection only — no service locator, no property injection, no factory patterns
+- Simple lifetimes — services are singletons or transient; no scoped lifetimes needed
+- The DI container is justified by three hosts sharing the same services. This is the "third host" trigger identified in the previous architecture review.
 
-**Evolution path:** If a third host is added, the natural next step is extracting a shared `VoxFlow.Core` library with interfaces. The facade interfaces already define the contracts.
-
-### No dependency injection container
-
-The application has no composition root, no service provider, no lifetime scopes. `Program.cs` directly calls static methods. This works because:
-- The dependency graph is acyclic and shallow (max depth: Program → LanguageSelectionService → TranscriptionFilter)
-- There are no cross-cutting concerns that need interception (no logging framework, no metrics)
-- Object lifetime is trivial — everything is either stateless (static methods) or process-scoped (WhisperFactory)
+**What changed:** The previous architecture used static services and no DI container. With the addition of the Desktop host (the third host), the evolution from static to DI-based services was triggered — exactly as predicted in the architecture review's evolution table.
 
 ### No logging framework
 
@@ -103,14 +96,16 @@ These are not weaknesses — they are design boundaries that would shift under d
 
 | Trigger | Current State | Evolution |
 |---------|--------------|-----------|
-| ~~MCP server integration~~ | ~~Static services, no DI~~ | **Done** — MCP server added as separate host with facades and DI (ADR-016) |
-| Third host or shared library | InternalsVisibleTo + facades | Extract `VoxFlow.Core` library; promote facade interfaces to shared contracts |
+| ~~MCP server integration~~ | ~~Static services, no DI~~ | **Done** — MCP server added as separate host (ADR-016), later evolved to shared Core (ADR-019) |
+| ~~Third host or shared library~~ | ~~InternalsVisibleTo + facades~~ | **Done** — `VoxFlow.Core` extracted with DI interfaces (ADR-019); facades and InternalsVisibleTo eliminated (ADR-023) |
+| ~~Desktop application~~ | ~~No GUI~~ | **Done** — macOS Blazor Hybrid desktop app added (ADR-021) with contextual flow navigation (ADR-022) |
 | HTTP/SSE MCP transport | Stdio-only | Add HTTP transport option; requires auth, CORS, port management |
 | Parallel batch processing | Sequential loop | Producer-consumer pipeline; ffmpeg conversion overlapped with inference |
 | Multiple transcription backends | Whisper.net hardcoded | Backend interface; factory-based selection |
 | Structured output formats | Plain text only | Output format strategy; JSON/CSV writers alongside plain text |
 | Watch mode / continuous processing | Run-once exit | File system watcher; process lifecycle management |
 | Plugin system for filters | Hardcoded filter stages | Filter chain with configurable stage ordering |
+| Linux/Windows desktop support | macOS only | Platform-specific MAUI targets; may require UI adjustments |
 
 Each of these would be driven by a concrete requirement, not added speculatively. The current architecture does not prevent any of them.
 
@@ -120,14 +115,15 @@ How to know the architecture is working:
 
 | Indicator | What to watch | Current status |
 |-----------|---------------|----------------|
-| **Change locality** | A new feature touches ≤ 2 modules | Batch mode added 2 new services; MCP server added as separate project with facades — no existing modules modified |
-| **Test independence** | Unit tests run without external dependencies | All unit tests use generated fixtures and fake externals |
+| **Change locality** | A new feature touches ≤ 2 modules | Desktop added as new host project — Core unchanged; MCP migration to shared Core touched only host-level code |
+| **Host independence** | Adding a new host requires only host-specific code | Three hosts (CLI, MCP, Desktop) share Core via `AddVoxFlowCore()` with no Core modifications per host |
+| **Test independence** | Unit tests run without external dependencies | All unit tests use generated fixtures, fake externals, and interface mocks |
 | **Startup time** | Validation completes in < 5 seconds | 15+ checks complete in 1–3 seconds |
-| **Failure clarity** | Every failure produces an actionable message | Startup validation, filter skip reasons, batch summary all provide specific messages |
-| **Dependency count** | External dependencies stay minimal | CLI: 2 runtime deps (ffmpeg, Whisper.net); MCP server adds ModelContextProtocol SDK + Microsoft.Extensions.Hosting |
+| **Failure clarity** | Every failure produces an actionable message | Startup validation, filter skip reasons, batch summary, and desktop first-run screen all provide specific messages |
+| **Dependency count** | External dependencies stay minimal | Core: 2 runtime deps (ffmpeg, Whisper.net); hosts add their specific deps (MCP SDK, MAUI, etc.) |
 
 ## Conclusion
 
-This architecture is appropriate for its problem domain. It prioritizes privacy, reliability, and operational clarity over extensibility and throughput. The trade-offs are deliberate and documented. The codebase is testable without heavy abstraction. And the design leaves room for evolution without requiring it.
+This architecture has evolved appropriately as the product grew from a single CLI to a multi-host system. It prioritizes privacy, reliability, and operational clarity while now supporting three distinct host applications through a shared core library.
 
-The strongest signal of architectural maturity here is not the complexity of the design — it is the discipline of keeping things simple where simple is sufficient, and adding structure only where it earns its cost.
+The strongest signal of architectural maturity is that the evolution followed the predicted path: the architecture review identified "third host" as the trigger for extracting a shared Core library, and that is exactly what happened when the Desktop app was added. The DI overhead is now justified by three hosts, interfaces enable testing, and `IProgress<ProgressUpdate>` cleanly decouples Core from host-specific rendering. Structure was added when it earned its cost — not before.
