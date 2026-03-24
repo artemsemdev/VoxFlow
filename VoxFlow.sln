@@ -20,6 +20,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VoxFlow.McpServer.Tests", "
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VoxFlow.Desktop", "src\VoxFlow.Desktop\VoxFlow.Desktop.csproj", "{4B996AE4-CDE6-422F-9BA1-BEEC2E317561}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VoxFlow.Desktop.Tests", "tests\VoxFlow.Desktop.Tests\VoxFlow.Desktop.Tests.csproj", "{8590D21A-3408-4E14-B222-EAB1D07FAB69}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -54,6 +56,10 @@ Global
 		{4B996AE4-CDE6-422F-9BA1-BEEC2E317561}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{4B996AE4-CDE6-422F-9BA1-BEEC2E317561}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{4B996AE4-CDE6-422F-9BA1-BEEC2E317561}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8590D21A-3408-4E14-B222-EAB1D07FAB69}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8590D21A-3408-4E14-B222-EAB1D07FAB69}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8590D21A-3408-4E14-B222-EAB1D07FAB69}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8590D21A-3408-4E14-B222-EAB1D07FAB69}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -69,5 +75,6 @@ Global
 		{316EA391-9C3C-4D05-86AB-075CD30D293D} = {96A7F41A-69D8-4CD6-9D9C-9218775641C3}
 		{0F432ACF-3ACC-462F-A4D4-6FA3017A9C9F} = {CC94594C-0AE3-417F-A7B6-84B16765F66C}
 		{4B996AE4-CDE6-422F-9BA1-BEEC2E317561} = {96A7F41A-69D8-4CD6-9D9C-9218775641C3}
+		{8590D21A-3408-4E14-B222-EAB1D07FAB69} = {CC94594C-0AE3-417F-A7B6-84B16765F66C}
 	EndGlobalSection
 EndGlobal
