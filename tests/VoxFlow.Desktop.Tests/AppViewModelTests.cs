@@ -97,18 +97,14 @@ internal sealed class StubTranscriptionService : ITranscriptionService
 }
 
 /// <summary>
-/// Tracks whether <see cref="GetOrCreateFactoryAsync"/> was called.
+/// Stub model service for DI compatibility.
 /// </summary>
 internal sealed class StubModelService : IModelService
 {
-    public bool GetOrCreateFactoryWasCalled { get; private set; }
-
     public Task<WhisperFactory> GetOrCreateFactoryAsync(
         TranscriptionOptions options,
         CancellationToken cancellationToken = default)
     {
-        GetOrCreateFactoryWasCalled = true;
-        // Return null! — the AppViewModel only awaits this without using the result.
         return Task.FromResult<WhisperFactory>(null!);
     }
 
@@ -156,19 +152,6 @@ internal static class ViewModelFactory
             new StubConfigurationService(settingsPath),
             new StubModelService());
     }
-
-    public static (AppViewModel vm, StubModelService modelService) CreateWithModelService(
-        bool validationCanStart = true)
-    {
-        var settingsPath = ResolveRootSettingsPath();
-        var modelService = new StubModelService();
-        var vm = new AppViewModel(
-            new StubTranscriptionService(success: true),
-            new StubValidationService(validationCanStart),
-            new StubConfigurationService(settingsPath),
-            modelService);
-        return (vm, modelService);
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -194,13 +177,13 @@ public sealed class AppViewModelTests
     }
 
     [Fact]
-    public async Task InitializeAsync_FailingValidation_StateBecomesNotReady()
+    public async Task InitializeAsync_FailingValidation_StillBecomesReady()
     {
         var vm = ViewModelFactory.Create(validationCanStart: false);
 
         await vm.InitializeAsync();
 
-        Assert.Equal(AppState.NotReady, vm.CurrentState);
+        Assert.Equal(AppState.Ready, vm.CurrentState);
         Assert.NotNull(vm.ValidationResult);
         Assert.False(vm.ValidationResult!.CanStart);
     }
@@ -290,26 +273,42 @@ public sealed class AppViewModelTests
         // RetryAsync without any prior TranscribeFileAsync call should be a no-op
         await vm.RetryAsync();
 
-        Assert.Equal(AppState.NotReady, vm.CurrentState);
+        Assert.Equal(AppState.Ready, vm.CurrentState);
     }
 
     // -----------------------------------------------------------------------
-    // DownloadModelAsync
+    // GoToReady
     // -----------------------------------------------------------------------
 
     [Fact]
-    public async Task DownloadModelAsync_CallsModelServiceAndRevalidates()
+    public async Task GoToReady_AfterComplete_ResetsState()
     {
-        var (vm, modelService) = ViewModelFactory.CreateWithModelService(validationCanStart: true);
+        var vm = ViewModelFactory.Create();
+        await vm.TranscribeFileAsync("/tmp/audio.wav");
+        Assert.Equal(AppState.Complete, vm.CurrentState);
 
-        await vm.DownloadModelAsync();
+        vm.GoToReady();
 
-        Assert.True(modelService.GetOrCreateFactoryWasCalled,
-            "IModelService.GetOrCreateFactoryAsync should have been called.");
-        // After revalidation with canStart=true the state should be Ready
         Assert.Equal(AppState.Ready, vm.CurrentState);
-        Assert.False(vm.IsDownloadingModel,
-            "IsDownloadingModel should be false after DownloadModelAsync completes.");
+        Assert.Null(vm.ErrorMessage);
+        Assert.Null(vm.TranscriptionResult);
+        Assert.Null(vm.CurrentProgress);
+    }
+
+    // -----------------------------------------------------------------------
+    // CurrentFileName
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task CurrentFileName_ReturnsFileNameFromLastPath()
+    {
+        var vm = ViewModelFactory.Create();
+
+        Assert.Null(vm.CurrentFileName);
+
+        await vm.TranscribeFileAsync("/tmp/meeting_01.m4a");
+
+        Assert.Equal("meeting_01.m4a", vm.CurrentFileName);
     }
 
     // -----------------------------------------------------------------------

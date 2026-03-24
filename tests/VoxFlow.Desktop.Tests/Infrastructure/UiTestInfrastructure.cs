@@ -21,20 +21,17 @@ internal sealed class DesktopUiTestContext : IAsyncDisposable
     public DesktopUiTestContext(
         TestRenderer renderer,
         AppViewModel viewModel,
-        SettingsViewModel settings,
         RecordingJsRuntime jsRuntime,
         ITranscriptionService transcriptionService)
     {
         Renderer = renderer;
         ViewModel = viewModel;
-        Settings = settings;
         JsRuntime = jsRuntime;
         TranscriptionService = transcriptionService;
     }
 
     public TestRenderer Renderer { get; }
     public AppViewModel ViewModel { get; }
-    public SettingsViewModel Settings { get; }
     public RecordingJsRuntime JsRuntime { get; }
     public ITranscriptionService TranscriptionService { get; }
 
@@ -58,16 +55,14 @@ internal sealed class DesktopUiTestContext : IAsyncDisposable
         var jsRuntime = new RecordingJsRuntime();
 
         var viewModel = new AppViewModel(transcription, validation, config, models);
-        var settings = new SettingsViewModel(config);
 
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton<IJSRuntime>(jsRuntime);
         services.AddSingleton(viewModel);
-        services.AddSingleton(settings);
 
         var renderer = new TestRenderer(services.BuildServiceProvider());
-        return new DesktopUiTestContext(renderer, viewModel, settings, jsRuntime, transcription);
+        return new DesktopUiTestContext(renderer, viewModel, jsRuntime, transcription);
     }
 
     public static DesktopUiTestContext CreateWithRealCore(string configurationPath)
@@ -82,7 +77,6 @@ internal sealed class DesktopUiTestContext : IAsyncDisposable
         services.AddVoxFlowCore();
         services.AddSingleton<IConfigurationService>(new FixedConfigurationService(configurationPath));
         services.AddSingleton<AppViewModel>();
-        services.AddSingleton<SettingsViewModel>();
 
         var provider = services.BuildServiceProvider();
         var renderer = new TestRenderer(provider);
@@ -90,7 +84,6 @@ internal sealed class DesktopUiTestContext : IAsyncDisposable
         return new DesktopUiTestContext(
             renderer,
             provider.GetRequiredService<AppViewModel>(),
-            provider.GetRequiredService<SettingsViewModel>(),
             (RecordingJsRuntime)provider.GetRequiredService<IJSRuntime>(),
             provider.GetRequiredService<ITranscriptionService>());
     }
@@ -517,8 +510,7 @@ internal static class AppViewModelStateAccessor
         TranscribeFileResult? transcriptionResult = null,
         ProgressUpdate? currentProgress = null,
         string? errorMessage = null,
-        string? lastFilePath = null,
-        bool? isDownloadingModel = null)
+        string? lastFilePath = null)
     {
         SetIfProvided(viewModel, "_currentState", currentState);
         SetIfProvided(viewModel, "_validationResult", validationResult);
@@ -526,7 +518,6 @@ internal static class AppViewModelStateAccessor
         SetIfProvided(viewModel, "_currentProgress", currentProgress);
         SetIfProvided(viewModel, "_errorMessage", errorMessage);
         SetIfProvided(viewModel, "_lastFilePath", lastFilePath);
-        SetIfProvided(viewModel, "_isDownloadingModel", isDownloadingModel);
         viewModel.NotifyStateChanged();
     }
 

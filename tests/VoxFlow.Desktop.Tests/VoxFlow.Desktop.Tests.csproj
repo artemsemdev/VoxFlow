@@ -35,7 +35,6 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="..\..\src\VoxFlow.Desktop\ViewModels\AppViewModel.cs" Link="ViewModels\AppViewModel.cs" />
-    <Compile Include="..\..\src\VoxFlow.Desktop\ViewModels\SettingsViewModel.cs" Link="ViewModels\SettingsViewModel.cs" />
     <Compile Include="..\..\src\VoxFlow.Desktop\Configuration\DesktopConfigurationService.cs" Link="Configuration\DesktopConfigurationService.cs" />
     <Compile Include="..\..\src\VoxFlow.Desktop\Services\BlazorProgressHandler.cs" Link="Services\BlazorProgressHandler.cs" />
   </ItemGroup>

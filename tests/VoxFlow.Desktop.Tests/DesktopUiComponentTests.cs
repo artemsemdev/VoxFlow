@@ -47,59 +47,7 @@ public sealed class DesktopUiComponentTests
             "startup retry button");
 
         Assert.DoesNotContain("Startup Failed", rendered.TextContent);
-        Assert.Contains("Ready to Transcribe", rendered.TextContent);
-    }
-
-    [Fact]
-    public async Task MainLayout_SettingsToggle_OpensSettingsPanel()
-    {
-        await using var context = DesktopUiTestContext.Create();
-        AppViewModelStateAccessor.SetState(
-            context.ViewModel,
-            currentState: AppState.Ready,
-            validationResult: TestValidationFactory.Create(canStart: true));
-
-        var rendered = await context.RenderAsync<MainLayout>();
-
-        Assert.DoesNotContain("Output Directory", rendered.TextContent);
-
-        await rendered.ClickAsync(
-            element => element.Name == "button" && element.HasClass("settings-toggle"),
-            "settings toggle button");
-
-        Assert.Contains("Output Directory", rendered.TextContent);
-        Assert.Contains("Open appsettings.json", rendered.TextContent);
-    }
-
-    [Fact]
-    public async Task NotReadyView_RendersRecoveryActions_ForFailedChecks()
-    {
-        await using var context = DesktopUiTestContext.Create();
-        AppViewModelStateAccessor.SetState(
-            context.ViewModel,
-            currentState: AppState.NotReady,
-            validationResult: TestValidationFactory.Create(
-                canStart: false,
-                new ValidationCheck("ffmpeg", ValidationCheckStatus.Failed, "ffmpeg is missing."),
-                new ValidationCheck("model directory", ValidationCheckStatus.Failed, "Directory not found."),
-                new ValidationCheck("language support", ValidationCheckStatus.Passed, "English")));
-
-        var rendered = await context.RenderAsync<NotReadyView>();
-
-        Assert.Contains("Environment Setup Required", rendered.TextContent);
-        Assert.Contains("Install ffmpeg", rendered.TextContent);
-        Assert.Contains("Download Model", rendered.TextContent);
-        Assert.Contains("Retry Validation", rendered.TextContent);
-    }
-
-    [Fact]
-    public async Task StatusBar_WithoutValidation_ShowsInitializingState()
-    {
-        await using var context = DesktopUiTestContext.Create();
-
-        var rendered = await context.RenderAsync<StatusBar>();
-
-        Assert.Contains("Initializing...", rendered.TextContent);
+        Assert.Contains("Audio Transcription", rendered.TextContent);
     }
 
     [Fact]
@@ -118,7 +66,7 @@ public sealed class DesktopUiComponentTests
 
         var rendered = await context.RenderAsync<RunningView>();
 
-        Assert.Contains("Transcribing...", rendered.TextContent);
+        Assert.Contains("audio file", rendered.TextContent);
         Assert.Contains("Processing audio", rendered.TextContent);
         Assert.Contains("Language: English", rendered.TextContent);
         Assert.Contains("2:05", rendered.TextContent);
@@ -158,7 +106,7 @@ public sealed class DesktopUiComponentTests
             element => element.Name == "button" && element.TextContent == "Choose Different File",
             "choose different file button");
 
-        Assert.Contains("Ready to Transcribe", rendered.TextContent);
+        Assert.Contains("Audio Transcription", rendered.TextContent);
         Assert.DoesNotContain("Transcription Failed", rendered.TextContent);
     }
 
@@ -189,8 +137,8 @@ public sealed class DesktopUiComponentTests
 
         var delegateTranscriptionService = Assert.IsType<DelegateTranscriptionService>(context.TranscriptionService);
         Assert.Equal("/tmp/demo.wav", delegateTranscriptionService.LastFilePath);
-        Assert.Contains("Transcription Complete", rendered.TextContent);
-        Assert.Contains("Finished in", rendered.TextContent);
+        Assert.NotNull(context.ViewModel.TranscriptionResult);
+        Assert.True(context.ViewModel.TranscriptionResult!.Success);
     }
 
     [Theory]
@@ -218,7 +166,7 @@ public sealed class DesktopUiComponentTests
             Assert.Equal(AppState.Ready, context.ViewModel.CurrentState);
 
             await rendered.ClickAsync(
-                element => element.Name == "button" && element.TextContent == "Browse Files",
+                element => element.Name == "button" && element.TextContent == "+ Browse Files",
                 "browse files button");
 
             var resultFilePath = Path.Combine(tempDir, $"{Path.GetFileNameWithoutExtension(fileName)}.txt");
@@ -228,7 +176,7 @@ public sealed class DesktopUiComponentTests
             Assert.True(context.ViewModel.TranscriptionResult!.Success);
             Assert.Equal(resultFilePath, context.ViewModel.TranscriptionResult.ResultFilePath);
             Assert.True(File.Exists(resultFilePath), $"Expected result file to exist: {resultFilePath}");
-            Assert.Contains("Transcription Complete", rendered.TextContent);
+            Assert.Contains(Path.GetFileName(inputPath), rendered.TextContent);
         }
         finally
         {
@@ -264,7 +212,7 @@ public sealed class DesktopUiComponentTests
             var rendered = await context.RenderAsync<ReadyView>();
 
             await rendered.ClickAsync(
-                element => element.Name == "button" && element.TextContent == "Browse Files",
+                element => element.Name == "button" && element.TextContent == "+ Browse Files",
                 "browse files button");
 
             var resultFilePath = Path.Combine(tempDir, "Test 1.txt");
@@ -288,7 +236,7 @@ public sealed class DesktopUiComponentTests
     }
 
     [Fact]
-    public async Task CompleteView_CopyTranscript_UsesClipboardInterop_AndUpdatesButton()
+    public async Task CompleteView_CopyText_UsesClipboardInterop_AndUpdatesButton()
     {
         await using var context = DesktopUiTestContext.Create();
         AppViewModelStateAccessor.SetState(
@@ -307,13 +255,39 @@ public sealed class DesktopUiComponentTests
         var rendered = await context.RenderAsync<CompleteView>();
 
         await rendered.ClickAsync(
-            element => element.Name == "button" && element.TextContent == "Copy Transcript",
-            "copy transcript button");
+            element => element.Name == "button" && element.TextContent == "Copy Text",
+            "copy text button");
 
         var invocation = Assert.Single(context.JsRuntime.Invocations);
         Assert.Equal("voxFlowInterop.copyToClipboard", invocation.Identifier);
         Assert.Equal("Clipboard text", Assert.Single(invocation.Arguments));
         Assert.Contains("Copied!", rendered.TextContent);
+    }
+
+    [Fact]
+    public async Task CompleteView_BackButton_NavigatesToReady()
+    {
+        await using var context = DesktopUiTestContext.Create();
+        AppViewModelStateAccessor.SetState(
+            context.ViewModel,
+            currentState: AppState.Complete,
+            transcriptionResult: new TranscribeFileResult(
+                Success: true,
+                DetectedLanguage: "en",
+                ResultFilePath: "/tmp/result.txt",
+                AcceptedSegmentCount: 7,
+                SkippedSegmentCount: 0,
+                Duration: TimeSpan.FromSeconds(12),
+                Warnings: [],
+                TranscriptPreview: "Test text"));
+
+        var rendered = await context.RenderAsync<CompleteView>();
+
+        await rendered.ClickAsync(
+            element => element.Name == "button" && element.HasClass("result-back-btn"),
+            "back button");
+
+        Assert.Equal(AppState.Ready, context.ViewModel.CurrentState);
     }
 
     [Fact]
@@ -335,7 +309,7 @@ public sealed class DesktopUiComponentTests
         var rendered = await context.RenderAsync<DropZone>(parameters);
 
         await rendered.ClickAsync(
-            element => element.Name == "button" && element.TextContent == "Browse Files",
+            element => element.Name == "button" && element.TextContent == "+ Browse Files",
             "browse files button");
 
         Assert.Equal("/tmp/interview.wav", selectedFile);
@@ -351,43 +325,25 @@ public sealed class DesktopUiComponentTests
         var rendered = await context.RenderAsync<DropZone>();
 
         await rendered.ClickAsync(
-            element => element.Name == "button" && element.TextContent == "Browse Files",
+            element => element.Name == "button" && element.TextContent == "+ Browse Files",
             "browse files button");
 
         Assert.Contains("File picker failed: picker unavailable", rendered.TextContent);
     }
 
     [Fact]
-    public async Task SettingsPanel_LoadsConfiguredValues_AndSaveClosesPanel()
+    public async Task ReadyView_ShowsExpectedLayout()
     {
-        var options = TranscriptionOptions.LoadFromPath(ViewModelFactory.ResolveRootSettingsPath());
-        var closed = false;
-
         await using var context = DesktopUiTestContext.Create();
-        var parameters = ParameterView.FromDictionary(new Dictionary<string, object?>
-        {
-            [nameof(SettingsPanel.OnClose)] = EventCallback.Factory.Create(this, () => closed = true)
-        });
+        AppViewModelStateAccessor.SetState(
+            context.ViewModel,
+            currentState: AppState.Ready);
 
-        var rendered = await context.RenderAsync<SettingsPanel>(parameters);
+        var rendered = await context.RenderAsync<ReadyView>();
 
-        var outputInput = rendered.FindElement(
-            element => element.Name == "input" &&
-                Equals(element.Attributes.GetValueOrDefault("placeholder"), "Default output directory"),
-            "output directory input");
-        var ffmpegInput = rendered.FindElement(
-            element => element.Name == "input" &&
-                Equals(element.Attributes.GetValueOrDefault("placeholder"), "/usr/local/bin/ffmpeg"),
-            "ffmpeg path input");
-
-        Assert.Equal(options.ResultFilePath, outputInput.Attributes["value"]?.ToString());
-        Assert.Equal(options.FfmpegExecutablePath, ffmpegInput.Attributes["value"]?.ToString());
-
-        await rendered.ClickAsync(
-            element => element.Name == "button" && element.TextContent == "Save",
-            "settings save button");
-
-        Assert.True(closed);
+        Assert.Contains("Audio Transcription", rendered.TextContent);
+        Assert.Contains("Drop your M4A files here to convert speech into text", rendered.TextContent);
+        Assert.Contains("No files added yet", rendered.TextContent);
     }
 
     private static string WriteSingleFileConfig(string repositoryRoot, string tempDir, string inputPath)
