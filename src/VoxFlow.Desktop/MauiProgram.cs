@@ -1,4 +1,6 @@
 using VoxFlow.Core.DependencyInjection;
+using VoxFlow.Core.Interfaces;
+using VoxFlow.Desktop.Configuration;
 using VoxFlow.Desktop.ViewModels;
 
 namespace VoxFlow.Desktop;
@@ -17,6 +19,7 @@ public static class MauiProgram
 
         builder.Services.AddMauiBlazorWebView();
         builder.Services.AddVoxFlowCore();
+        builder.Services.AddSingleton<IConfigurationService, DesktopConfigurationService>();
         builder.Services.AddSingleton<AppViewModel>();
         builder.Services.AddSingleton<SettingsViewModel>();
 

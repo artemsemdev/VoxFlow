@@ -18,5 +18,6 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="..\..\src\VoxFlow.Desktop\ViewModels\AppViewModel.cs" Link="ViewModels\AppViewModel.cs" />
+    <Compile Include="..\..\src\VoxFlow.Desktop\Configuration\DesktopConfigurationService.cs" Link="Configuration\DesktopConfigurationService.cs" />
   </ItemGroup>
 </Project>
