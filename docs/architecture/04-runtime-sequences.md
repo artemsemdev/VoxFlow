@@ -198,13 +198,17 @@ sequenceDiagram
     participant User as Desktop User
     participant Desktop as VoxFlow.Desktop
     participant VM as AppViewModel
+    participant DesktopConfig as DesktopConfigurationService
     participant IValidation as IValidationService (Core)
     participant IConfig as IConfigurationService (Core)
 
     User->>Desktop: Launch app
     Desktop->>VM: Initialize (DI via AddVoxFlowCore)
 
-    VM->>IConfig: LoadConfiguration()
+    VM->>DesktopConfig: Build merged Desktop config
+    DesktopConfig-->>VM: Bundled appsettings + user overrides
+
+    VM->>IConfig: LoadConfiguration(merged config path)
     IConfig-->>VM: TranscriptionOptions
 
     VM->>IValidation: ValidateAsync(options)
@@ -240,11 +244,8 @@ sequenceDiagram
     participant Core as Core Pipeline
 
     User->>Pages: Select file (picker or drag-and-drop)
-    Pages->>VM: SetInputFile(path)
-    VM-->>Pages: Navigate to Transcription screen
-
-    Pages->>VM: StartTranscription()
-    VM->>ITranscription: TranscribeAsync(inputPath, progress)
+    Pages->>VM: TranscribeFileAsync(path)
+    VM->>ITranscription: TranscribeAsync(path, progress)
     ITranscription->>Core: Convert → Model → Load → Infer → Filter → Write
 
     loop During transcription
@@ -274,5 +275,9 @@ sequenceDiagram
 **MCP path validation.** Every file path from an MCP tool argument passes through `PathPolicy` before reaching the Core service interfaces. This is a hard security boundary — paths outside configured allowed roots are rejected with an error response, never reaching the file system.
 
 **Desktop contextual flow.** The Desktop app uses a contextual navigation model where the current Blazor page represents the application state. There is no separate state machine — navigating to a page IS transitioning to that state. This simplifies the mental model and keeps the UI code straightforward.
+
+**Desktop config merge.** The Desktop host does not rely on `TRANSCRIPTION_SETTINGS_PATH` by default. It builds a merged runtime config from bundled app resources plus `~/Library/Application Support/VoxFlow/appsettings.json`, then hands that resolved file to Core configuration loading.
+
+**Desktop flow verification status.** The sequence above is the intended workflow. Current headless UI tests verify the direct `ReadyView -> DropZone -> AppViewModel -> ITranscriptionService` path with real audio inputs (`artifacts/Input/Test 1.m4a` and `artifacts/Input/Test 2.m4a`), but the fully integrated `Routes` shell still has open `Browse Files` failures and remains under stabilization.
 
 **Host-agnostic progress.** Core services report progress via `IProgress<ProgressUpdate>`. The CLI host renders this as an ANSI progress bar, the Desktop host renders it as a Blazor UI update, and the MCP server suppresses it. This decoupling means Core services have no knowledge of how progress is displayed.

@@ -423,7 +423,8 @@ Each tool validates paths via `IPathPolicy`, delegates to the appropriate Core s
 - Injects Core service interfaces via constructor DI
 - Manages navigation flow between screens (the current Blazor page is the application state)
 - Translates `ProgressUpdate` events into UI-bindable properties
-- Handles file selection from picker and drag-and-drop
+- Accepts file selection from Desktop shell adapters and starts transcription
+- Owns validation, retry, completion, and failure transitions for the Desktop workflow
 
 ---
 
@@ -440,3 +441,10 @@ Each tool validates paths via `IPathPolicy`, delegates to the appropriate Core s
 | Settings | Model, language, and path configuration |
 
 **Design note:** Navigation follows a contextual flow model — the screen IS the state. There is no separate state machine abstraction. The current Blazor page represents the current application state, and navigation between pages drives the workflow forward. Dark theme is applied consistently across all pages.
+
+**Current verification status:**
+
+- `tests/VoxFlow.Desktop.Tests` now exercises `Routes`, `MainLayout`, `ReadyView`, `NotReadyView`, `RunningView`, `CompleteView`, `DropZone`, and the settings panel in a headless Razor renderer.
+- The direct `ReadyView -> DropZone -> AppViewModel -> VoxFlow.Core` browse path is verified with real sample audio from `artifacts/Input/Test 1.m4a` and `artifacts/Input/Test 2.m4a`.
+- The fully integrated `Routes`-based Desktop shell still has open browse-flow failures in the current UI integration suite, so the component model is only partially green end-to-end.
+- `SettingsViewModel.SaveAsync()` remains an open implementation gap, so settings can be viewed in the Desktop panel but are not yet persisted from the UI.

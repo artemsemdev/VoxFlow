@@ -22,7 +22,7 @@ Active test projects:
 | `tests/VoxFlow.Core.Tests` | Core unit tests |
 | `tests/VoxFlow.Cli.Tests` | CLI end-to-end and regression tests |
 | `tests/VoxFlow.McpServer.Tests` | MCP configuration and path-policy tests |
-| `tests/VoxFlow.Desktop.Tests` | Desktop view-model and config tests |
+| `tests/VoxFlow.Desktop.Tests` | Desktop view-model, configuration, headless Razor UI/component, and UI integration tests |
 
 ## Scope
 
@@ -263,7 +263,7 @@ Current Desktop flow:
 
 - First-run validation checks `ffmpeg`, model state, and writable paths
 - Missing model can be downloaded from the UI
-- Audio files can be selected by drag-and-drop or Browse
+- The intended file-entry paths are drag-and-drop and `Browse Files`
 - Current UI scope is single-file transcription
 - Result view supports opening the output folder and copying the transcript preview
 - Settings are exposed through the Desktop settings panel
@@ -272,6 +272,8 @@ Current Desktop limitations:
 
 - Batch processing is implemented in `VoxFlow.Core`, but not exposed as a Desktop UI workflow yet
 - Settings persistence from the UI is not implemented yet
+- The direct `ReadyView` browse flow is covered by headless tests, but the full `Routes`-based Desktop shell still has open integration failures around `Browse Files`
+- Native drag-and-drop and the system file picker are still best treated as active stabilization areas until the integrated Desktop shell is green end-to-end
 - MCP setup, MCP diagnostics, and MCP controls are intentionally outside the current Desktop UI scope
 
 ### MCP Server
@@ -325,12 +327,31 @@ Run the full solution:
 dotnet test VoxFlow.sln --no-restore
 ```
 
-Current verified result:
+Run only the Desktop UI/component suite:
+
+```bash
+dotnet test tests/VoxFlow.Desktop.Tests/VoxFlow.Desktop.Tests.csproj \
+  --filter FullyQualifiedName~DesktopUiComponentTests \
+  --no-restore
+```
+
+Desktop UI integration fixtures currently used in the repo:
+
+- `artifacts/Input/Test 1.m4a`
+- `artifacts/Input/Test 2.m4a`
+
+Current verified result as of March 24, 2026:
 
 - `VoxFlow.Core.Tests`: 50 passed
 - `VoxFlow.Cli.Tests`: 6 passed
 - `VoxFlow.McpServer.Tests`: 31 passed
-- `VoxFlow.Desktop.Tests`: 18 passed
+- `VoxFlow.Desktop.Tests`: 28 passed, 2 failed, 2 skipped
+
+Current Desktop UI interpretation:
+
+- The direct `ReadyView` browse path passes with real audio and completes transcription
+- CLI and Core processing both succeed on `Test 1.m4a` and `Test 2.m4a`
+- The remaining two failures are both `Routes_BrowseFile_WithRealAudio_CompletesTranscription(...)`, which localizes the open issue to the integrated Desktop root shell rather than the transcription pipeline itself
 
 ## Troubleshooting
 
@@ -341,6 +362,18 @@ The checked-in root config and host configs currently default to `processingMode
 ### Desktop validation fails on batch input paths
 
 This usually means a user override file switched Desktop back to `processingMode: "batch"` or provided batch-only relative paths. Review `~/Library/Application Support/VoxFlow/appsettings.json` and prefer single-file settings unless you are explicitly testing batch behavior outside the Desktop UI.
+
+### Desktop shows `Ready to Transcribe`, but `Browse Files` or drag-and-drop does not start transcription
+
+This is a known integration issue in the current Desktop shell. The repo's headless UI tests show that the direct `ReadyView -> DropZone -> AppViewModel -> VoxFlow.Core` path works with real audio, but the fully integrated `Routes`-based shell still has open `Browse Files` failures. Reproduce the current state with:
+
+```bash
+dotnet test tests/VoxFlow.Desktop.Tests/VoxFlow.Desktop.Tests.csproj \
+  --filter FullyQualifiedName~DesktopUiComponentTests \
+  --no-restore
+```
+
+If you need a stable transcription baseline while debugging the UI shell, use `VoxFlow.Cli` against the same input files and config.
 
 ### Local packaged app triggers macOS trust warnings
 
