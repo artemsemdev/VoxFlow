@@ -1,10 +1,14 @@
 @inject AppViewModel ViewModel
 @inject IJSRuntime JSRuntime
 
-<div class="result-header">
+<div class="result-header" id="complete-screen" aria-label="Complete Screen">
     <div class="result-header-left">
-        <button class="result-back-btn" @onclick="ViewModel.GoToReady">&#x2039;</button>
-        <span class="result-filename">@(ViewModel.CurrentFileName ?? "result")</span>
+        <button id="back-to-ready-button"
+                class="result-back-btn"
+                aria-label="Back To Ready Screen"
+                title="Back To Ready Screen"
+                @onclick="ViewModel.GoToReady">&#x2039;</button>
+        <span class="result-filename" id="result-file-name">@(ViewModel.CurrentFileName ?? "result")</span>
     </div>
 </div>
 
@@ -14,20 +18,28 @@
 
     @if (!string.IsNullOrEmpty(result.DetectedLanguage))
     {
-        <p class="result-language">Language: @result.DetectedLanguage</p>
+        <p class="result-language" id="result-language">Language: @result.DetectedLanguage</p>
     }
 
     @if (!string.IsNullOrEmpty(result.TranscriptPreview))
     {
-        <div class="transcript-preview mt-4">@result.TranscriptPreview</div>
+        <div class="transcript-preview mt-4" id="transcript-preview">@result.TranscriptPreview</div>
     }
 }
 
 <div class="btn-group mt-4">
-    <button class="btn btn-secondary" @onclick="OpenFolder">
+    <button id="open-folder-button"
+            class="btn btn-secondary"
+            aria-label="Open Result Folder"
+            title="Open Result Folder"
+            @onclick="OpenFolder">
         Open Folder
     </button>
-    <button class="btn btn-secondary" @onclick="CopyTranscript">
+    <button id="copy-text-button"
+            class="btn btn-secondary"
+            aria-label="Copy Transcript"
+            title="Copy Transcript"
+            @onclick="CopyTranscript">
         @(_copied ? "Copied!" : "Copy Text")
     </button>
 </div>

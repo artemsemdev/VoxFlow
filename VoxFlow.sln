@@ -1,4 +1,4 @@
-﻿Microsoft Visual Studio Solution File, Format Version 12.00
+Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.5.2.0
 MinimumVisualStudioVersion = 10.0.40219.1
@@ -21,6 +21,8 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VoxFlow.Desktop", "src\VoxFlow.Desktop\VoxFlow.Desktop.csproj", "{4B996AE4-CDE6-422F-9BA1-BEEC2E317561}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VoxFlow.Desktop.Tests", "tests\VoxFlow.Desktop.Tests\VoxFlow.Desktop.Tests.csproj", "{8590D21A-3408-4E14-B222-EAB1D07FAB69}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VoxFlow.Desktop.UiTests", "tests\VoxFlow.Desktop.UiTests\VoxFlow.Desktop.UiTests.csproj", "{CDB66EBC-8F2F-448D-9FD4-E6A019B80DDF}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -60,6 +62,10 @@ Global
 		{8590D21A-3408-4E14-B222-EAB1D07FAB69}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{8590D21A-3408-4E14-B222-EAB1D07FAB69}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{8590D21A-3408-4E14-B222-EAB1D07FAB69}.Release|Any CPU.Build.0 = Release|Any CPU
+		{CDB66EBC-8F2F-448D-9FD4-E6A019B80DDF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{CDB66EBC-8F2F-448D-9FD4-E6A019B80DDF}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{CDB66EBC-8F2F-448D-9FD4-E6A019B80DDF}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{CDB66EBC-8F2F-448D-9FD4-E6A019B80DDF}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -76,5 +82,6 @@ Global
 		{0F432ACF-3ACC-462F-A4D4-6FA3017A9C9F} = {CC94594C-0AE3-417F-A7B6-84B16765F66C}
 		{4B996AE4-CDE6-422F-9BA1-BEEC2E317561} = {96A7F41A-69D8-4CD6-9D9C-9218775641C3}
 		{8590D21A-3408-4E14-B222-EAB1D07FAB69} = {CC94594C-0AE3-417F-A7B6-84B16765F66C}
+		{CDB66EBC-8F2F-448D-9FD4-E6A019B80DDF} = {CC94594C-0AE3-417F-A7B6-84B16765F66C}
 	EndGlobalSection
 EndGlobal
