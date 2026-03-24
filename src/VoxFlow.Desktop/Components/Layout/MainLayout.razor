@@ -2,17 +2,9 @@
 @inject AppViewModel ViewModel
 
 <div class="app-shell">
-    <header class="app-header">
-        <span class="app-title">VoxFlow</span>
-        <button class="settings-toggle" @onclick="ToggleSettings">&#9881;</button>
-    </header>
-
     <main class="app-content">
         @switch (ViewModel.CurrentState)
         {
-            case AppState.NotReady:
-                <NotReadyView />
-                break;
             case AppState.Ready:
                 <ReadyView />
                 break;
@@ -27,20 +19,4 @@
                 break;
         }
     </main>
-
-    <StatusBar />
-
-    @if (_settingsOpen)
-    {
-        <SettingsPanel OnClose="ToggleSettings" />
-    }
 </div>
-
-@code {
-    private bool _settingsOpen;
-
-    private void ToggleSettings()
-    {
-        _settingsOpen = !_settingsOpen;
-    }
-}
