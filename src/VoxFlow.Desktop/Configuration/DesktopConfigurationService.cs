@@ -10,7 +10,9 @@ public sealed class DesktopConfigurationService : IConfigurationService
 {
     private static readonly string AppSupportDir =
         Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            "Library",
+            "Application Support",
             "VoxFlow");
 
     private static readonly string UserConfigPath =

@@ -11,6 +11,8 @@ internal static class RepositoryLayout
     public static string DesktopProjectPath =>
         Path.Combine(RepositoryRoot, "src", "VoxFlow.Desktop", "VoxFlow.Desktop.csproj");
 
+    public static string DesktopProcessName => "VoxFlow.Desktop";
+
     public static string DesktopAppBundlePath => ResolveDesktopAppBundlePath();
 
     public static string DesktopExecutablePath =>
@@ -30,9 +32,28 @@ internal static class RepositoryLayout
 
     public static string DesktopUserConfigPath =>
         Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            "Library",
+            "Application Support",
             "VoxFlow",
             "appsettings.json");
+
+    public static string DesktopUiAutomationRootPath =>
+        Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            "Library",
+            "Application Support",
+            "VoxFlow",
+            "ui-automation");
+
+    public static string DesktopUiAutomationSessionFilePath =>
+        Path.Combine(DesktopUiAutomationRootPath, "active-session.json");
+
+    public static string DesktopUiAutomationRequestsDirectory =>
+        Path.Combine(DesktopUiAutomationRootPath, "requests");
+
+    public static string DesktopUiAutomationResponsesDirectory =>
+        Path.Combine(DesktopUiAutomationRootPath, "responses");
 
     private static string FindRepositoryRoot()
     {

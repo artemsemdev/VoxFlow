@@ -4,12 +4,36 @@ namespace VoxFlow.Desktop.UiTests.Infrastructure;
 
 internal sealed class MacUiAutomation
 {
-    private readonly int _pid;
+    private readonly string _processName;
+    private readonly DesktopUiAutomationBridgeClient _bridge;
 
-    public MacUiAutomation(int pid)
+    public MacUiAutomation(string processName, DesktopUiAutomationBridgeClient bridge)
     {
-        _pid = pid;
+        _processName = processName;
+        _bridge = bridge;
     }
+
+    public Task WaitForProcessAsync(TimeSpan timeout, CancellationToken cancellationToken)
+        => WaitUntilAsync(
+            async token =>
+            {
+                var output = await RunAppleScriptCheckedAsync(
+                    $$"""
+                    tell application "System Events"
+                        set matchingProcesses to every process whose name is "{{EscapeAppleScriptString(_processName)}}"
+                        if (count of matchingProcesses) > 0 then
+                            return "true"
+                        end if
+                        return "false"
+                    end tell
+                    """,
+                    token);
+
+                return output.Trim().Equals("true", StringComparison.OrdinalIgnoreCase);
+            },
+            timeout,
+            $"Timed out waiting for the UI process '{_processName}' to appear.",
+            cancellationToken);
 
     public async Task EnsureAccessibilityAccessAsync(CancellationToken cancellationToken)
     {
@@ -18,7 +42,7 @@ internal sealed class MacUiAutomation
             await RunAppleScriptCheckedAsync(
                 $$"""
                 tell application "System Events"
-                    tell (first process whose unix id is {{_pid}})
+                    tell (first process whose name is "{{EscapeAppleScriptString(_processName)}}")
                         return count of windows
                     end tell
                 end tell
@@ -40,7 +64,7 @@ internal sealed class MacUiAutomation
                 var count = await RunAppleScriptCheckedAsync(
                     $$"""
                     tell application "System Events"
-                        tell (first process whose unix id is {{_pid}})
+                        tell (first process whose name is "{{EscapeAppleScriptString(_processName)}}")
                             return count of windows
                         end tell
                     end tell
@@ -57,12 +81,37 @@ internal sealed class MacUiAutomation
         => WaitUntilAsync(
             async token =>
             {
-                var snapshot = await GetAccessibilitySnapshotAsync(token);
-                return snapshot.Contains(expectedText, StringComparison.OrdinalIgnoreCase);
+                var snapshot = await _bridge.GetSnapshotAsync(token);
+                return snapshot.BodyText.Contains(expectedText, StringComparison.OrdinalIgnoreCase);
             },
             timeout,
             $"Timed out waiting for text '{expectedText}' to appear in the Desktop UI.",
-            cancellationToken);
+            cancellationToken,
+            DescribeCurrentDomStateAsync);
+
+    public Task WaitForActiveScreenAsync(string screenId, TimeSpan timeout, CancellationToken cancellationToken)
+        => WaitUntilAsync(
+            async token =>
+            {
+                var snapshot = await _bridge.GetSnapshotAsync(token);
+                return string.Equals(snapshot.ActiveScreenId, screenId, StringComparison.Ordinal);
+            },
+            timeout,
+            $"Timed out waiting for screen '{screenId}' to become active in the Desktop UI.",
+            cancellationToken,
+            DescribeCurrentDomStateAsync);
+
+    public Task WaitForVisibleElementAsync(string elementId, TimeSpan timeout, CancellationToken cancellationToken)
+        => WaitUntilAsync(
+            async token =>
+            {
+                var snapshot = await _bridge.GetSnapshotAsync(token);
+                return snapshot.VisibleElementIds.Contains(elementId, StringComparer.Ordinal);
+            },
+            timeout,
+            $"Timed out waiting for DOM element '{elementId}' to become visible in the Desktop UI.",
+            cancellationToken,
+            DescribeCurrentDomStateAsync);
 
     public Task WaitForAnyVisibleTextAsync(
         IReadOnlyList<string> expectedTexts,
@@ -71,37 +120,31 @@ internal sealed class MacUiAutomation
         => WaitUntilAsync(
             async token =>
             {
-                var snapshot = await GetAccessibilitySnapshotAsync(token);
-                return expectedTexts.Any(text => snapshot.Contains(text, StringComparison.OrdinalIgnoreCase));
+                var snapshot = await _bridge.GetSnapshotAsync(token);
+                return expectedTexts.Any(text => snapshot.BodyText.Contains(text, StringComparison.OrdinalIgnoreCase));
             },
             timeout,
             $"Timed out waiting for any of the expected texts to appear: {string.Join(", ", expectedTexts)}.",
-            cancellationToken);
+            cancellationToken,
+            DescribeCurrentDomStateAsync);
 
-    public async Task ClickButtonAsync(IReadOnlyList<string> candidateLabels, CancellationToken cancellationToken)
+    public async Task ClickElementAsync(string selector, CancellationToken cancellationToken)
     {
-        foreach (var label in candidateLabels)
-        {
-            var pressed = await TryClickButtonAsync(label, cancellationToken);
-            if (pressed)
-            {
-                return;
-            }
-        }
-
-        throw new InvalidOperationException(
-            $"Could not find a clickable button with any of these labels: {string.Join(", ", candidateLabels)}.");
+        UiProgressLogger.Write($"Trying to click DOM element: {selector}");
+        await _bridge.ClickAsync(selector, cancellationToken);
+        UiProgressLogger.Write($"Clicked DOM element: {selector}");
     }
 
     public async Task SelectFileInOpenPanelAsync(string filePath, CancellationToken cancellationToken)
     {
+        UiProgressLogger.Write("Waiting for the native Open dialog.");
         await WaitUntilAsync(
             async token =>
             {
                 var output = await RunAppleScriptCheckedAsync(
                     $$"""
                     tell application "System Events"
-                        tell (first process whose unix id is {{_pid}})
+                        tell (first process whose name is "{{EscapeAppleScriptString(_processName)}}")
                             if (count of windows) > 1 then
                                 return "true"
                             end if
@@ -124,10 +167,11 @@ internal sealed class MacUiAutomation
             "Timed out waiting for the native Open dialog to appear.",
             cancellationToken);
 
+        UiProgressLogger.Write($"Sending file path to the native Open dialog: {filePath}");
         await RunAppleScriptCheckedAsync(
             $$"""
             tell application "System Events"
-                tell (first process whose unix id is {{_pid}})
+                tell (first process whose name is "{{EscapeAppleScriptString(_processName)}}")
                     set frontmost to true
                 end tell
 
@@ -143,11 +187,49 @@ internal sealed class MacUiAutomation
             cancellationToken);
     }
 
-    public Task<string> GetAccessibilitySnapshotAsync(CancellationToken cancellationToken)
+    public async Task<string> GetAccessibilitySnapshotAsync(CancellationToken cancellationToken)
+    {
+        var domSnapshot = await _bridge.GetSnapshotAsync(cancellationToken);
+        var nativeSnapshot = await GetNativeAccessibilitySnapshotAsync(cancellationToken);
+        var builder = new StringBuilder();
+        builder.AppendLine($"DOM|ActiveScreen|{domSnapshot.ActiveScreenId ?? "(none)"}");
+        builder.AppendLine($"DOM|VisibleIds|{string.Join(",", domSnapshot.VisibleElementIds)}");
+        builder.AppendLine("DOM|BodyText|");
+        builder.AppendLine(domSnapshot.BodyText);
+        builder.AppendLine();
+        builder.AppendLine("AX|Snapshot|");
+        builder.Append(nativeSnapshot);
+        return builder.ToString().TrimEnd();
+    }
+
+    public async Task CaptureScreenshotAsync(string destinationPath, CancellationToken cancellationToken)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(destinationPath) ?? RepositoryLayout.UiArtifactsRoot);
+        await CommandRunner.RunCheckedAsync(
+            "screencapture",
+            ["-x", destinationPath],
+            cancellationToken: cancellationToken,
+            timeout: TimeSpan.FromSeconds(15));
+    }
+
+    public async Task<string> GetClipboardTextAsync(CancellationToken cancellationToken)
+    {
+        var output = await CommandRunner.RunCheckedAsync(
+            "pbpaste",
+            Array.Empty<string>(),
+            cancellationToken: cancellationToken,
+            timeout: TimeSpan.FromSeconds(10));
+        return output.Trim();
+    }
+
+    public Task<DesktopUiDomSnapshot> GetDomSnapshotAsync(CancellationToken cancellationToken)
+        => _bridge.GetSnapshotAsync(cancellationToken);
+
+    private Task<string> GetNativeAccessibilitySnapshotAsync(CancellationToken cancellationToken)
         => RunAppleScriptCheckedAsync(
             $$"""
             tell application "System Events"
-                tell (first process whose unix id is {{_pid}})
+                tell (first process whose name is "{{EscapeAppleScriptString(_processName)}}")
                     if (count of windows) is 0 then
                         return ""
                     end if
@@ -187,85 +269,18 @@ internal sealed class MacUiAutomation
             """,
             cancellationToken);
 
-    public async Task CaptureScreenshotAsync(string destinationPath, CancellationToken cancellationToken)
-    {
-        Directory.CreateDirectory(Path.GetDirectoryName(destinationPath) ?? RepositoryLayout.UiArtifactsRoot);
-        await CommandRunner.RunCheckedAsync(
-            "screencapture",
-            ["-x", destinationPath],
-            cancellationToken: cancellationToken,
-            timeout: TimeSpan.FromSeconds(15));
-    }
-
-    public async Task<string> GetClipboardTextAsync(CancellationToken cancellationToken)
-    {
-        var output = await CommandRunner.RunCheckedAsync(
-            "pbpaste",
-            Array.Empty<string>(),
-            cancellationToken: cancellationToken,
-            timeout: TimeSpan.FromSeconds(10));
-        return output.Trim();
-    }
-
-    private async Task<bool> TryClickButtonAsync(string candidateLabel, CancellationToken cancellationToken)
-    {
-        var output = await RunAppleScriptCheckedAsync(
-            $$"""
-            on matchesLabel(targetLabel, candidateValue)
-                if candidateValue is missing value then
-                    return false
-                end if
-
-                return (candidateValue as text) is targetLabel
-            end matchesLabel
-
-            tell application "System Events"
-                tell (first process whose unix id is {{_pid}})
-                    set frontmost to true
-
-                    if (count of windows) is 0 then
-                        return "false"
-                    end if
-
-                    set targetElement to missing value
-                    repeat with el in (entire contents of window 1)
-                        try
-                            if role of el is "AXButton" then
-                                if my matchesLabel("{{EscapeAppleScriptString(candidateLabel)}}", name of el) then
-                                    set targetElement to el
-                                    exit repeat
-                                end if
-
-                                if my matchesLabel("{{EscapeAppleScriptString(candidateLabel)}}", description of el) then
-                                    set targetElement to el
-                                    exit repeat
-                                end if
-                            end if
-                        end try
-                    end repeat
-
-                    if targetElement is missing value then
-                        return "false"
-                    end if
-
-                    perform action "AXPress" of targetElement
-                    return "true"
-                end tell
-            end tell
-            """,
-            cancellationToken);
-
-        return output.Trim().Equals("true", StringComparison.OrdinalIgnoreCase);
-    }
-
     private static async Task WaitUntilAsync(
         Func<CancellationToken, Task<bool>> condition,
         TimeSpan timeout,
         string timeoutMessage,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<CancellationToken, Task<string?>>? progressDetails = null)
     {
+        UiProgressLogger.Write($"{timeoutMessage} Waiting up to {timeout.TotalSeconds:F0}s.");
         var deadline = DateTimeOffset.UtcNow + timeout;
         Exception? lastException = null;
+        var startedAt = DateTimeOffset.UtcNow;
+        var nextHeartbeatAt = startedAt.AddSeconds(5);
 
         while (DateTimeOffset.UtcNow < deadline)
         {
@@ -275,6 +290,8 @@ internal sealed class MacUiAutomation
             {
                 if (await condition(cancellationToken))
                 {
+                    UiProgressLogger.Write(
+                        $"Wait completed after {(DateTimeOffset.UtcNow - startedAt).TotalSeconds:F1}s.");
                     return;
                 }
             }
@@ -283,9 +300,33 @@ internal sealed class MacUiAutomation
                 lastException = ex;
             }
 
+            if (DateTimeOffset.UtcNow >= nextHeartbeatAt)
+            {
+                var message = $"Still waiting... elapsed {(DateTimeOffset.UtcNow - startedAt).TotalSeconds:F1}s.";
+                if (progressDetails is not null)
+                {
+                    try
+                    {
+                        var details = await progressDetails(cancellationToken);
+                        if (!string.IsNullOrWhiteSpace(details))
+                        {
+                            message = $"{message} Current state: {details}";
+                        }
+                    }
+                    catch
+                    {
+                        // Best-effort diagnostics only.
+                    }
+                }
+
+                UiProgressLogger.Write(message);
+                nextHeartbeatAt = DateTimeOffset.UtcNow.AddSeconds(5);
+            }
+
             await Task.Delay(TimeSpan.FromMilliseconds(250), cancellationToken);
         }
 
+        UiProgressLogger.Write($"Wait timed out after {(DateTimeOffset.UtcNow - startedAt).TotalSeconds:F1}s.");
         throw lastException is null
             ? new TimeoutException(timeoutMessage)
             : new TimeoutException(timeoutMessage, lastException);
@@ -312,4 +353,24 @@ internal sealed class MacUiAutomation
     private static string EscapeAppleScriptString(string value)
         => value.Replace("\\", "\\\\", StringComparison.Ordinal)
             .Replace("\"", "\\\"", StringComparison.Ordinal);
+
+    private async Task<string?> DescribeCurrentDomStateAsync(CancellationToken cancellationToken)
+    {
+        var snapshot = await _bridge.GetSnapshotAsync(cancellationToken);
+        var visibleIds = snapshot.VisibleElementIds.Count == 0
+            ? "(none)"
+            : string.Join(",", snapshot.VisibleElementIds);
+
+        var text = snapshot.BodyText
+            .Replace(Environment.NewLine, " ", StringComparison.Ordinal)
+            .Replace("\n", " ", StringComparison.Ordinal)
+            .Trim();
+
+        if (text.Length > 120)
+        {
+            text = $"{text[..120]}...";
+        }
+
+        return $"screen={snapshot.ActiveScreenId ?? "(none)"}, ids={visibleIds}, text='{text}'";
+    }
 }

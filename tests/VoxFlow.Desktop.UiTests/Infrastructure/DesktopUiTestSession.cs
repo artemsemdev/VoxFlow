@@ -7,17 +7,20 @@ internal sealed class DesktopUiTestSession : IAsyncDisposable
 {
     private readonly DesktopUserConfigScope _userConfigScope;
     private readonly DesktopAppLauncher _launcher;
+    private readonly DesktopUiAutomationBridgeClient _bridge;
 
     private DesktopUiTestSession(
         ScenarioArtifacts artifacts,
         DesktopUserConfigScope userConfigScope,
         DesktopAppLauncher launcher,
+        DesktopUiAutomationBridgeClient bridge,
         MacUiAutomation automation,
         VoxFlowDesktopApp app)
     {
         Artifacts = artifacts;
         _userConfigScope = userConfigScope;
         _launcher = launcher;
+        _bridge = bridge;
         Automation = automation;
         App = app;
     }
@@ -32,30 +35,45 @@ internal sealed class DesktopUiTestSession : IAsyncDisposable
         string scenarioName,
         CancellationToken cancellationToken)
     {
+        UiProgressLogger.Write($"Preparing Desktop UI session for scenario '{scenarioName}'.");
         ValidatePrerequisites();
+        UiProgressLogger.Write("Prerequisites validated.");
 
         var artifacts = new ScenarioArtifacts(scenarioName);
+        UiProgressLogger.Write($"Scenario artifacts directory: {artifacts.RootDirectory}");
         var userConfigScope = new DesktopUserConfigScope();
+        UiProgressLogger.Write("Writing isolated Desktop user config override.");
         await userConfigScope.WriteAsync(DesktopUiTestConfigFactory.CreateValidSingleFileOverride(artifacts));
+        UiProgressLogger.Write("Preparing Desktop UI automation bridge session.");
+        var bridge = DesktopUiAutomationBridgeClient.CreateAndPrepare();
 
+        UiProgressLogger.Write("Launching real VoxFlow.Desktop app.");
         var launcher = await DesktopAppLauncher.StartAsync(artifacts.AppLogPath, cancellationToken);
-        var automation = new MacUiAutomation(launcher.ProcessId);
+        var automation = new MacUiAutomation(launcher.ProcessName, bridge);
 
         try
         {
+            UiProgressLogger.Write("Waiting for the Desktop UI process to appear.");
+            await automation.WaitForProcessAsync(TimeSpan.FromSeconds(30), cancellationToken);
+            UiProgressLogger.Write("Checking macOS Accessibility access.");
             await automation.EnsureAccessibilityAccessAsync(cancellationToken);
+            UiProgressLogger.Write("Waiting for the Desktop main window.");
             await automation.WaitForMainWindowAsync(TimeSpan.FromSeconds(45), cancellationToken);
+            UiProgressLogger.Write("Waiting for the Desktop webview automation bridge.");
+            await bridge.WaitForReadyAsync(TimeSpan.FromSeconds(30), cancellationToken);
         }
         catch
         {
             await launcher.DisposeAsync();
+            await bridge.DisposeAsync();
             await userConfigScope.DisposeAsync();
             artifacts.Dispose();
             throw;
         }
 
         var app = new VoxFlowDesktopApp(automation);
-        return new DesktopUiTestSession(artifacts, userConfigScope, launcher, automation, app);
+        UiProgressLogger.Write($"Desktop UI session is ready. App log: {artifacts.AppLogPath}");
+        return new DesktopUiTestSession(artifacts, userConfigScope, launcher, bridge, automation, app);
     }
 
     public Task RewriteUserConfigAsync(System.Text.Json.Nodes.JsonObject root)
@@ -69,6 +87,7 @@ internal sealed class DesktopUiTestSession : IAsyncDisposable
 
     public async Task<string> CaptureFailureDiagnosticsAsync(Exception exception, CancellationToken cancellationToken)
     {
+        UiProgressLogger.Write("Capturing failure diagnostics.");
         var builder = new StringBuilder();
         builder.AppendLine(exception.ToString());
         builder.AppendLine();
@@ -103,6 +122,7 @@ internal sealed class DesktopUiTestSession : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         await _launcher.DisposeAsync();
+        await _bridge.DisposeAsync();
         await _userConfigScope.DisposeAsync();
         Artifacts.Dispose();
     }

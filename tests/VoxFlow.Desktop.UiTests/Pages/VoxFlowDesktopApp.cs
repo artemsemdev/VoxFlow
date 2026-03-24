@@ -4,7 +4,12 @@ namespace VoxFlow.Desktop.UiTests.Pages;
 
 internal sealed class VoxFlowDesktopApp
 {
-    private static readonly IReadOnlyList<string> BrowseFilesLabels = ["Browse Files", "+ Browse Files"];
+    private const string BrowseFilesSelector = "#browse-files-button";
+    private const string CopyTranscriptSelector = "#copy-text-button";
+    private const string BackToReadySelector = "#back-to-ready-button";
+    private const string RetrySelector = "#retry-transcription-button";
+    private const string ChooseDifferentFileSelector = "#choose-different-file-button";
+    private const string CancelSelector = "#cancel-transcription-button";
 
     public VoxFlowDesktopApp(MacUiAutomation automation)
     {
@@ -21,13 +26,25 @@ internal sealed class VoxFlowDesktopApp
     public CompleteScreen Complete { get; }
     public FailedScreen Failed { get; }
 
-    public Task WaitForReadyAsync(CancellationToken cancellationToken)
-        => Automation.WaitForVisibleTextAsync("Audio Transcription", TimeSpan.FromSeconds(45), cancellationToken);
+    public async Task WaitForReadyAsync(CancellationToken cancellationToken)
+    {
+        UiProgressLogger.Write("Waiting for the Ready screen.");
+        await Automation.WaitForActiveScreenAsync("ready-screen", TimeSpan.FromSeconds(45), cancellationToken);
+        await Automation.WaitForVisibleElementAsync("browse-files-button", TimeSpan.FromSeconds(10), cancellationToken);
+    }
 
-    public Task BrowseFileAsync(string filePath, CancellationToken cancellationToken)
-        => Ready.BrowseFileAsync(filePath, cancellationToken);
+    public async Task BrowseFileAsync(string filePath, CancellationToken cancellationToken)
+    {
+        UiProgressLogger.Write($"Starting file selection for {Path.GetFileName(filePath)}.");
+        await Ready.BrowseFileAsync(filePath, cancellationToken);
+    }
 
-    internal static IReadOnlyList<string> BrowseButtonLabels => BrowseFilesLabels;
+    internal static string BrowseButtonSelector => BrowseFilesSelector;
+    internal static string CopyTranscriptButtonSelector => CopyTranscriptSelector;
+    internal static string BackToReadyButtonSelector => BackToReadySelector;
+    internal static string RetryButtonSelector => RetrySelector;
+    internal static string ChooseDifferentFileButtonSelector => ChooseDifferentFileSelector;
+    internal static string CancelButtonSelector => CancelSelector;
 }
 
 internal sealed class ReadyScreen
@@ -41,8 +58,9 @@ internal sealed class ReadyScreen
 
     public async Task BrowseFileAsync(string filePath, CancellationToken cancellationToken)
     {
-        await _automation.ClickButtonAsync(VoxFlowDesktopApp.BrowseButtonLabels, cancellationToken);
+        await _automation.ClickElementAsync(VoxFlowDesktopApp.BrowseButtonSelector, cancellationToken);
         await _automation.SelectFileInOpenPanelAsync(filePath, cancellationToken);
+        UiProgressLogger.Write($"Native file picker selection confirmed: {filePath}");
     }
 }
 
@@ -57,13 +75,13 @@ internal sealed class RunningScreen
 
     public async Task WaitForVisibleAsync(string fileName, CancellationToken cancellationToken)
     {
-        await _automation.WaitForAnyVisibleTextAsync(
-            ["Cancel", fileName, "Transcribing", "Converting audio"],
-            TimeSpan.FromSeconds(45),
-            cancellationToken);
+        UiProgressLogger.Write($"Waiting for Running screen for {fileName}.");
+        await _automation.WaitForActiveScreenAsync("running-screen", TimeSpan.FromSeconds(45), cancellationToken);
+        await _automation.WaitForVisibleElementAsync("cancel-transcription-button", TimeSpan.FromSeconds(10), cancellationToken);
 
-        var snapshot = await _automation.GetAccessibilitySnapshotAsync(cancellationToken);
-        if (!snapshot.Contains("Cancel", StringComparison.OrdinalIgnoreCase))
+        var snapshot = await _automation.GetDomSnapshotAsync(cancellationToken);
+        if (!snapshot.BodyText.Contains(fileName, StringComparison.OrdinalIgnoreCase) &&
+            !snapshot.BodyText.Contains("Cancel", StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException(
                 "The running screen never exposed the Cancel action. Progress/status UI was not observed.");
@@ -81,16 +99,27 @@ internal sealed class CompleteScreen
     }
 
     public Task WaitForVisibleAsync(string fileName, CancellationToken cancellationToken)
-        => _automation.WaitForAnyVisibleTextAsync(
-            [fileName, "Copy Text", "Open Folder"],
-            TimeSpan.FromMinutes(3),
-            cancellationToken);
+        => WaitForVisibleInternalAsync(fileName, cancellationToken);
 
-    public Task CopyTranscriptAsync(CancellationToken cancellationToken)
-        => _automation.ClickButtonAsync(["Copy Transcript", "Copy Text"], cancellationToken);
+    public async Task CopyTranscriptAsync(CancellationToken cancellationToken)
+    {
+        UiProgressLogger.Write("Clicking Copy Transcript.");
+        await _automation.ClickElementAsync(VoxFlowDesktopApp.CopyTranscriptButtonSelector, cancellationToken);
+    }
 
-    public Task GoBackAsync(CancellationToken cancellationToken)
-        => _automation.ClickButtonAsync(["Back To Ready Screen", "‹"], cancellationToken);
+    public async Task GoBackAsync(CancellationToken cancellationToken)
+    {
+        UiProgressLogger.Write("Returning from Complete screen back to Ready.");
+        await _automation.ClickElementAsync(VoxFlowDesktopApp.BackToReadyButtonSelector, cancellationToken);
+    }
+
+    private async Task WaitForVisibleInternalAsync(string fileName, CancellationToken cancellationToken)
+    {
+        UiProgressLogger.Write($"Waiting for Complete screen for {fileName}.");
+        await _automation.WaitForActiveScreenAsync("complete-screen", TimeSpan.FromMinutes(3), cancellationToken);
+        await _automation.WaitForVisibleElementAsync("copy-text-button", TimeSpan.FromSeconds(15), cancellationToken);
+        await _automation.WaitForVisibleElementAsync("open-folder-button", TimeSpan.FromSeconds(15), cancellationToken);
+    }
 }
 
 internal sealed class FailedScreen
@@ -102,12 +131,22 @@ internal sealed class FailedScreen
         _automation = automation;
     }
 
-    public Task WaitForVisibleAsync(CancellationToken cancellationToken)
-        => _automation.WaitForVisibleTextAsync("Transcription Failed", TimeSpan.FromMinutes(1), cancellationToken);
+    public async Task WaitForVisibleAsync(CancellationToken cancellationToken)
+    {
+        UiProgressLogger.Write("Waiting for Failed screen.");
+        await _automation.WaitForActiveScreenAsync("failed-screen", TimeSpan.FromMinutes(1), cancellationToken);
+        await _automation.WaitForVisibleTextAsync("Transcription Failed", TimeSpan.FromSeconds(10), cancellationToken);
+    }
 
-    public Task ChooseDifferentFileAsync(CancellationToken cancellationToken)
-        => _automation.ClickButtonAsync(["Choose Different File"], cancellationToken);
+    public async Task ChooseDifferentFileAsync(CancellationToken cancellationToken)
+    {
+        UiProgressLogger.Write("Clicking Choose Different File.");
+        await _automation.ClickElementAsync(VoxFlowDesktopApp.ChooseDifferentFileButtonSelector, cancellationToken);
+    }
 
-    public Task RetryAsync(CancellationToken cancellationToken)
-        => _automation.ClickButtonAsync(["Retry Transcription", "Retry"], cancellationToken);
+    public async Task RetryAsync(CancellationToken cancellationToken)
+    {
+        UiProgressLogger.Write("Clicking Retry.");
+        await _automation.ClickElementAsync(VoxFlowDesktopApp.RetryButtonSelector, cancellationToken);
+    }
 }

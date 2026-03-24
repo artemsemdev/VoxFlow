@@ -15,7 +15,8 @@ public sealed class DesktopEndToEndTests
                 await session.App.WaitForReadyAsync(cancellationToken);
                 var snapshot = await session.Automation.GetAccessibilitySnapshotAsync(cancellationToken);
                 Assert.Contains("Audio Transcription", snapshot, StringComparison.OrdinalIgnoreCase);
-                Assert.Contains("Browse Files", snapshot, StringComparison.OrdinalIgnoreCase);
+                Assert.Contains("ready-screen", snapshot, StringComparison.OrdinalIgnoreCase);
+                Assert.Contains("browse-files-button", snapshot, StringComparison.OrdinalIgnoreCase);
             });
 
     [DesktopUiFact]
@@ -68,6 +69,7 @@ public sealed class DesktopEndToEndTests
 
                 var failureSnapshot = await session.Automation.GetAccessibilitySnapshotAsync(cancellationToken);
                 Assert.Contains("Transcription Failed", failureSnapshot, StringComparison.OrdinalIgnoreCase);
+                Assert.Contains("failed-screen", failureSnapshot, StringComparison.OrdinalIgnoreCase);
 
                 await session.App.Failed.ChooseDifferentFileAsync(cancellationToken);
                 await session.App.WaitForReadyAsync(cancellationToken);
@@ -108,14 +110,19 @@ public sealed class DesktopEndToEndTests
         Func<DesktopUiTestSession, CancellationToken, Task> scenario)
     {
         using var cancellationSource = new CancellationTokenSource(TimeSpan.FromMinutes(6));
+        var startedAt = DateTimeOffset.UtcNow;
+        UiProgressLogger.Write($"Scenario started: {scenarioName}");
         await using var session = await DesktopUiTestSession.StartAsync(scenarioName, cancellationSource.Token);
 
         try
         {
             await scenario(session, cancellationSource.Token);
+            UiProgressLogger.Write(
+                $"Scenario finished successfully: {scenarioName} (elapsed {(DateTimeOffset.UtcNow - startedAt).TotalSeconds:F1}s)");
         }
         catch (Exception ex)
         {
+            UiProgressLogger.Write($"Scenario failed: {scenarioName} ({ex.GetType().Name}: {ex.Message})");
             var diagnostics = await session.CaptureFailureDiagnosticsAsync(ex, CancellationToken.None);
             throw new XunitException(diagnostics);
         }

@@ -5,17 +5,26 @@ using VoxFlow.Desktop.ViewModels;
 #if MACCATALYST
 using UIKit;
 #endif
+#if DEBUG && MACCATALYST
+using VoxFlow.Desktop.Automation;
+#endif
 
 namespace VoxFlow.Desktop;
 
 public partial class MainPage : ContentPage
 {
     private readonly AppViewModel _viewModel;
+#if DEBUG && MACCATALYST
+    private readonly DesktopUiAutomationHost? _uiAutomationHost;
+#endif
 
     public MainPage(AppViewModel viewModel)
     {
         InitializeComponent();
         _viewModel = viewModel;
+#if DEBUG && MACCATALYST
+        _uiAutomationHost = DesktopUiAutomationHost.TryStart(blazorWebView);
+#endif
 
         var dropGestureRecognizer = new DropGestureRecognizer
         {

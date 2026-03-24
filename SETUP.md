@@ -293,6 +293,30 @@ Or use the helper script:
 ./scripts/run-desktop-ui-tests.sh
 ```
 
+The helper script now prints timing for both the Desktop build step and the UI test step, and writes a timestamped `trx` report plus timing logs under:
+
+```bash
+artifacts/test-results/desktop-ui/<utc-timestamp>/
+```
+
+Typical files in that directory:
+
+- `desktop-ui-<utc-timestamp>.trx`
+- `build.time.txt`
+- `test.time.txt`
+- `progress.log`
+
+During execution, the helper script also prints live progress lines to the console with prefixes such as:
+
+- `[ui-progress]`
+- `[heartbeat]`
+
+This makes it easier to distinguish between:
+
+- active scenario steps, such as app launch, waiting for a window, opening the file dialog, waiting for the result screen
+- long-running but healthy waits
+- likely hangs, where only the heartbeat continues and no new UI progress appears
+
 Optional environment variable:
 
 - `VOXFLOW_DESKTOP_UI_APP_PATH`
