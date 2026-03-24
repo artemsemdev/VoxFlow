@@ -6,14 +6,13 @@ Audio Transcription Utility
 
 ## Purpose
 
-Provide a local C# console application that:
+Provide a local C# audio transcription system with three product surfaces:
 
-- reads a local `.m4a` file
-- converts it to a filtered `.wav` file with `ffmpeg`
-- transcribes the audio with a local Whisper model
-- writes timestamped transcript lines to a local text file
+1. **CLI** — a console application that reads a local `.m4a` file, converts it to a filtered `.wav` file with `ffmpeg`, transcribes the audio with a local Whisper model, and writes timestamped transcript lines to a local text file
+2. **MCP Server** — exposes the transcription pipeline to AI clients through a Model Context Protocol server, enabling tools like Claude, ChatGPT, GitHub Copilot, and VS Code to discover and invoke transcription capabilities programmatically
+3. **Desktop App** — a macOS Blazor Hybrid desktop application that provides a visual transcription workflow with file selection, progress display, and result review
 
-Additionally, expose the transcription pipeline to AI clients through a Model Context Protocol (MCP) server, enabling tools like Claude, ChatGPT, GitHub Copilot, and VS Code to discover and invoke transcription capabilities programmatically.
+All three surfaces share a common core library (`VoxFlow.Core`) with dependency injection, ensuring consistent behavior across hosts.
 
 The product must stay local-only and must not depend on cloud transcription APIs.
 
@@ -27,14 +26,15 @@ The product must stay local-only and must not depend on cloud transcription APIs
 - Reduce hallucinated transcript output caused by silence and noise
 - Keep the system testable and maintainable
 - Expose transcription capabilities to AI clients via MCP protocol
+- Provide a macOS desktop app for visual transcription workflow
 
 ## Non-Goals
 
 - Real-time transcription
 - Speaker diarization
 - Translation
-- Web or desktop UI
 - Cloud-hosted inference
+- Linux/Windows desktop support in Phase 1
 - Parallel/concurrent batch file processing
 - Recursive subdirectory scanning for batch mode
 - Watch mode or file system monitoring
@@ -48,6 +48,7 @@ The product must stay local-only and must not depend on cloud transcription APIs
 
 - Single-file mode: local `.m4a` source file
 - Batch mode: directory of `.m4a` files matching a configurable file pattern
+- Desktop app: file picker or drag-and-drop selection of local `.m4a` files
 
 ### Intermediate Output
 
@@ -293,9 +294,9 @@ The product must expose its transcription pipeline to AI clients through a Model
 
 **MCP Server Architecture:**
 
-- The MCP server is a separate .NET 9 console application (`WhisperNET.McpServer`) that references the VoxFlow application core
+- The MCP server (`VoxFlow.McpServer`) is a separate .NET 9 console application that uses `VoxFlow.Core` via dependency injection
 - Communication uses stdio transport (stdin/stdout for protocol frames, stderr for diagnostics)
-- The server uses `InternalsVisibleTo` to access VoxFlow's internal types via application facades
+- The server injects Core interfaces directly (e.g., `ITranscriptionService`, `IValidationService`) — no facades or `InternalsVisibleTo` required
 - All stdout writes are redirected to stderr to protect the MCP protocol stream
 
 **MCP Tools (6 tools):**
@@ -336,6 +337,51 @@ The product must expose its transcription pipeline to AI clients through a Model
 
 The MCP server loads its configuration from `appsettings.json` under the `mcp` section, with settings for server identity, path policy, batch limits, resource/prompt toggles, and logging.
 
+### 13. Desktop App
+
+The product must provide a macOS desktop application built with .NET MAUI Blazor Hybrid that provides a visual transcription workflow.
+
+**Architecture:**
+
+- The desktop app (`VoxFlow.Desktop`) is a separate host that uses `VoxFlow.Core` via dependency injection, sharing the same service interfaces as CLI and MCP
+- Navigation uses a contextual flow model where the screen is the state — there is no separate state machine abstraction; the current Blazor page represents the current application state
+- Progress reporting uses `IProgress<ProgressUpdate>` to bridge Core services to the Blazor UI without host-specific coupling
+
+**Screens and workflow:**
+
+| Screen | Purpose |
+|--------|---------|
+| Welcome / First Run | Dependency check, model download, environment validation |
+| File Selection | File picker and drag-and-drop for `.m4a` input files |
+| Transcription | Real-time progress display during pipeline execution |
+| Result | Transcript review with copy and export options |
+| Settings | Configuration for model, language, and paths |
+
+**UI requirements:**
+
+- Dark theme consistent with macOS design conventions
+- Responsive layout for different window sizes
+- Clear error states with actionable messages
+- Visible progress during long-running operations
+
+### 14. First-Run Bootstrap
+
+The desktop app must guide users through a first-run experience that validates the environment and prepares dependencies.
+
+**First-run checks:**
+
+- ffmpeg availability and version
+- Whisper model presence and loadability
+- Model download with progress if model is missing
+- Output directory writability
+
+**Behavior:**
+
+- First-run validation runs automatically on initial launch
+- Users can re-run validation from the Settings screen
+- The app must not proceed to transcription until all critical dependencies are satisfied
+- Non-critical warnings (e.g., non-default model type) are displayed but do not block progress
+
 ## Reliability Requirements
 
 - fail early on invalid configuration
@@ -359,8 +405,12 @@ The MCP server loads its configuration from `appsettings.json` under the `mcp` s
 
 - production code must stay organized by responsibility
 - all business rules must be driven by configuration instead of inline magic values
-- the app must remain a console application with no CLI contract changes
+- the CLI must remain a console application with no CLI contract changes
 - the external I/O contract must remain backward-compatible
+- all transcription logic must live in a shared core library (`VoxFlow.Core`) consumed by all hosts via dependency injection
+- host projects (CLI, MCP, Desktop) must contain only host-specific concerns (entry point, UI, transport)
+- core services must be registered through a single `AddVoxFlowCore()` extension method
+- progress reporting must use `IProgress<ProgressUpdate>` to remain host-agnostic
 
 ## Testing Requirements
 
@@ -380,7 +430,7 @@ The solution must include unit coverage for:
 - MCP path policy validation (allowed roots, traversal rejection, absolute path enforcement)
 - MCP configuration defaults and custom value binding
 - application contract DTO construction and immutability
-- application facade behavior (transcript reading, path validation, truncation)
+- Core service interface behavior via DI registration
 
 ### End-to-End Tests
 
@@ -392,6 +442,17 @@ The solution must include process-level tests for:
 - batch mode with valid input directory processes all matching files
 - batch mode with missing input directory fails startup validation
 - batch mode with `stopOnFirstError` stops after first failure
+
+### Desktop Smoke Tests
+
+The solution must include basic verification for:
+
+- desktop app launches without crash
+- first-run validation screen displays dependency status
+- single-file transcription completes and displays result
+- settings screen loads and reflects current configuration
+
+### End-to-End Test Infrastructure
 
 The current end-to-end tests use:
 
@@ -418,4 +479,6 @@ The current end-to-end tests use:
 - MCP server starts and registers tools, prompts, and resource tools
 - AI clients (Claude, ChatGPT, VS Code, etc.) can discover and invoke transcription tools via stdio MCP
 - path safety enforcement rejects all paths outside configured allowed roots
-- MCP server tests cover path policy, configuration, contracts, and facade behavior
+- MCP server tests cover path policy, configuration, and Core service integration
+- desktop app launches, validates environment, and completes single-file transcription
+- all three hosts (CLI, MCP, Desktop) share VoxFlow.Core without duplication
