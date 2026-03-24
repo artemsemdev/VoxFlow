@@ -1,0 +1,79 @@
+@inject AppViewModel ViewModel
+@inject IJSRuntime JSRuntime
+
+<div class="result-header" id="complete-screen" aria-label="Complete Screen">
+    <div class="result-header-left">
+        <button id="back-to-ready-button"
+                class="result-back-btn"
+                aria-label="Back To Ready Screen"
+                title="Back To Ready Screen"
+                @onclick="ViewModel.GoToReady">&#x2039;</button>
+        <span class="result-filename" id="result-file-name">@(ViewModel.CurrentFileName ?? "result")</span>
+    </div>
+</div>
+
+@if (ViewModel.TranscriptionResult is not null)
+{
+    var result = ViewModel.TranscriptionResult;
+
+    @if (!string.IsNullOrEmpty(result.DetectedLanguage))
+    {
+        <p class="result-language" id="result-language">Language: @result.DetectedLanguage</p>
+    }
+
+    @if (!string.IsNullOrEmpty(result.TranscriptPreview))
+    {
+        <div class="transcript-preview mt-4" id="transcript-preview">@result.TranscriptPreview</div>
+    }
+}
+
+<div class="btn-group mt-4">
+    <button id="open-folder-button"
+            class="btn btn-secondary"
+            aria-label="Open Result Folder"
+            title="Open Result Folder"
+            @onclick="OpenFolder">
+        Open Folder
+    </button>
+    <button id="copy-text-button"
+            class="btn btn-secondary"
+            aria-label="Copy Transcript"
+            title="Copy Transcript"
+            @onclick="CopyTranscript">
+        @(_copied ? "Copied!" : "Copy Text")
+    </button>
+</div>
+
+@code {
+    private bool _copied;
+
+    private async Task OpenFolder()
+    {
+        var result = ViewModel.TranscriptionResult;
+        if (result is not null && !string.IsNullOrEmpty(result.ResultFilePath))
+        {
+            var directory = Path.GetDirectoryName(result.ResultFilePath);
+            if (!string.IsNullOrEmpty(directory))
+            {
+                await Launcher.Default.OpenAsync(directory);
+            }
+        }
+    }
+
+    private async Task CopyTranscript()
+    {
+        var result = ViewModel.TranscriptionResult;
+        if (result is not null && !string.IsNullOrEmpty(result.TranscriptPreview))
+        {
+            await JSRuntime.InvokeVoidAsync("voxFlowInterop.copyToClipboard", result.TranscriptPreview);
+            _copied = true;
+            StateHasChanged();
+
+            _ = Task.Delay(2000).ContinueWith(_ =>
+            {
+                _copied = false;
+                InvokeAsync(StateHasChanged);
+            });
+        }
+    }
+}

@@ -1,0 +1,29 @@
+@inject AppViewModel ViewModel
+
+<div class="text-center" id="ready-screen" aria-label="Ready Screen">
+    <h1 class="app-main-title" id="ready-screen-title">Audio Transcription</h1>
+    <p class="text-secondary mt-2">Drop your M4A files here to convert speech into text</p>
+</div>
+
+@if (ViewModel.HasBlockingValidationErrors && !string.IsNullOrWhiteSpace(ViewModel.BlockingValidationMessage))
+{
+    <div class="message message-warning mt-4" id="startup-validation-message" aria-label="Startup Validation Message">
+        <span class="message-icon">&#9888;</span>
+        <span>@ViewModel.BlockingValidationMessage</span>
+    </div>
+}
+
+<div class="mt-6">
+    <DropZone OnFileSelected="HandleFileSelected" IsDisabled="ViewModel.HasBlockingValidationErrors" />
+</div>
+
+<p class="text-muted mt-4 text-center supported-formats">
+    Supported format: M4A. You can upload multiple files.
+</p>
+
+@code {
+    private async Task HandleFileSelected(string filePath)
+    {
+        await ViewModel.TranscribeFileAsync(filePath);
+    }
+}

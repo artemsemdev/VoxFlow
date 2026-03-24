@@ -1,137 +1,74 @@
 # Runtime Sequences
 
-> How the application behaves at runtime — sequence diagrams for both processing modes.
+> How the application behaves at runtime across the supported hosts.
 
-## Single-File Mode
+## Single-File Mode (CLI)
 
 ```mermaid
 sequenceDiagram
     participant User
-    participant Program
-    participant Config as TranscriptionOptions
-    participant Validation as StartupValidationService
-    participant FFmpeg as AudioConversionService
-    participant Model as ModelService
-    participant Loader as WavAudioLoader
-    participant Lang as LanguageSelectionService
-    participant Filter as TranscriptionFilter
-    participant Writer as OutputWriter
+    participant Program as Program.cs (CLI Host)
+    participant DI as AddVoxFlowCore()
+    participant IConfig as IConfigurationService
+    participant IValidation as IValidationService
+    participant ITranscription as ITranscriptionService
+    participant Progress as CliProgressHandler
+    participant Core as Core Pipeline
 
     User->>Program: dotnet run
-    Program->>Config: Load()
-    Config-->>Program: Immutable options
+    Program->>DI: Register Core services
+    DI-->>Program: ServiceProvider ready
 
-    Program->>Validation: ValidateAsync(options)
+    Program->>IConfig: LoadAsync()
+    IConfig-->>Program: TranscriptionOptions
+
+    Program->>IValidation: ValidateAsync(options)
     alt Validation failed
-        Validation-->>Program: Report with failures
+        IValidation-->>Program: ValidationResult (CanStart = false)
         Program-->>User: Exit 1 with diagnostics
     end
-    Validation-->>Program: Report (passed/warnings)
+    IValidation-->>Program: ValidationResult
 
-    Program->>FFmpeg: ConvertToWavAsync(input, output)
-    FFmpeg->>FFmpeg: Spawn ffmpeg process
-    FFmpeg-->>Program: WAV file written
+    Program->>ITranscription: TranscribeFileAsync(request, progress)
+    ITranscription->>Core: Convert -> Model -> Load -> Infer -> Filter -> Write
+    Core->>Progress: IProgress<ProgressUpdate> callbacks
+    Progress->>Progress: Render console progress
+    Core-->>ITranscription: TranscribeFileResult
+    ITranscription-->>Program: Result
 
-    Program->>Model: CreateFactoryAsync(options)
-    Model-->>Program: WhisperFactory
-
-    Program->>Loader: LoadSamplesAsync(wavPath)
-    Loader-->>Program: float[] samples
-
-    Program->>Lang: SelectBestCandidateAsync(factory, samples, options)
-
-    alt Single language configured
-        Lang->>Lang: CreateProcessor(language)
-        Lang->>Lang: TranscribeCandidateAsync()
-        Lang->>Filter: FilterSegments(rawSegments)
-        Filter-->>Lang: CandidateFilteringResult
-    else Multiple languages configured
-        loop For each configured language
-            Lang->>Lang: CreateProcessor(language)
-            Lang->>Lang: TranscribeCandidateAsync()
-            Lang->>Filter: FilterSegments(rawSegments)
-            Filter-->>Lang: CandidateFilteringResult
-            Lang->>Lang: CalculateWeightedScore()
-        end
-        Lang->>Lang: DecideWinningCandidate()
-    end
-
-    Lang-->>Program: LanguageSelectionDecision
-
-    alt No winning candidate
+    alt Result.Success = false
         Program-->>User: Exit 1
+    else Result.Success = true
+        Program-->>User: Exit 0
     end
-
-    Program->>Writer: WriteAsync(segments, outputPath)
-    Writer-->>Program: File written
-
-    Program-->>User: Exit 0
 ```
 
-## Batch Mode
+## Batch Mode (CLI)
 
 ```mermaid
 sequenceDiagram
     participant User
     participant Program
-    participant Config as TranscriptionOptions
-    participant Validation as StartupValidationService
-    participant Model as ModelService
-    participant Discovery as FileDiscoveryService
-    participant FFmpeg as AudioConversionService
-    participant Loader as WavAudioLoader
-    participant Lang as LanguageSelectionService
-    participant Writer as OutputWriter
-    participant Summary as BatchSummaryWriter
+    participant Config as IConfigurationService
+    participant Validation as IValidationService
+    participant Batch as IBatchTranscriptionService
+    participant Core as Batch Pipeline
 
     User->>Program: dotnet run (processingMode=batch)
-    Program->>Config: Load()
+    Program->>Config: LoadAsync()
     Config-->>Program: Immutable options (batch mode)
 
     Program->>Validation: ValidateAsync(options)
     alt Validation failed
-        Validation-->>Program: Report with failures
+        Validation-->>Program: ValidationResult (CanStart = false)
         Program-->>User: Exit 1 with diagnostics
     end
-    Validation-->>Program: Report (passed/warnings)
+    Validation-->>Program: ValidationResult
 
-    Note over Program,Model: Model loaded ONCE before file loop
-    Program->>Model: CreateFactoryAsync(options)
-    Model-->>Program: WhisperFactory (shared)
-
-    Program->>Discovery: DiscoverInputFiles(options)
-    Discovery-->>Program: List<DiscoveredFile>
-
-    loop For each discovered file
-        alt File status = Skipped
-            Program->>Program: Record skip result
-        else File status = Ready
-            Program->>FFmpeg: ConvertToWavAsync(input, tempWav)
-            FFmpeg-->>Program: Temp WAV written
-
-            Program->>Loader: LoadSamplesAsync(tempWav)
-            Loader-->>Program: float[] samples
-
-            Program->>Lang: SelectBestCandidateAsync(factory, samples, options)
-            Lang-->>Program: LanguageSelectionDecision
-
-            Program->>Writer: WriteAsync(segments, outputPath)
-            Writer-->>Program: Per-file transcript written
-
-            Program->>Program: CleanupTempWav(tempWav)
-            Program->>Program: Record success result
-        end
-
-        alt Error during file processing
-            Program->>Program: Record error result
-            alt stopOnFirstError = true
-                Program->>Program: Break loop
-            end
-        end
-    end
-
-    Program->>Summary: WriteAsync(results)
-    Summary-->>Program: Batch summary written
+    Program->>Batch: TranscribeBatchAsync(request, progress)
+    Batch->>Core: Discover -> Convert -> Load -> Infer -> Filter -> Write -> Summarize
+    Core-->>Batch: BatchTranscribeResult
+    Batch-->>Program: Result
 
     Program-->>User: Exit with batch status
 ```
@@ -160,7 +97,7 @@ sequenceDiagram
         Lang-->>Program: OperationCanceledException
     end
 
-    Program-->>User: Exit 130 (cancelled)
+    Program-->>User: Exit with cancellation message
 ```
 
 ## MCP Server — Tool Invocation
@@ -170,15 +107,15 @@ sequenceDiagram
     participant AIClient as AI Client
     participant McpServer as MCP Server (stdio)
     participant PathPolicy
-    participant Facade as Application Facade
-    participant Pipeline as VoxFlow Pipeline
+    participant ITranscription as ITranscriptionService (Core)
+    participant Pipeline as VoxFlow.Core Pipeline
 
-    AIClient->>McpServer: MCP tool call (e.g., transcribe_file)
+    AIClient->>McpServer: MCP tool call (e.g. transcribe_file)
     McpServer->>McpServer: Deserialize JSON-RPC request
 
     McpServer->>PathPolicy: ValidateInputPath(inputPath)
     alt Path validation fails
-        PathPolicy-->>McpServer: Exception (outside allowed roots)
+        PathPolicy-->>McpServer: Exception
         McpServer-->>AIClient: JSON error response
     end
     PathPolicy-->>McpServer: Path accepted
@@ -188,47 +125,109 @@ sequenceDiagram
         PathPolicy-->>McpServer: Path accepted
     end
 
-    McpServer->>Facade: TranscribeFileAsync(request)
-    Facade->>Pipeline: Convert → Model → Load → Infer → Filter → Write
-    Pipeline-->>Facade: Pipeline result
-    Facade-->>McpServer: TranscribeFileResultDto
+    McpServer->>ITranscription: TranscribeFileAsync(request)
+    ITranscription->>Pipeline: Convert -> Model -> Load -> Infer -> Filter -> Write
+    Pipeline-->>ITranscription: Result
+    ITranscription-->>McpServer: Transcription result
 
-    McpServer->>McpServer: Serialize to JSON
-    McpServer-->>AIClient: MCP tool result (JSON-RPC response)
+    McpServer->>McpServer: Serialize JSON response
+    McpServer-->>AIClient: MCP tool result
 ```
 
-## MCP Server — Prompt-Guided Workflow
+## Desktop — Startup and Validation
 
 ```mermaid
 sequenceDiagram
-    participant AIClient as AI Client
-    participant McpServer as MCP Server (stdio)
+    participant User as Desktop User
+    participant Routes as Routes.razor
+    participant VM as AppViewModel
+    participant Config as DesktopConfigurationService
+    participant IValidation as IValidationService
+    participant Layout as MainLayout / ReadyView
 
-    AIClient->>McpServer: MCP prompt request (e.g., transcribe-local-audio)
-    McpServer-->>AIClient: Workflow instructions (step-by-step guide)
+    User->>Routes: Launch app
+    Routes->>VM: InitializeAsync()
+    VM->>Config: LoadAsync()
+    Config->>Config: Merge bundled config + user overrides
+    Config->>Config: Apply Intel startup overrides when CLI bridge is active
+    Config-->>VM: TranscriptionOptions
 
-    Note over AIClient: AI client follows the prompt instructions
+    VM->>IValidation: ValidateAsync(options)
+    IValidation-->>VM: ValidationResult
 
-    AIClient->>McpServer: validate_environment tool call
-    McpServer-->>AIClient: Validation results
+    alt Initialization throws
+        VM-->>Routes: Exception
+        Routes-->>User: Show startup error screen with Retry
+    else Initialization succeeds
+        VM-->>Layout: CurrentState = Ready
+        alt ValidationResult.CanStart = false
+            Layout-->>User: Show ReadyView warning banner and disable file selection
+        else Validation passed or warnings only
+            Layout-->>User: Show ReadyView with Browse Files / DropZone enabled
+        end
+    end
+```
 
-    AIClient->>McpServer: transcribe_file tool call
-    McpServer-->>AIClient: Transcription results
+## Desktop — Single-File Transcription
 
-    AIClient->>McpServer: read_transcript tool call
-    McpServer-->>AIClient: Transcript content
+```mermaid
+sequenceDiagram
+    participant User as Desktop User
+    participant Ready as ReadyView / DropZone
+    participant VM as AppViewModel
+    participant ITranscription as ITranscriptionService
+    participant Bridge as DesktopCliTranscriptionService
+    participant CLI as VoxFlow.Cli
+    participant Core as VoxFlow.Core Pipeline
+    participant Result as FailedView / CompleteView
+
+    User->>Ready: Select file (Browse Files or drag-and-drop)
+    Ready->>VM: TranscribeFileAsync(path)
+    VM->>VM: CurrentState = Running
+    VM->>ITranscription: TranscribeFileAsync(request, progress)
+
+    alt Apple Silicon / default Core path
+        ITranscription->>Core: Convert -> Model -> Load -> Infer -> Filter -> Write
+        loop During transcription
+            Core->>VM: ProgressUpdate via BlazorProgressHandler
+        end
+        Core-->>ITranscription: TranscribeFileResult
+    else Intel Mac Catalyst / CLI bridge
+        ITranscription->>Bridge: TranscribeFileAsync(request, progress)
+        Bridge->>Bridge: Write merged temp config with selected file
+        Bridge->>VM: Report "Running CLI transcription pipeline..."
+        Bridge->>CLI: dotnet exec/run VoxFlow.Cli
+        CLI->>Core: Validate -> Convert -> Model -> Load -> Infer -> Filter -> Write
+        Core-->>CLI: Transcript written
+        CLI-->>Bridge: Exit code + stdout/stderr
+        Bridge->>Bridge: Read transcript preview from result file
+        Bridge-->>ITranscription: TranscribeFileResult
+    end
+
+    ITranscription-->>VM: Result
+    alt Result.Success = true
+        VM-->>Result: CurrentState = Complete
+        Result->>User: Show transcript preview, open-folder, copy actions
+    else Result.Success = false
+        VM-->>Result: CurrentState = Failed
+        Result->>User: Show error, Retry, Choose Different File
+    end
 ```
 
 ## Key Observations
 
-**Model reuse in batch mode.** The Whisper model is loaded once before the file loop begins. This is a deliberate choice (ADR-010, ADR-011) — loading a GGML model is expensive, and native runtime teardown on macOS has shown instability. Sharing the factory across files trades theoretical resource isolation for practical stability.
+**Model reuse in batch mode.** The Whisper model is loaded once before the batch loop begins. This reduces reload cost and avoids unnecessary native-runtime churn.
 
-**Sequential file processing.** Files are processed one at a time within the loop. There is no parallelism. This keeps memory usage predictable, avoids native runtime contention, and simplifies error isolation (see ADR-011).
+**Sequential file processing.** Batch mode stays single-threaded. This keeps memory usage predictable and avoids uncertain native-runtime concurrency behavior.
 
-**Error isolation.** Each file in the batch loop has its own try/catch. A failure in one file records the error and continues to the next (unless `stopOnFirstError` is configured). The summary report at the end provides a clear picture of what succeeded and what failed.
+**Desktop state flow is explicit.** The Desktop UI is driven by `AppState` (`Ready`, `Running`, `Failed`, `Complete`) rather than router-style page navigation. `Routes.razor` exists only for startup initialization and retry.
 
-**Temp WAV cleanup.** Intermediate WAV files are deleted after each file completes processing. This bounds disk usage during long batch runs. The `keepIntermediateFiles` option exists for debugging.
+**Desktop config merge is host-specific.** Desktop does not rely on `TRANSCRIPTION_SETTINGS_PATH` by default. It builds a merged runtime config from bundled defaults plus `~/Library/Application Support/VoxFlow/appsettings.json`.
 
-**MCP stdout protection.** The MCP server redirects `Console.SetOut(Console.Error)` at startup. This ensures that any diagnostic writes from VoxFlow services go to stderr, keeping the stdout channel clean for MCP JSON-RPC protocol frames.
+**Intel Mac Catalyst uses the CLI bridge.** Desktop replaces the default `ITranscriptionService` with `DesktopCliTranscriptionService` on Intel Mac Catalyst. The workaround stays local and reuses the current CLI pipeline rather than forking Core logic.
 
-**MCP path validation.** Every file path from an MCP tool argument passes through `PathPolicy` before reaching the application facades. This is a hard security boundary — paths outside configured allowed roots are rejected with an error response, never reaching the file system.
+**Desktop startup validation is non-blocking at the route level.** Validation failures do not crash the shell. Instead, the app stays on `ReadyView`, surfaces the failed checks, and disables file selection until the configuration is fixed.
+
+**Desktop integrated browse flow is green.** The real UI automation suite now covers app launch, `Browse Files`, the running state, and completion against the actual `.app`.
+
+**MCP stdout protection remains critical.** The MCP host keeps stdout reserved for JSON-RPC traffic and sends diagnostics to stderr.

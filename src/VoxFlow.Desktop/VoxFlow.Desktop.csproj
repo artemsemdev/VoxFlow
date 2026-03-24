@@ -1,0 +1,194 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <PropertyGroup>
+    <TargetFrameworks>net9.0-maccatalyst</TargetFrameworks>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>VoxFlow.Desktop</RootNamespace>
+    <UseMaui>true</UseMaui>
+    <SingleProject>true</SingleProject>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+
+    <!-- Display name -->
+    <ApplicationTitle>VoxFlow</ApplicationTitle>
+
+    <!-- App Identifier -->
+    <ApplicationId>com.voxflow.desktop</ApplicationId>
+
+    <!-- Versions -->
+    <ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>
+    <ApplicationVersion>1</ApplicationVersion>
+
+    <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst'">15.0</SupportedOSPlatformVersion>
+
+    <!-- Xcode 26.3 is newer than what the current MAUI workload expects (26.2). Safe to bypass for dev. -->
+    <ValidateXcodeVersion>false</ValidateXcodeVersion>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net9.0-maccatalyst'">
+    <CodesignEntitlements>Platforms/MacCatalyst/Entitlements.plist</CodesignEntitlements>
+    <EnableCodeSigning>true</EnableCodeSigning>
+    <RuntimeIdentifiers Condition="'$(RuntimeIdentifier)' == '' and '$([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture)' == 'X64'">maccatalyst-x64</RuntimeIdentifiers>
+    <RuntimeIdentifiers Condition="'$(RuntimeIdentifier)' == '' and '$([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture)' == 'Arm64'">maccatalyst-arm64</RuntimeIdentifiers>
+    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == '' and '$([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture)' == 'X64'">maccatalyst-x64</RuntimeIdentifier>
+    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == '' and '$([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture)' == 'Arm64'">maccatalyst-arm64</RuntimeIdentifier>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Exclude appsettings.json from default Content (MAUI auto-includes it) and add as BundleResource -->
+    <Content Remove="appsettings.json" />
+    <BundleResource Include="appsettings.json" Link="appsettings.json" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- App Icon -->
+    <MauiFont Include="Resources\Fonts\*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Maui.Controls" Version="$(MauiVersion)" />
+    <PackageReference Include="Microsoft.Maui.Controls.Compatibility" Version="$(MauiVersion)" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebView.Maui" Version="$(MauiVersion)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\VoxFlow.Core\VoxFlow.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Whisper.net" Version="1.9.0" ExcludeAssets="all" PrivateAssets="all" GeneratePathProperty="true" />
+    <!-- Restore the runtime packages but wire the native references manually.
+         Whisper.net.Runtime 1.9.0 ships arm64-only maccatalyst archives, so
+         Desktop uses the generic net9 Whisper.net assembly plus macOS dylibs. -->
+    <PackageReference Include="Whisper.net.Runtime" Version="1.9.0" ExcludeAssets="all" PrivateAssets="all" GeneratePathProperty="true" />
+    <PackageReference Include="Whisper.net.Runtime.Metal" Version="1.9.0" ExcludeAssets="all" PrivateAssets="all" GeneratePathProperty="true" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="Whisper.net">
+      <HintPath>$(PkgWhisper_net)\lib\net9.0\Whisper.net.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net9.0-maccatalyst'">
+    <MauiAsset Include="$(PkgWhisper_net_Runtime_Metal)\build\ggml-metal.metal" LogicalName="ggml-metal.metal" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net9.0-maccatalyst' and '$(RuntimeIdentifier)' == 'maccatalyst-arm64'">
+    <NativeReference Include="$(PkgWhisper_net_Runtime)\build\maccatalyst\libwhisper.a">
+      <Kind>Static</Kind>
+      <SmartLink>true</SmartLink>
+      <ForceLoad>true</ForceLoad>
+      <Frameworks>Accelerate</Frameworks>
+    </NativeReference>
+    <NativeReference Include="$(PkgWhisper_net_Runtime)\build\maccatalyst\libggml-whisper.a">
+      <Kind>Static</Kind>
+      <SmartLink>true</SmartLink>
+    </NativeReference>
+    <NativeReference Include="$(PkgWhisper_net_Runtime)\build\maccatalyst\libggml-base-whisper.a">
+      <Kind>Static</Kind>
+      <SmartLink>true</SmartLink>
+    </NativeReference>
+    <NativeReference Include="$(PkgWhisper_net_Runtime)\build\maccatalyst\libggml-cpu-whisper.a">
+      <Kind>Static</Kind>
+      <SmartLink>true</SmartLink>
+    </NativeReference>
+    <NativeReference Include="$(PkgWhisper_net_Runtime)\build\maccatalyst\libggml-blas-whisper.a">
+      <Kind>Static</Kind>
+      <SmartLink>true</SmartLink>
+      <Frameworks>Accelerate</Frameworks>
+    </NativeReference>
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net9.0-maccatalyst'">
+    <None Visible="false" Include="$(PkgWhisper_net_Runtime)\build\macos-x64\libwhisper.dylib">
+      <Pack>true</Pack>
+      <PackageCopyToOutput>true</PackageCopyToOutput>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <TargetPath>runtimes/macos-x64/libwhisper.dylib</TargetPath>
+    </None>
+    <None Visible="false" Include="$(PkgWhisper_net_Runtime)\build\macos-x64\libggml-whisper.dylib">
+      <Pack>true</Pack>
+      <PackageCopyToOutput>true</PackageCopyToOutput>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <TargetPath>runtimes/macos-x64/libggml-whisper.dylib</TargetPath>
+    </None>
+    <None Visible="false" Include="$(PkgWhisper_net_Runtime)\build\macos-x64\libggml-base-whisper.dylib">
+      <Pack>true</Pack>
+      <PackageCopyToOutput>true</PackageCopyToOutput>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <TargetPath>runtimes/macos-x64/libggml-base-whisper.dylib</TargetPath>
+    </None>
+    <None Visible="false" Include="$(PkgWhisper_net_Runtime)\build\macos-x64\libggml-cpu-whisper.dylib">
+      <Pack>true</Pack>
+      <PackageCopyToOutput>true</PackageCopyToOutput>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <TargetPath>runtimes/macos-x64/libggml-cpu-whisper.dylib</TargetPath>
+    </None>
+    <None Visible="false" Include="$(PkgWhisper_net_Runtime)\build\macos-x64\libggml-blas-whisper.dylib">
+      <Pack>true</Pack>
+      <PackageCopyToOutput>true</PackageCopyToOutput>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <TargetPath>runtimes/macos-x64/libggml-blas-whisper.dylib</TargetPath>
+    </None>
+
+    <None Visible="false" Include="$(PkgWhisper_net_Runtime)\build\macos-arm64\libwhisper.dylib">
+      <Pack>true</Pack>
+      <PackageCopyToOutput>true</PackageCopyToOutput>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <TargetPath>runtimes/macos-arm64/libwhisper.dylib</TargetPath>
+    </None>
+    <None Visible="false" Include="$(PkgWhisper_net_Runtime)\build\macos-arm64\libggml-whisper.dylib">
+      <Pack>true</Pack>
+      <PackageCopyToOutput>true</PackageCopyToOutput>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <TargetPath>runtimes/macos-arm64/libggml-whisper.dylib</TargetPath>
+    </None>
+    <None Visible="false" Include="$(PkgWhisper_net_Runtime)\build\macos-arm64\libggml-base-whisper.dylib">
+      <Pack>true</Pack>
+      <PackageCopyToOutput>true</PackageCopyToOutput>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <TargetPath>runtimes/macos-arm64/libggml-base-whisper.dylib</TargetPath>
+    </None>
+    <None Visible="false" Include="$(PkgWhisper_net_Runtime)\build\macos-arm64\libggml-cpu-whisper.dylib">
+      <Pack>true</Pack>
+      <PackageCopyToOutput>true</PackageCopyToOutput>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <TargetPath>runtimes/macos-arm64/libggml-cpu-whisper.dylib</TargetPath>
+    </None>
+    <None Visible="false" Include="$(PkgWhisper_net_Runtime)\build\macos-arm64\libggml-blas-whisper.dylib">
+      <Pack>true</Pack>
+      <PackageCopyToOutput>true</PackageCopyToOutput>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <TargetPath>runtimes/macos-arm64/libggml-blas-whisper.dylib</TargetPath>
+    </None>
+    <None Visible="false" Include="$(PkgWhisper_net_Runtime)\build\macos-arm64\libggml-metal-whisper.dylib">
+      <Pack>true</Pack>
+      <PackageCopyToOutput>true</PackageCopyToOutput>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <TargetPath>runtimes/macos-arm64/libggml-metal-whisper.dylib</TargetPath>
+    </None>
+  </ItemGroup>
+
+  <Target
+    Name="BuildDesktopCliBridge"
+    BeforeTargets="Build"
+    Condition="'$(TargetFramework)' == 'net9.0-maccatalyst'">
+    <MSBuild
+      Projects="$(MSBuildProjectDirectory)/../VoxFlow.Cli/VoxFlow.Cli.csproj"
+      Targets="Build"
+      Properties="Configuration=$(Configuration);TargetFramework=net9.0"
+      RemoveProperties="RuntimeIdentifier;SelfContained;UseMaui;TargetFrameworks;SupportedOSPlatformVersion;ValidateXcodeVersion" />
+  </Target>
+
+  <Target
+    Name="FixWhisperDylibInstallNames"
+    AfterTargets="_PostProcessAppBundle"
+    BeforeTargets="Codesign"
+    Condition="'$(TargetFramework)' == 'net9.0-maccatalyst' and Exists('$(MSBuildProjectDirectory)/$(_AppBundlePath)')">
+    <Exec
+      Command="bash &quot;$(MSBuildProjectDirectory)/../../scripts/fix-whisper-dylibs.sh&quot; &quot;$(MSBuildProjectDirectory)/$(_AppBundlePath)&quot;" />
+  </Target>
+
+</Project>

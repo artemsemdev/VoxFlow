@@ -1,0 +1,30 @@
+@inject AppViewModel ViewModel
+
+<div class="text-center" id="failed-screen" aria-label="Failed Screen">
+    <h2>Transcription Failed</h2>
+</div>
+
+@if (!string.IsNullOrEmpty(ViewModel.ErrorMessage))
+{
+    <div class="message message-error mt-4" id="transcription-error-message" aria-label="Transcription Error Message">
+        <span class="message-icon">&#x2717;</span>
+        <span>@ViewModel.ErrorMessage</span>
+    </div>
+}
+
+<div class="btn-group mt-6">
+    <button id="retry-transcription-button"
+            class="btn btn-primary"
+            aria-label="Retry Transcription"
+            title="Retry Transcription"
+            @onclick="ViewModel.RetryAsync">
+        Retry
+    </button>
+    <button id="choose-different-file-button"
+            class="btn btn-secondary"
+            aria-label="Choose Different File"
+            title="Choose Different File"
+            @onclick="ViewModel.GoToReady">
+        Choose Different File
+    </button>
+</div>

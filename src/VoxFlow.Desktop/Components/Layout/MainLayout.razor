@@ -1,0 +1,41 @@
+@using System.ComponentModel
+@inherits LayoutComponentBase
+@implements IDisposable
+@inject AppViewModel ViewModel
+
+<div class="app-shell">
+    <main class="app-content">
+        @switch (ViewModel.CurrentState)
+        {
+            case AppState.Ready:
+                <ReadyView />
+                break;
+            case AppState.Running:
+                <RunningView />
+                break;
+            case AppState.Failed:
+                <FailedView />
+                break;
+            case AppState.Complete:
+                <CompleteView />
+                break;
+        }
+    </main>
+</div>
+
+@code {
+    protected override void OnInitialized()
+    {
+        ViewModel.PropertyChanged += HandleViewModelChanged;
+    }
+
+    private void HandleViewModelChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        ViewModel.PropertyChanged -= HandleViewModelChanged;
+    }
+}

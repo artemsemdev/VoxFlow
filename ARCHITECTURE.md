@@ -2,9 +2,15 @@
 
 ## Overview
 
-VoxFlow is a fully local, privacy-first audio transcription system. The core is a .NET 9 console application that orchestrates a staged pipeline: configuration loading, preflight validation, audio preprocessing via ffmpeg, Whisper inference via local model, post-processing filters, and file output.
+VoxFlow is a fully local, privacy-first audio transcription system. The shared core is a .NET 9 library that orchestrates a staged pipeline: configuration loading, preflight validation, audio preprocessing via ffmpeg, Whisper inference via local model, post-processing filters, and file output.
 
-A companion MCP server (`WhisperNET.McpServer`) exposes the transcription pipeline to AI clients (Claude, ChatGPT, GitHub Copilot, VS Code) via the Model Context Protocol over stdio transport.
+Three hosts use that shared core today:
+
+- `VoxFlow.Cli` for command-line runs
+- `VoxFlow.Desktop` for the macOS MAUI Blazor Hybrid workflow
+- `VoxFlow.McpServer` for MCP stdio integration with AI clients
+
+`VoxFlow.McpServer` exposes the transcription pipeline to AI clients (Claude, ChatGPT, GitHub Copilot, VS Code) via the Model Context Protocol over stdio transport.
 
 This document provides the architectural overview. Detailed views are in [`docs/architecture/`](docs/architecture/).
 
@@ -35,20 +41,25 @@ C4Context
     Person(user, "Operator", "Runs transcription locally")
     Person(ai_client, "AI Client", "Claude, ChatGPT, GitHub Copilot, VS Code")
 
-    System(app, "VoxFlow", ".NET 9 console app — orchestrates local audio transcription")
-    System(mcp, "WhisperNET.McpServer", "MCP server — exposes VoxFlow via Model Context Protocol")
+    System(core, "VoxFlow.Core", ".NET 9 shared transcription pipeline")
+    System(cli, "VoxFlow.Cli", ".NET 9 CLI host")
+    System(desktop, "VoxFlow.Desktop", ".NET 9 MAUI Blazor Hybrid desktop host")
+    System(mcp, "VoxFlow.McpServer", "MCP server — exposes VoxFlow via Model Context Protocol")
 
     System_Ext(ffmpeg, "ffmpeg", "Audio conversion and filtering")
     System_Ext(whisper, "Whisper.net + native runtime", "Local speech-to-text inference")
     SystemDb_Ext(fs, "Local File System", "Audio files, models, transcripts, config")
 
-    Rel(user, app, "Invokes via CLI")
+    Rel(user, cli, "Invokes via CLI")
+    Rel(user, desktop, "Uses macOS app")
     Rel(ai_client, mcp, "Invokes via MCP stdio")
-    Rel(mcp, app, "References application core")
-    Rel(app, ffmpeg, "Spawns process for .m4a → .wav conversion")
-    Rel(app, whisper, "Loads model, runs inference in-process")
-    Rel(app, fs, "Reads config/audio, writes transcripts")
-    Rel(fs, app, "Provides input files and configuration")
+    Rel(cli, core, "Uses")
+    Rel(desktop, core, "Uses")
+    Rel(mcp, core, "Uses")
+    Rel(core, ffmpeg, "Spawns process for .m4a → .wav conversion")
+    Rel(core, whisper, "Loads model, runs inference in-process")
+    Rel(core, fs, "Reads config/audio, writes transcripts")
+    Rel(fs, core, "Provides input files and configuration")
 ```
 
 ## High-Level Pipeline
@@ -65,30 +76,15 @@ The processing pipeline is a linear chain of stages. Each stage either succeeds 
 
 In batch mode, the pipeline after model loading repeats per file, with error isolation and a summary report at the end.
 
-## Module Responsibilities
+## Project Responsibilities
 
-| Module | Folder | Responsibility |
+| Project | Folder | Responsibility |
 |--------|--------|----------------|
-| Program | root | Top-level orchestrator, cancellation, exit codes |
-| TranscriptionOptions | Configuration/ | Immutable runtime options from JSON |
-| StartupValidationService | Services/ | Preflight checks with pass/warn/fail/skip status |
-| AudioConversionService | Audio/ | ffmpeg invocation for .m4a → .wav |
-| WavAudioLoader | Audio/ | WAV parsing into normalized float samples |
-| ModelService | Services/ | Whisper model loading with reuse-first behavior |
-| LanguageSelectionService | Services/ | Single/multi-language transcription and scoring |
-| TranscriptionFilter | Processing/ | Segment filtering: hallucinations, noise, loops |
-| ConsoleProgressService | Services/ | ANSI progress bar with batch context |
-| OutputWriter | Services/ | Timestamped transcript file writing |
-| FileDiscoveryService | Services/ | Batch input file discovery and path mapping |
-| BatchSummaryWriter | Services/ | Per-file result summary for batch runs |
-| **MCP Server** | **src/WhisperNET.McpServer/** | |
-| WhisperMcpTools | Tools/ | 6 MCP tools exposing transcription capabilities |
-| WhisperMcpPrompts | Prompts/ | 4 guided workflow prompts for AI clients |
-| WhisperMcpResourceTools | Resources/ | Configuration inspection tool |
-| Application Facades | Facades/ | Instance-based wrappers bridging static services to DI |
-| Application Contracts | Contracts/ | Host-agnostic DTOs for request/response types |
-| PathPolicy | Security/ | Input/output root enforcement for MCP tool arguments |
-| McpOptions | Configuration/ | MCP-specific server configuration |
+| `VoxFlow.Core` | `src/VoxFlow.Core/` | Shared configuration loading, startup validation, single-file transcription, batch orchestration, model management, filtering, and file output |
+| `VoxFlow.Cli` | `src/VoxFlow.Cli/` | Console host, Ctrl+C cancellation, console progress, and CLI-oriented exit codes |
+| `VoxFlow.Desktop` | `src/VoxFlow.Desktop/` | MAUI Blazor Hybrid shell, Desktop configuration merge, native file picker / drag-and-drop adapters, and contextual UI flow |
+| `VoxFlow.McpServer` | `src/VoxFlow.McpServer/` | Stdio MCP host, path safety policy, tools, prompts, and configuration/resource inspection |
+| `tests/*` | `tests/` | Unit, regression, end-to-end, and headless Desktop UI/component tests |
 
 ## Key Architectural Decisions
 
@@ -105,20 +101,22 @@ The full decision log is in [06-decision-log.md](docs/architecture/06-decision-l
 | ADR-016 | MCP server as separate host with InternalsVisibleTo | Pragmatic integration; avoids restructuring CLI for DI |
 | ADR-017 | Stdio-only MCP transport | Local-first security; no network surface area |
 | ADR-018 | Path policy for MCP tool arguments | Prevents directory traversal from AI client inputs |
+| ADR-021 | Blazor Hybrid for macOS desktop UI | Reuse .NET + web component model inside a native shell |
+| ADR-022 | Contextual Desktop flow | Keep Desktop UI state aligned with the visible screen and ViewModel state |
 
 ## Boundary Map
 
 ```mermaid
 flowchart TB
     subgraph trust["Trust Boundary — Local Machine"]
-        subgraph app["Application Process (VoxFlow CLI)"]
-            orchestrator["Program<br/>(Orchestrator)"]
+        subgraph app["Local Host + Core Process (CLI or Desktop)"]
+            orchestrator["Host Entry / Shell<br/>(CLI or Desktop)"]
             config["TranscriptionOptions<br/>(Immutable Config)"]
             validation["StartupValidation<br/>(Preflight)"]
             pipeline["Processing Pipeline<br/>(Conversion → Inference → Filter → Output)"]
         end
 
-        subgraph mcp["MCP Server Process (WhisperNET.McpServer)"]
+        subgraph mcp["MCP Server Process (VoxFlow.McpServer)"]
             mcp_host["MCP Host<br/>(DI + stdio transport)"]
             mcp_tools["MCP Tools + Prompts"]
             pathpolicy["PathPolicy<br/>(Path Safety)"]
@@ -167,9 +165,16 @@ The architecture supports testability through module isolation:
 - **Unit tests** cover configuration validation, startup reporting, WAV parsing, transcript filtering, language selection logic, output formatting, file discovery, and batch summary generation.
 - **End-to-end tests** validate full application startup, transcription flow entry, batch processing, and error handling using generated WAV fixtures and fake ffmpeg executables.
 - **MCP server tests** cover path policy validation, MCP configuration binding, application contract DTOs, and facade behavior (transcript reading with real file I/O).
+- **Desktop UI tests** cover headless Razor rendering for `Routes`, `MainLayout`, `ReadyView`, `DropZone`, status/progress/result states, settings panel behavior, and real-audio browse integration at the `ReadyView` level.
 - **Test support utilities** (`tests/TestSupport/`) provide deterministic test infrastructure: temporary directories, generated settings files, WAV fixtures, and mock ffmpeg.
 
 All tests run locally without network access, consistent with the local-only architecture.
+
+Current verification status as of March 24, 2026:
+
+- Core and CLI processing are verified against `artifacts/Input/Test 1.m4a` and `artifacts/Input/Test 2.m4a`.
+- The Desktop `ReadyView -> DropZone -> AppViewModel -> VoxFlow.Core` path passes with real audio.
+- The fully integrated `Routes`-based Desktop shell still has open browse-flow failures in the UI integration suite and remains an active stabilization area.
 
 ## Related Documents
 

@@ -1,0 +1,87 @@
+@using VoxFlow.Desktop.Platform
+
+<div id="file-drop-zone"
+     class="drop-zone @(IsDisabled ? "drop-zone-disabled" : string.Empty)"
+     role="button"
+     aria-label="Audio File Drop Zone"
+     aria-disabled="@IsDisabled"
+     tabindex="@(IsDisabled ? "-1" : "0")"
+     @onclick="BrowseFiles"
+     @onkeydown="HandleKeyDown">
+
+    <div class="upload-icon">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="17 8 12 3 7 8"/>
+            <line x1="12" y1="3" x2="12" y2="15"/>
+        </svg>
+    </div>
+    <span id="drop-zone-label" class="drop-label">@(Label ?? "No files added yet")</span>
+    <span class="drop-hint">Drop your M4A files here or <span class="drop-browse-link">browse</span> from your device.</span>
+    <button id="browse-files-button"
+            class="btn btn-primary mt-4"
+            aria-label="Browse Files"
+            title="Browse Files"
+            disabled="@IsDisabled"
+            @onclick="BrowseFiles"
+            @onclick:stopPropagation="true">
+        + Browse Files
+    </button>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(_selectionError))
+{
+    <div class="message message-error mt-4" id="file-selection-error" aria-label="File Selection Error">
+        <span class="message-icon">&#x2717;</span>
+        <span>@_selectionError</span>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public EventCallback<string> OnFileSelected { get; set; }
+
+    [Parameter]
+    public string? Label { get; set; }
+
+    [Parameter]
+    public bool IsDisabled { get; set; }
+
+    private string? _selectionError;
+
+    private async Task BrowseFiles()
+    {
+        if (IsDisabled)
+        {
+            return;
+        }
+
+        _selectionError = null;
+
+        try
+        {
+            var filePath = await MacFilePicker.PickAudioFileAsync();
+            if (string.IsNullOrWhiteSpace(filePath))
+            {
+                System.Diagnostics.Debug.WriteLine("[DropZone] File picker returned null or empty path.");
+                return;
+            }
+
+            System.Diagnostics.Debug.WriteLine($"[DropZone] File selected: {filePath}");
+            await OnFileSelected.InvokeAsync(filePath);
+        }
+        catch (Exception ex)
+        {
+            _selectionError = $"File picker failed: {ex.Message}";
+            System.Diagnostics.Debug.WriteLine($"[DropZone] Exception: {ex}");
+        }
+    }
+
+    private async Task HandleKeyDown(KeyboardEventArgs args)
+    {
+        if (args.Key is "Enter" or " ")
+        {
+            await BrowseFiles();
+        }
+    }
+}

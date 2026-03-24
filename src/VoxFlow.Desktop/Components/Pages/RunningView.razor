@@ -1,0 +1,63 @@
+@inject AppViewModel ViewModel
+
+<div class="file-card" id="running-screen" aria-label="Running Screen">
+    <div class="file-card-header">
+        <div class="file-card-info">
+            <div class="file-card-icon">&#x25B6;</div>
+            <span class="file-card-name" id="running-file-name">@(ViewModel.CurrentFileName ?? "audio file")</span>
+        </div>
+    </div>
+
+    @if (ViewModel.CurrentProgress is not null)
+    {
+        <div class="progress-container">
+            <div class="progress-track">
+                <div class="progress-bar"
+                     style="width: @($"{ViewModel.CurrentProgress.PercentComplete:F0}%")">
+                </div>
+            </div>
+        </div>
+
+        <p class="file-card-stage" id="running-stage" aria-live="polite">
+            <span class="file-card-stage-label">@ViewModel.CurrentProgress.Stage:</span>
+            @ViewModel.CurrentProgress.Message
+        </p>
+
+        @if (!string.IsNullOrEmpty(ViewModel.CurrentProgress.CurrentLanguage))
+        {
+            <p class="text-muted mt-2">Language: @ViewModel.CurrentProgress.CurrentLanguage</p>
+        }
+    }
+    else
+    {
+        <div class="mt-4">
+            <div class="spinner spinner-lg"></div>
+        </div>
+    }
+</div>
+
+@if (ViewModel.CurrentProgress is not null)
+{
+    <p class="text-muted mt-4 text-center">
+        Elapsed Time: <span class="text-secondary">@FormatElapsed(ViewModel.CurrentProgress.Elapsed)</span>
+    </p>
+}
+
+<div class="btn-group mt-4">
+    <button id="cancel-transcription-button"
+            class="btn btn-secondary"
+            aria-label="Cancel Transcription"
+            title="Cancel Transcription"
+            @onclick="ViewModel.CancelTranscription">
+        Cancel
+    </button>
+</div>
+
+@code {
+    private static string FormatElapsed(TimeSpan elapsed)
+    {
+        if (elapsed.TotalHours >= 1)
+            return elapsed.ToString(@"h\:mm\:ss");
+        return elapsed.ToString(@"m\:ss");
+    }
+}
