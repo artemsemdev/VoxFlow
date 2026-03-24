@@ -1,6 +1,62 @@
-<Router AppAssembly="typeof(Routes).Assembly">
-    <Found Context="routeData">
-        <RouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)" />
-        <FocusOnNavigate RouteData="routeData" Selector="h1" />
-    </Found>
-</Router>
+@using System.ComponentModel
+@implements IDisposable
+@inject AppViewModel ViewModel
+
+@if (!string.IsNullOrWhiteSpace(_startupError))
+{
+    <div class="text-center">
+        <h2>Startup Failed</h2>
+        <p class="text-secondary mt-2">@_startupError</p>
+    </div>
+
+    <div class="btn-group mt-6">
+        <button class="btn btn-primary btn-sm" @onclick="RetryInitializationAsync">
+            Retry
+        </button>
+    </div>
+}
+else
+{
+    <MainLayout />
+}
+
+@code {
+    private string? _startupError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        ViewModel.PropertyChanged += HandleViewModelChanged;
+        await InitializeViewModelAsync();
+    }
+
+    private async Task RetryInitializationAsync()
+    {
+        await InitializeViewModelAsync();
+    }
+
+    private async Task InitializeViewModelAsync()
+    {
+        _startupError = null;
+
+        try
+        {
+            await ViewModel.InitializeAsync();
+        }
+        catch (Exception ex)
+        {
+            _startupError = ex.Message;
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void HandleViewModelChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        ViewModel.PropertyChanged -= HandleViewModelChanged;
+    }
+}

@@ -10,6 +10,8 @@ TestResults/
 .vs/
 .vscode/
 .claude/
+.superpowers/
+*.SdkResolver.*.proj.Backup.tmp
 *.user
 *.rsuser
 *.suo

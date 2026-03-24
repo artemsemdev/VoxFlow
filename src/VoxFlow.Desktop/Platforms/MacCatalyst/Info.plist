@@ -10,15 +10,9 @@
 	<string>1.0.0</string>
 	<key>CFBundleShortVersionString</key>
 	<string>1.0.0</string>
-	<key>LSMinimumSystemVersion</key>
-	<string>13.0</string>
 	<key>UIDeviceFamily</key>
 	<array>
 		<integer>2</integer>
-	</array>
-	<key>UIRequiredDeviceCapabilities</key>
-	<array>
-		<string>arm64</string>
 	</array>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>

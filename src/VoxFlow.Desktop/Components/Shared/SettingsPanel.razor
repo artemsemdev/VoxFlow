@@ -78,23 +78,11 @@
         await OnClose.InvokeAsync();
     }
 
-    private async Task ChangeOutputDirectory()
+    private Task ChangeOutputDirectory()
     {
-        // Use MAUI FolderPicker if available; the text input is already editable
-        // so users can type/paste a path directly as a fallback
-        try
-        {
-            var result = await FolderPicker.Default.PickAsync(default);
-            if (result.IsSuccessful && !string.IsNullOrEmpty(result.Folder?.Path))
-            {
-                Settings.OutputDirectory = result.Folder.Path;
-            }
-        }
-        catch
-        {
-            // FolderPicker may not be available in all MAUI contexts;
-            // the text field remains editable as a fallback
-        }
+        // Output directory field is already editable — users can type/paste directly.
+        // A native folder picker could be added via CommunityToolkit.Maui in the future.
+        return Task.CompletedTask;
     }
 
     private async Task ChangeFfmpegPath()

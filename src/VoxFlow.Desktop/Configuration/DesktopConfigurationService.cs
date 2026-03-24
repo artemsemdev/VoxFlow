@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using VoxFlow.Core.Configuration;
 using VoxFlow.Core.Interfaces;
 using VoxFlow.Core.Models;
@@ -15,18 +16,24 @@ public sealed class DesktopConfigurationService : IConfigurationService
     private static readonly string UserConfigPath =
         Path.Combine(AppSupportDir, "appsettings.json");
 
+    private static readonly string DocumentsDir =
+        Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+            "VoxFlow");
+
     public Task<TranscriptionOptions> LoadAsync(string? configurationPath = null)
     {
         Directory.CreateDirectory(AppSupportDir);
 
-        var bundledPath = Path.Combine(AppContext.BaseDirectory, "appsettings.json");
+        var bundledPath = ResolveBundledConfigPath(AppContext.BaseDirectory);
 
         var merged = MergeJsonFiles(bundledPath, UserConfigPath, configurationPath);
+        var normalized = NormalizeDesktopConfiguration(merged);
 
         var tempPath = Path.Combine(Path.GetTempPath(), $"voxflow-merged-{Guid.NewGuid()}.json");
         try
         {
-            File.WriteAllText(tempPath, merged);
+            File.WriteAllText(tempPath, normalized);
             var options = TranscriptionOptions.LoadFromPath(tempPath);
             return Task.FromResult(options);
         }
@@ -51,6 +58,143 @@ public sealed class DesktopConfigurationService : IConfigurationService
             new { transcription = overrides },
             new JsonSerializerOptions { WriteIndented = true });
         await File.WriteAllTextAsync(UserConfigPath, json);
+    }
+
+    internal static string ResolveBundledConfigPath(string baseDirectory)
+    {
+        var candidates = new[]
+        {
+            Path.Combine(baseDirectory, "appsettings.json"),
+            Path.GetFullPath(Path.Combine(baseDirectory, "..", "Resources", "appsettings.json")),
+            Path.GetFullPath(Path.Combine(baseDirectory, "..", "..", "Resources", "appsettings.json"))
+        };
+
+        foreach (var candidate in candidates)
+        {
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return candidates[0];
+    }
+
+    internal static string NormalizeDesktopConfiguration(string json)
+    {
+        return NormalizeDesktopConfiguration(json, AppSupportDir, DocumentsDir);
+    }
+
+    internal static string NormalizeDesktopConfiguration(string json, string appSupportDir, string documentsDir)
+    {
+        var root = JsonNode.Parse(json)?.AsObject();
+        if (root is null || root["transcription"] is not JsonObject transcription)
+        {
+            return json;
+        }
+
+        transcription["inputFilePath"] = ResolveDesktopPath(
+            transcription["inputFilePath"]?.GetValue<string>(),
+            documentsDir,
+            "input.m4a");
+        transcription["wavFilePath"] = ResolveDesktopPath(
+            transcription["wavFilePath"]?.GetValue<string>(),
+            appSupportDir,
+            Path.Combine("artifacts", "output.wav"));
+        transcription["resultFilePath"] = ResolveDesktopPath(
+            transcription["resultFilePath"]?.GetValue<string>(),
+            documentsDir,
+            "result.txt");
+        transcription["modelFilePath"] = ResolveDesktopPath(
+            transcription["modelFilePath"]?.GetValue<string>(),
+            appSupportDir,
+            Path.Combine("models", "ggml-base.bin"));
+
+        if (transcription["batch"] is JsonObject batch)
+        {
+            batch["inputDirectory"] = ResolveDesktopPath(
+                batch["inputDirectory"]?.GetValue<string>(),
+                documentsDir,
+                "input");
+            batch["outputDirectory"] = ResolveDesktopPath(
+                batch["outputDirectory"]?.GetValue<string>(),
+                documentsDir,
+                "output");
+            batch["tempDirectory"] = ResolveDesktopPath(
+                batch["tempDirectory"]?.GetValue<string>(),
+                appSupportDir,
+                "temp");
+            batch["summaryFilePath"] = ResolveDesktopPath(
+                batch["summaryFilePath"]?.GetValue<string>(),
+                documentsDir,
+                "batch-summary.txt");
+        }
+
+        EnsureFileParentDirectory(transcription["wavFilePath"]?.GetValue<string>());
+        EnsureFileParentDirectory(transcription["resultFilePath"]?.GetValue<string>());
+        EnsureFileParentDirectory(transcription["modelFilePath"]?.GetValue<string>());
+
+        if (transcription["batch"] is JsonObject normalizedBatch)
+        {
+            EnsureDirectory(normalizedBatch["outputDirectory"]?.GetValue<string>());
+            EnsureDirectory(normalizedBatch["tempDirectory"]?.GetValue<string>());
+            EnsureFileParentDirectory(normalizedBatch["summaryFilePath"]?.GetValue<string>());
+        }
+
+        return root.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
+    }
+
+    internal static string ResolveDesktopPath(string? configuredPath, string rootDirectory, string defaultRelativePath)
+    {
+        var trimmed = string.IsNullOrWhiteSpace(configuredPath)
+            ? defaultRelativePath
+            : configuredPath.Trim();
+
+        var expanded = ExpandHomeDirectory(trimmed);
+        if (Path.IsPathRooted(expanded))
+        {
+            return Path.GetFullPath(expanded);
+        }
+
+        return Path.GetFullPath(Path.Combine(rootDirectory, expanded));
+    }
+
+    private static string ExpandHomeDirectory(string path)
+    {
+        if (path == "~")
+        {
+            return Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        }
+
+        if (path.StartsWith("~/", StringComparison.Ordinal) || path.StartsWith("~\\", StringComparison.Ordinal))
+        {
+            var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            return Path.Combine(home, path[2..]);
+        }
+
+        return path;
+    }
+
+    private static void EnsureDirectory(string? directoryPath)
+    {
+        if (!string.IsNullOrWhiteSpace(directoryPath))
+        {
+            Directory.CreateDirectory(directoryPath);
+        }
+    }
+
+    private static void EnsureFileParentDirectory(string? filePath)
+    {
+        if (string.IsNullOrWhiteSpace(filePath))
+        {
+            return;
+        }
+
+        var directory = Path.GetDirectoryName(filePath);
+        if (!string.IsNullOrWhiteSpace(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
     }
 
     internal static string MergeJsonFiles(string basePath, string userPath, string? overridePath)

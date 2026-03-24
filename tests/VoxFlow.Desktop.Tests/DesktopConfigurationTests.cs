@@ -31,6 +31,106 @@ public sealed class DesktopConfigurationTests : IDisposable
         return path;
     }
 
+    [Fact]
+    public void ResolveBundledConfigPath_PrefersBaseDirectoryFile()
+    {
+        var baseDirectory = Path.Combine(_tempDir, "base");
+        Directory.CreateDirectory(baseDirectory);
+        var expectedPath = Path.Combine(baseDirectory, "appsettings.json");
+        File.WriteAllText(expectedPath, "{}");
+
+        var resolvedPath = DesktopConfigurationService.ResolveBundledConfigPath(baseDirectory);
+
+        Assert.Equal(expectedPath, resolvedPath);
+    }
+
+    [Fact]
+    public void ResolveBundledConfigPath_FindsMacCatalystResourcesFile()
+    {
+        var monoBundleDirectory = Path.Combine(_tempDir, "VoxFlow.Desktop.app", "Contents", "MonoBundle");
+        var resourcesDirectory = Path.Combine(_tempDir, "VoxFlow.Desktop.app", "Contents", "Resources");
+        Directory.CreateDirectory(monoBundleDirectory);
+        Directory.CreateDirectory(resourcesDirectory);
+
+        var expectedPath = Path.Combine(resourcesDirectory, "appsettings.json");
+        File.WriteAllText(expectedPath, "{}");
+
+        var resolvedPath = DesktopConfigurationService.ResolveBundledConfigPath(monoBundleDirectory);
+
+        Assert.Equal(expectedPath, resolvedPath);
+    }
+
+    [Fact]
+    public void ResolveDesktopPath_ExpandsHomeDirectory()
+    {
+        var expectedPath = Path.GetFullPath(Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            "Library/Application Support/VoxFlow/models/ggml-base.bin"));
+
+        var resolvedPath = DesktopConfigurationService.ResolveDesktopPath(
+            "~/Library/Application Support/VoxFlow/models/ggml-base.bin",
+            _tempDir,
+            "ignored.bin");
+
+        Assert.Equal(expectedPath, resolvedPath);
+    }
+
+    [Fact]
+    public void NormalizeDesktopConfiguration_ResolvesDesktopPathsAndCreatesDirectories()
+    {
+        var appSupportDir = Path.Combine(_tempDir, "app-support");
+        var documentsDir = Path.Combine(_tempDir, "documents");
+
+        var json = JsonSerializer.Serialize(new
+        {
+            transcription = new
+            {
+                wavFilePath = "artifacts/output.wav",
+                resultFilePath = "result.txt",
+                modelFilePath = "models/ggml-base.bin",
+                batch = new
+                {
+                    outputDirectory = "output",
+                    tempDirectory = "temp",
+                    summaryFilePath = "reports/batch-summary.txt"
+                }
+            }
+        });
+
+        var normalized = DesktopConfigurationService.NormalizeDesktopConfiguration(json, appSupportDir, documentsDir);
+
+        using var doc = JsonDocument.Parse(normalized);
+        var transcription = doc.RootElement.GetProperty("transcription");
+
+        Assert.Equal(
+            Path.GetFullPath(Path.Combine(appSupportDir, "artifacts/output.wav")),
+            transcription.GetProperty("wavFilePath").GetString());
+        Assert.Equal(
+            Path.GetFullPath(Path.Combine(documentsDir, "result.txt")),
+            transcription.GetProperty("resultFilePath").GetString());
+        Assert.Equal(
+            Path.GetFullPath(Path.Combine(appSupportDir, "models/ggml-base.bin")),
+            transcription.GetProperty("modelFilePath").GetString());
+
+        var batch = transcription.GetProperty("batch");
+        Assert.Equal(
+            Path.GetFullPath(Path.Combine(documentsDir, "output")),
+            batch.GetProperty("outputDirectory").GetString());
+        Assert.Equal(
+            Path.GetFullPath(Path.Combine(appSupportDir, "temp")),
+            batch.GetProperty("tempDirectory").GetString());
+        Assert.Equal(
+            Path.GetFullPath(Path.Combine(documentsDir, "reports/batch-summary.txt")),
+            batch.GetProperty("summaryFilePath").GetString());
+
+        Assert.True(Directory.Exists(Path.Combine(appSupportDir, "artifacts")));
+        Assert.True(Directory.Exists(documentsDir));
+        Assert.True(Directory.Exists(Path.Combine(appSupportDir, "models")));
+        Assert.True(Directory.Exists(Path.Combine(documentsDir, "output")));
+        Assert.True(Directory.Exists(Path.Combine(appSupportDir, "temp")));
+        Assert.True(Directory.Exists(Path.Combine(documentsDir, "reports")));
+    }
+
     // -----------------------------------------------------------------------
     // MergeJsonFiles — user overrides replace specified values, bundled
     // defaults remain for unspecified values
