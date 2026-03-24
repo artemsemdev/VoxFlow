@@ -1,10 +1,10 @@
 @inject AppViewModel ViewModel
 
-<div class="file-card">
+<div class="file-card" id="running-screen" aria-label="Running Screen">
     <div class="file-card-header">
         <div class="file-card-info">
             <div class="file-card-icon">&#x25B6;</div>
-            <span class="file-card-name">@(ViewModel.CurrentFileName ?? "audio file")</span>
+            <span class="file-card-name" id="running-file-name">@(ViewModel.CurrentFileName ?? "audio file")</span>
         </div>
     </div>
 
@@ -18,7 +18,7 @@
             </div>
         </div>
 
-        <p class="file-card-stage">
+        <p class="file-card-stage" id="running-stage" aria-live="polite">
             <span class="file-card-stage-label">@ViewModel.CurrentProgress.Stage:</span>
             @ViewModel.CurrentProgress.Message
         </p>
@@ -44,7 +44,11 @@
 }
 
 <div class="btn-group mt-4">
-    <button class="btn btn-secondary" @onclick="ViewModel.CancelTranscription">
+    <button id="cancel-transcription-button"
+            class="btn btn-secondary"
+            aria-label="Cancel Transcription"
+            title="Cancel Transcription"
+            @onclick="ViewModel.CancelTranscription">
         Cancel
     </button>
 </div>

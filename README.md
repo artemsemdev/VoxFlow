@@ -42,6 +42,7 @@ The shared pipeline remains configuration loading, startup validation, ffmpeg-ba
 
 - CLI and Core processing are verified locally, including real sample inputs in `artifacts/Input/Test 1.m4a` and `artifacts/Input/Test 2.m4a`.
 - Desktop now has headless Razor UI/component tests covering startup, validation, progress, settings, copy-to-clipboard, `DropZone`, and real-audio browse flow at the `ReadyView` level.
+- Desktop also has a dedicated macOS real-UI automation suite in `tests/VoxFlow.Desktop.UiTests` that launches the built `.app`, drives the native window through Accessibility and the system Open dialog, and verifies end-to-end user flows against the actual application.
 - Desktop is still under stabilization. The integrated `Routes`-based root shell currently has open UI integration failures around the full `Browse Files` flow, even though the direct `ReadyView -> DropZone -> AppViewModel -> VoxFlow.Core` path is passing.
 
 ## Project Documentation

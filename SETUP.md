@@ -23,6 +23,7 @@ Active test projects:
 | `tests/VoxFlow.Cli.Tests` | CLI end-to-end and regression tests |
 | `tests/VoxFlow.McpServer.Tests` | MCP configuration and path-policy tests |
 | `tests/VoxFlow.Desktop.Tests` | Desktop view-model, configuration, headless Razor UI/component, and UI integration tests |
+| `tests/VoxFlow.Desktop.UiTests` | Real macOS desktop UI automation against the built `.app` bundle |
 
 ## Scope
 
@@ -258,6 +259,59 @@ Recommended before first launch:
 - Create `~/Library/Application Support/VoxFlow/appsettings.json`
 - Override bundled defaults only if you want different output/model locations
 - Use absolute paths in overrides when you want fully explicit locations
+
+## Real Desktop UI Automation
+
+`tests/VoxFlow.Desktop.UiTests` launches the real Mac Catalyst app bundle and drives the actual desktop window through macOS Accessibility plus the native Open dialog. This is separate from the headless Razor/component tests in `tests/VoxFlow.Desktop.Tests`.
+
+Prerequisites:
+
+- macOS
+- Built Desktop app bundle
+- `ffmpeg` available on `PATH`
+- `models/ggml-base.bin` present locally
+- Accessibility permission granted in `System Settings > Privacy & Security > Accessibility`
+  - Allow your terminal app, IDE, and the `dotnet`/`osascript` host that runs the tests
+- `VoxFlow.Desktop` should not already be running before the suite starts
+
+Build the Desktop app for the current Mac architecture:
+
+```bash
+dotnet build src/VoxFlow.Desktop/VoxFlow.Desktop.csproj -f net9.0-maccatalyst
+```
+
+Run the real UI automation suite:
+
+```bash
+VOXFLOW_RUN_DESKTOP_UI_TESTS=1 \
+dotnet test tests/VoxFlow.Desktop.UiTests/VoxFlow.Desktop.UiTests.csproj
+```
+
+Or use the helper script:
+
+```bash
+./scripts/run-desktop-ui-tests.sh
+```
+
+Optional environment variable:
+
+- `VOXFLOW_DESKTOP_UI_APP_PATH`
+  - Set this when you want the suite to target a specific built `.app` bundle instead of the default `Debug/net9.0-maccatalyst/<rid>/VoxFlow.Desktop.app`
+
+Current coverage in the real UI suite:
+
+- app starts and renders the main ready screen
+- primary `Browse Files` action works against the native file picker
+- single-file happy path reaches the final result screen
+- transcript copy action updates the system clipboard
+- corrupt/invalid audio drives the real failure screen and recovery flow
+- repeated sequential processing works without restarting the app
+
+Diagnostics on failure:
+
+- full-screen screenshot under `artifacts/ui-tests/<timestamp>-<scenario>/diagnostics/`
+- accessibility snapshot of the active app window
+- captured Desktop process log
 
 Current Desktop flow:
 

@@ -1,7 +1,9 @@
 @using VoxFlow.Desktop.Platform
 
-<div class="drop-zone"
+<div id="file-drop-zone"
+     class="drop-zone"
      role="button"
+     aria-label="Audio File Drop Zone"
      tabindex="0"
      @onclick="BrowseFiles"
      @onkeydown="HandleKeyDown">
@@ -13,9 +15,12 @@
             <line x1="12" y1="3" x2="12" y2="15"/>
         </svg>
     </div>
-    <span class="drop-label">@(Label ?? "No files added yet")</span>
+    <span id="drop-zone-label" class="drop-label">@(Label ?? "No files added yet")</span>
     <span class="drop-hint">Drop your M4A files here or <span class="drop-browse-link">browse</span> from your device.</span>
-    <button class="btn btn-primary mt-4"
+    <button id="browse-files-button"
+            class="btn btn-primary mt-4"
+            aria-label="Browse Files"
+            title="Browse Files"
             @onclick="BrowseFiles"
             @onclick:stopPropagation="true">
         + Browse Files
@@ -24,7 +29,7 @@
 
 @if (!string.IsNullOrWhiteSpace(_selectionError))
 {
-    <div class="message message-error mt-4">
+    <div class="message message-error mt-4" id="file-selection-error" aria-label="File Selection Error">
         <span class="message-icon">&#x2717;</span>
         <span>@_selectionError</span>
     </div>

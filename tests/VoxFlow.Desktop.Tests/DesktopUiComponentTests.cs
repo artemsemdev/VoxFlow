@@ -78,67 +78,97 @@ public sealed class DesktopUiComponentTests
         Assert.Contains("42%", progressBar.Attributes["style"]?.ToString());
     }
 
-    [Fact(Skip = "Headless renderer timing for manually injected failed-state is still under investigation.")]
-    public async Task FailedMainLayout_ChooseDifferentFile_Revalidates_ToReady()
+    [Fact]
+    public async Task Routes_BrowseFile_WithStubTranscription_CompletesViaRealClick()
     {
-        var validationService = new DelegateValidationService((_, _) =>
-            Task.FromResult(TestValidationFactory.Create(
-                canStart: true,
-                new ValidationCheck("ffmpeg", ValidationCheckStatus.Passed, "ffmpeg is available."))));
+        var transcriptionService = new DelegateTranscriptionService((request, _, _) =>
+            Task.FromResult(TestTranscriptionFactory.Create(
+                success: true,
+                path: $"/tmp/{Path.GetFileNameWithoutExtension(request.InputPath)}.txt")));
 
-        await using var context = DesktopUiTestContext.Create(validationService: validationService);
+        await using var context = DesktopUiTestContext.Create(transcriptionService: transcriptionService);
+        VoxFlow.Desktop.Platform.MacFilePicker.PickAudioFileAsyncHandler =
+            static () => Task.FromResult<string?>("/tmp/interview.m4a");
+
+        var rendered = await context.RenderAsync<Routes>();
+        Assert.Equal(AppState.Ready, context.ViewModel.CurrentState);
+        Assert.Contains("Audio Transcription", rendered.TextContent);
+
+        await rendered.ClickAsync(
+            element => element.Name == "button" && element.TextContent == "+ Browse Files",
+            "browse files button");
+
+        var delegateTranscriptionService = Assert.IsType<DelegateTranscriptionService>(context.TranscriptionService);
+        Assert.Equal("/tmp/interview.m4a", delegateTranscriptionService.LastFilePath);
+        Assert.Equal(AppState.Complete, context.ViewModel.CurrentState);
+        Assert.NotNull(context.ViewModel.TranscriptionResult);
+        Assert.True(context.ViewModel.TranscriptionResult!.Success);
+        Assert.Contains("interview.m4a", rendered.TextContent);
+        Assert.Contains("Hello from VoxFlow", rendered.TextContent);
+        Assert.Contains("Copy Text", rendered.TextContent);
+    }
+
+    [Fact]
+    public async Task Routes_WhenTranscriptionFails_ChooseDifferentFile_ReturnsToReady()
+    {
+        var transcriptionService = new DelegateTranscriptionService((_, _, _) =>
+            Task.FromResult(TestTranscriptionFactory.Create(success: false, warnings: ["ffmpeg crashed"])));
+
+        await using var context = DesktopUiTestContext.Create(transcriptionService: transcriptionService);
+        VoxFlow.Desktop.Platform.MacFilePicker.PickAudioFileAsyncHandler =
+            static () => Task.FromResult<string?>("/tmp/demo.m4a");
         var rendered = await context.RenderAsync<Routes>();
 
-        await context.Renderer.Dispatcher.InvokeAsync(() =>
-        {
-            AppViewModelStateAccessor.SetState(
-                context.ViewModel,
-                currentState: AppState.Failed,
-                validationResult: TestValidationFactory.Create(canStart: true),
-                errorMessage: "ffmpeg crashed");
-            return Task.CompletedTask;
-        });
-        await rendered.SynchronizeAsync();
+        await rendered.ClickAsync(
+            element => element.Name == "button" && element.TextContent == "+ Browse Files",
+            "browse files button");
 
+        Assert.Equal(AppState.Failed, context.ViewModel.CurrentState);
         Assert.Contains("Transcription Failed", rendered.TextContent);
+        Assert.Contains("ffmpeg crashed", rendered.TextContent);
 
         await rendered.ClickAsync(
             element => element.Name == "button" && element.TextContent == "Choose Different File",
             "choose different file button");
 
+        Assert.Equal(AppState.Ready, context.ViewModel.CurrentState);
         Assert.Contains("Audio Transcription", rendered.TextContent);
         Assert.DoesNotContain("Transcription Failed", rendered.TextContent);
     }
 
-    [Fact(Skip = "Headless renderer timing for manually injected failed-state is still under investigation.")]
-    public async Task FailedMainLayout_Retry_UsesLastFile_AndTransitions_ToComplete()
+    [Fact]
+    public async Task Routes_WhenTranscriptionFails_Retry_ReusesLastFile_AndTransitionsToComplete()
     {
+        var attempts = 0;
         var transcriptionService = new DelegateTranscriptionService((request, _, _) =>
-            Task.FromResult(TestTranscriptionFactory.Create(success: true, path: $"/tmp/{Path.GetFileNameWithoutExtension(request.InputPath)}.txt")));
+            Task.FromResult(++attempts == 1
+                ? TestTranscriptionFactory.Create(success: false, warnings: ["retry me"])
+                : TestTranscriptionFactory.Create(success: true, path: $"/tmp/{Path.GetFileNameWithoutExtension(request.InputPath)}.txt")));
 
         await using var context = DesktopUiTestContext.Create(transcriptionService: transcriptionService);
+        VoxFlow.Desktop.Platform.MacFilePicker.PickAudioFileAsyncHandler =
+            static () => Task.FromResult<string?>("/tmp/demo.wav");
         var rendered = await context.RenderAsync<Routes>();
 
-        await context.Renderer.Dispatcher.InvokeAsync(() =>
-        {
-            AppViewModelStateAccessor.SetState(
-                context.ViewModel,
-                currentState: AppState.Failed,
-                validationResult: TestValidationFactory.Create(canStart: true),
-                errorMessage: "retry me",
-                lastFilePath: "/tmp/demo.wav");
-            return Task.CompletedTask;
-        });
-        await rendered.SynchronizeAsync();
+        await rendered.ClickAsync(
+            element => element.Name == "button" && element.TextContent == "+ Browse Files",
+            "browse files button");
+
+        Assert.Equal(AppState.Failed, context.ViewModel.CurrentState);
+        Assert.Contains("Transcription Failed", rendered.TextContent);
+        Assert.Contains("retry me", rendered.TextContent);
 
         await rendered.ClickAsync(
             element => element.Name == "button" && element.TextContent == "Retry",
             "failed retry button");
 
         var delegateTranscriptionService = Assert.IsType<DelegateTranscriptionService>(context.TranscriptionService);
+        Assert.Equal(2, attempts);
         Assert.Equal("/tmp/demo.wav", delegateTranscriptionService.LastFilePath);
+        Assert.Equal(AppState.Complete, context.ViewModel.CurrentState);
         Assert.NotNull(context.ViewModel.TranscriptionResult);
         Assert.True(context.ViewModel.TranscriptionResult!.Success);
+        Assert.Contains("demo.wav", rendered.TextContent);
     }
 
     [Theory]
@@ -265,29 +295,33 @@ public sealed class DesktopUiComponentTests
     }
 
     [Fact]
-    public async Task CompleteView_BackButton_NavigatesToReady()
+    public async Task Routes_WhenTranscriptionCompletes_BackButton_ReturnsToReady()
     {
-        await using var context = DesktopUiTestContext.Create();
-        AppViewModelStateAccessor.SetState(
-            context.ViewModel,
-            currentState: AppState.Complete,
-            transcriptionResult: new TranscribeFileResult(
-                Success: true,
-                DetectedLanguage: "en",
-                ResultFilePath: "/tmp/result.txt",
-                AcceptedSegmentCount: 7,
-                SkippedSegmentCount: 0,
-                Duration: TimeSpan.FromSeconds(12),
-                Warnings: [],
-                TranscriptPreview: "Test text"));
+        var transcriptionService = new DelegateTranscriptionService((request, _, _) =>
+            Task.FromResult(TestTranscriptionFactory.Create(
+                success: true,
+                path: $"/tmp/{Path.GetFileNameWithoutExtension(request.InputPath)}.txt")));
 
-        var rendered = await context.RenderAsync<CompleteView>();
+        await using var context = DesktopUiTestContext.Create(transcriptionService: transcriptionService);
+        VoxFlow.Desktop.Platform.MacFilePicker.PickAudioFileAsyncHandler =
+            static () => Task.FromResult<string?>("/tmp/meeting_01.m4a");
+
+        var rendered = await context.RenderAsync<Routes>();
+
+        await rendered.ClickAsync(
+            element => element.Name == "button" && element.TextContent == "+ Browse Files",
+            "browse files button");
+
+        Assert.Equal(AppState.Complete, context.ViewModel.CurrentState);
+        Assert.Contains("meeting_01.m4a", rendered.TextContent);
 
         await rendered.ClickAsync(
             element => element.Name == "button" && element.HasClass("result-back-btn"),
             "back button");
 
         Assert.Equal(AppState.Ready, context.ViewModel.CurrentState);
+        Assert.Contains("Audio Transcription", rendered.TextContent);
+        Assert.DoesNotContain("meeting_01.m4a", rendered.TextContent);
     }
 
     [Fact]
