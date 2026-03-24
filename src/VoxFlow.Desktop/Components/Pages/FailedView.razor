@@ -7,7 +7,7 @@
 @if (!string.IsNullOrEmpty(ViewModel.ErrorMessage))
 {
     <div class="message message-error mt-4">
-        <span class="message-icon">\u2717</span>
+        <span class="message-icon">&#x2717;</span>
         <span>@ViewModel.ErrorMessage</span>
     </div>
 }
@@ -16,14 +16,7 @@
     <button class="btn btn-primary" @onclick="ViewModel.RetryAsync">
         Retry
     </button>
-    <button class="btn btn-secondary" @onclick="GoToReady">
+    <button class="btn btn-secondary" @onclick="ViewModel.GoToReady">
         Choose Different File
     </button>
 </div>
-
-@code {
-    private async Task GoToReady()
-    {
-        await ViewModel.RevalidateAsync();
-    }
-}
