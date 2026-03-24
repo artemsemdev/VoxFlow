@@ -80,19 +80,53 @@
 
     private async Task ChangeOutputDirectory()
     {
-        // File picker dialog will be wired via JS interop in Task 17
-        await Task.CompletedTask;
+        // Use MAUI FolderPicker if available; the text input is already editable
+        // so users can type/paste a path directly as a fallback
+        try
+        {
+            var result = await FolderPicker.Default.PickAsync(default);
+            if (result.IsSuccessful && !string.IsNullOrEmpty(result.Folder?.Path))
+            {
+                Settings.OutputDirectory = result.Folder.Path;
+            }
+        }
+        catch
+        {
+            // FolderPicker may not be available in all MAUI contexts;
+            // the text field remains editable as a fallback
+        }
     }
 
     private async Task ChangeFfmpegPath()
     {
-        // File picker dialog will be wired via JS interop in Task 17
-        await Task.CompletedTask;
+        // Use MAUI FilePicker to select the ffmpeg binary
+        try
+        {
+            var result = await FilePicker.Default.PickAsync(new PickOptions
+            {
+                PickerTitle = "Select ffmpeg executable"
+            });
+
+            if (result is not null && !string.IsNullOrEmpty(result.FullPath))
+            {
+                Settings.FfmpegPath = result.FullPath;
+            }
+        }
+        catch
+        {
+            // FilePicker may not be available; the text field remains editable
+        }
     }
 
     private async Task OpenConfigFile()
     {
-        // Shell open will be wired via JS interop in Task 17
-        await Task.CompletedTask;
+        var configPath = Path.Combine(AppContext.BaseDirectory, "appsettings.json");
+        if (File.Exists(configPath))
+        {
+            await Launcher.Default.OpenAsync(new OpenFileRequest
+            {
+                File = new ReadOnlyFile(configPath)
+            });
+        }
     }
 }

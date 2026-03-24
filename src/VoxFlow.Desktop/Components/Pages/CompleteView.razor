@@ -1,4 +1,5 @@
 @inject AppViewModel ViewModel
+@inject IJSRuntime JSRuntime
 
 <div class="text-center">
     <h2>Transcription Complete</h2>
@@ -9,25 +10,25 @@
     var result = ViewModel.TranscriptionResult;
 
     <div class="message message-success mt-4">
-        <span class="message-icon">\u2713</span>
+        <span class="message-icon">✓</span>
         <span>Finished in @FormatDuration(result.Duration)</span>
     </div>
 
     <div class="validation-checklist mt-4">
         <div class="validation-item valid">
-            <span class="validation-icon">\uD83C\uDF10</span>
+            <span class="validation-icon">🌐</span>
             <span class="validation-label">Language</span>
             <span class="validation-detail">@(result.DetectedLanguage ?? "Unknown")</span>
         </div>
         <div class="validation-item valid">
-            <span class="validation-icon">\u2713</span>
+            <span class="validation-icon">✓</span>
             <span class="validation-label">Accepted Segments</span>
             <span class="validation-detail">@result.AcceptedSegmentCount</span>
         </div>
         @if (result.SkippedSegmentCount > 0)
         {
             <div class="validation-item pending">
-                <span class="validation-icon">\u2014</span>
+                <span class="validation-icon">—</span>
                 <span class="validation-label">Filtered Segments</span>
                 <span class="validation-detail">@result.SkippedSegmentCount</span>
             </div>
@@ -49,7 +50,7 @@
     @if (result.Warnings.Count > 0)
     {
         <div class="message message-warning mt-4">
-            <span class="message-icon">\u26A0</span>
+            <span class="message-icon">⚠</span>
             <span>@string.Join("; ", result.Warnings)</span>
         </div>
     }
@@ -60,7 +61,7 @@
         Open Folder
     </button>
     <button class="btn btn-secondary btn-sm" @onclick="CopyTranscript">
-        Copy Transcript
+        @(_copied ? "Copied!" : "Copy Transcript")
     </button>
 </div>
 
@@ -69,6 +70,8 @@
 </div>
 
 @code {
+    private bool _copied;
+
     private async Task HandleFileSelected(string filePath)
     {
         await ViewModel.TranscribeFileAsync(filePath);
@@ -76,14 +79,33 @@
 
     private async Task OpenFolder()
     {
-        // JS interop for opening the folder will be wired in Task 17
-        await Task.CompletedTask;
+        var result = ViewModel.TranscriptionResult;
+        if (result is not null && !string.IsNullOrEmpty(result.ResultFilePath))
+        {
+            var directory = Path.GetDirectoryName(result.ResultFilePath);
+            if (!string.IsNullOrEmpty(directory))
+            {
+                await Launcher.Default.OpenAsync(directory);
+            }
+        }
     }
 
     private async Task CopyTranscript()
     {
-        // JS interop for clipboard will be wired in Task 17
-        await Task.CompletedTask;
+        var result = ViewModel.TranscriptionResult;
+        if (result is not null && !string.IsNullOrEmpty(result.TranscriptPreview))
+        {
+            await JSRuntime.InvokeVoidAsync("voxFlowInterop.copyToClipboard", result.TranscriptPreview);
+            _copied = true;
+            StateHasChanged();
+
+            // Reset "Copied!" feedback after 2 seconds
+            _ = Task.Delay(2000).ContinueWith(_ =>
+            {
+                _copied = false;
+                InvokeAsync(StateHasChanged);
+            });
+        }
     }
 
     private static string FormatDuration(TimeSpan duration)

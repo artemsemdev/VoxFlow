@@ -1,4 +1,9 @@
-<div class="drop-zone @(_isDragOver ? "drag-over" : "")"
+@using VoxFlow.Desktop.Platform
+@inject IJSRuntime JSRuntime
+@implements IAsyncDisposable
+
+<div id="@_elementId"
+     class="drop-zone @(_isDragOver ? "drag-over" : "")"
      @ondragenter="HandleDragEnter"
      @ondragover="HandleDragOver"
      @ondragover:preventDefault
@@ -6,9 +11,12 @@
      @ondrop="HandleDrop"
      @ondrop:preventDefault>
 
-    <span class="drop-icon">\uD83C\uDFA4</span>
+    <span class="drop-icon">🎤</span>
     <span class="drop-label">@(Label ?? "Drop audio file here")</span>
     <span class="drop-hint">Supports M4A, WAV, MP3, and other audio formats</span>
+    <button class="btn btn-secondary btn-sm mt-2" @onclick="BrowseFiles">
+        Browse Files
+    </button>
 </div>
 
 @code {
@@ -19,6 +27,27 @@
     public string? Label { get; set; }
 
     private bool _isDragOver;
+    private readonly string _elementId = $"dropzone-{Guid.NewGuid():N}";
+    private DotNetObjectReference<DropZone>? _dotNetRef;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _dotNetRef = DotNetObjectReference.Create(this);
+            await JSRuntime.InvokeVoidAsync("voxFlowInterop.initDropZone", _elementId, _dotNetRef);
+        }
+    }
+
+    [JSInvokable]
+    public async Task OnFileDropped(string fileName)
+    {
+        if (!string.IsNullOrWhiteSpace(fileName))
+        {
+            await OnFileSelected.InvokeAsync(fileName);
+            StateHasChanged();
+        }
+    }
 
     private void HandleDragEnter()
     {
@@ -38,10 +67,22 @@
     private async Task HandleDrop()
     {
         _isDragOver = false;
-
-        // File path extraction requires JS interop which will be wired in Task 17.
-        // For now, invoke the callback with a placeholder to validate the wiring.
-        // The JS interop layer will call OnFileSelected with the actual file path.
+        // Actual file handling is done via JS interop in OnFileDropped
         await Task.CompletedTask;
+    }
+
+    private async Task BrowseFiles()
+    {
+        var filePath = await MacFilePicker.PickAudioFileAsync();
+        if (!string.IsNullOrWhiteSpace(filePath))
+        {
+            await OnFileSelected.InvokeAsync(filePath);
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _dotNetRef?.Dispose();
+        await ValueTask.CompletedTask;
     }
 }
