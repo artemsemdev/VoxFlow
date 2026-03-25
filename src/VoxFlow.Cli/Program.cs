@@ -11,6 +11,7 @@ internal static class Program
     {
         var services = new ServiceCollection();
         services.AddVoxFlowCore();
+        // Fail fast on registration mistakes because this host is the composition root for the CLI pipeline.
         using var provider = services.BuildServiceProvider(new ServiceProviderOptions
         {
             ValidateOnBuild = true,
@@ -19,6 +20,7 @@ internal static class Program
 
         using var cts = new CancellationTokenSource();
 
+        // Convert Ctrl+C into cooperative cancellation so ffmpeg/model work can stop cleanly.
         Console.CancelKeyPress += (_, e) =>
         {
             e.Cancel = true;
@@ -31,7 +33,8 @@ internal static class Program
             var configService = provider.GetRequiredService<IConfigurationService>();
             var options = await configService.LoadAsync();
 
-            // Validation
+            // Run startup validation once at the host boundary so users get a complete preflight report
+            // before any conversion or model-loading work begins.
             if (options.StartupValidation.Enabled)
             {
                 var validationService = provider.GetRequiredService<IValidationService>();
@@ -49,7 +52,7 @@ internal static class Program
                 Console.WriteLine("Startup validation is disabled by configuration.");
             }
 
-            // Dispatch based on mode
+            // Keep mode selection in the entry point so the Core services stay focused on one workflow each.
             if (options.IsBatchMode)
             {
                 return await RunBatchAsync(provider, options, cts.Token);
@@ -78,6 +81,7 @@ internal static class Program
 
         var transcriptionService = provider.GetRequiredService<ITranscriptionService>();
         var progress = new CliProgressHandler();
+        // The CLI host resolves its input path from configuration rather than command-line arguments.
         var request = new TranscribeFileRequest(options.InputFilePath);
         var result = await transcriptionService.TranscribeFileAsync(request, progress, cancellationToken);
 
@@ -116,6 +120,7 @@ internal static class Program
             Console.WriteLine($"Summary written to: {result.SummaryFilePath}");
         }
 
+        // Preserve a conventional non-zero exit code when any file in the batch fails.
         return result.Failed > 0 ? 1 : 0;
     }
 }
