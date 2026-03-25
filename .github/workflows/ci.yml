@@ -80,8 +80,10 @@ jobs:
           dotnet restore src/VoxFlow.Desktop/VoxFlow.Desktop.csproj
           dotnet restore tests/VoxFlow.Desktop.Tests/VoxFlow.Desktop.Tests.csproj
 
+      # GitHub's macOS images can lag behind the SDK expected by the current MAUI workload.
+      # Restrict CI to SDK-only linking so the desktop build stays compatible with the runner Xcode.
       - name: Build desktop app
-        run: dotnet build src/VoxFlow.Desktop/VoxFlow.Desktop.csproj -f net9.0-maccatalyst --no-restore
+        run: dotnet build src/VoxFlow.Desktop/VoxFlow.Desktop.csproj -f net9.0-maccatalyst --no-restore -p:MtouchLink=SdkOnly
 
       # Real Desktop UI automation is intentionally excluded from default CI because it is slower
       # and depends on a more specialized interactive macOS environment than the headless suite.
