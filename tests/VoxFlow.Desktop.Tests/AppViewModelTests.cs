@@ -95,6 +95,29 @@ internal sealed class StubTranscriptionService : ITranscriptionService
     }
 }
 
+/// <summary>
+/// Blocks until the provided TaskCompletionSource is completed or cancelled.
+/// Respects the cancellation token to simulate a cancellable long-running transcription.
+/// </summary>
+internal sealed class BlockingTranscriptionService : ITranscriptionService
+{
+    private readonly TaskCompletionSource<TranscribeFileResult> _tcs;
+
+    public BlockingTranscriptionService(TaskCompletionSource<TranscribeFileResult> tcs)
+    {
+        _tcs = tcs;
+    }
+
+    public async Task<TranscribeFileResult> TranscribeFileAsync(
+        TranscribeFileRequest request,
+        IProgress<ProgressUpdate>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        await using var registration = cancellationToken.Register(() => _tcs.TrySetCanceled(cancellationToken));
+        return await _tcs.Task;
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Helper
 // ---------------------------------------------------------------------------
@@ -290,6 +313,32 @@ public sealed class AppViewModelTests
     // -----------------------------------------------------------------------
     // INotifyPropertyChanged — sanity check
     // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task CancelTranscription_DuringRun_ReturnsToReady()
+    {
+        var tcs = new TaskCompletionSource<TranscribeFileResult>();
+        var stub = new StubTranscriptionService(success: true);
+        var vm = ViewModelFactory.Create(transcriptionService: stub);
+
+        // Replace the stub with a blocking version
+        var blockingStub = new BlockingTranscriptionService(tcs);
+        var blockingVm = new AppViewModel(blockingStub, new StubValidationService(true),
+            new StubConfigurationService(ViewModelFactory.ResolveRootSettingsPath()));
+
+        // Start transcription (will block)
+        var transcribeTask = blockingVm.TranscribeFileAsync("/tmp/audio.wav");
+        Assert.Equal(AppState.Running, blockingVm.CurrentState);
+
+        // Cancel
+        blockingVm.CancelTranscription();
+        tcs.TrySetCanceled();
+
+        await transcribeTask;
+
+        Assert.Equal(AppState.Ready, blockingVm.CurrentState);
+        Assert.Null(blockingVm.ErrorMessage);
+    }
 
     [Fact]
     public async Task InitializeAsync_RaisesPropertyChangedForCurrentState()

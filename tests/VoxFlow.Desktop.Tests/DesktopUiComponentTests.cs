@@ -405,6 +405,294 @@ public sealed class DesktopUiComponentTests
         Assert.Contains("No files added yet", rendered.TextContent);
     }
 
+    [Fact]
+    public async Task Routes_CancelDuringTranscription_ReturnsToReady()
+    {
+        var tcs = new TaskCompletionSource<TranscribeFileResult>();
+        var transcriptionService = new DelegateTranscriptionService((_, _, ct) =>
+        {
+            ct.Register(() => tcs.TrySetCanceled(ct));
+            return tcs.Task;
+        });
+
+        await using var context = DesktopUiTestContext.Create(transcriptionService: transcriptionService);
+        VoxFlow.Desktop.Platform.MacFilePicker.PickAudioFileAsyncHandler =
+            static () => Task.FromResult<string?>("/tmp/long-recording.m4a");
+
+        var rendered = await context.RenderAsync<Routes>();
+        Assert.Equal(AppState.Ready, context.ViewModel.CurrentState);
+
+        // Start transcription (will block on tcs) — fire and forget
+        var transcribeTask = Task.Run(async () =>
+        {
+            await rendered.ClickAsync(
+                element => element.Name == "button" && element.TextContent == "+ Browse Files",
+                "browse files button");
+        });
+
+        // Wait until the ViewModel enters Running state
+        var timeout = Task.Delay(TimeSpan.FromSeconds(5));
+        while (context.ViewModel.CurrentState != AppState.Running)
+        {
+            if (timeout.IsCompleted) throw new TimeoutException("ViewModel did not enter Running state.");
+            await Task.Delay(10);
+        }
+
+        Assert.Equal(AppState.Running, context.ViewModel.CurrentState);
+
+        // Click Cancel
+        context.ViewModel.CancelTranscription();
+
+        await transcribeTask;
+        await rendered.SynchronizeAsync();
+
+        Assert.Equal(AppState.Ready, context.ViewModel.CurrentState);
+        Assert.Contains("Audio Transcription", rendered.TextContent);
+    }
+
+    [Fact]
+    public async Task DropZone_KeyboardEnter_InvokesBrowse()
+    {
+        string? selectedFile = null;
+
+        await using var context = DesktopUiTestContext.Create();
+        VoxFlow.Desktop.Platform.MacFilePicker.PickAudioFileAsyncHandler =
+            static () => Task.FromResult<string?>("/tmp/keyboard-test.wav");
+        var parameters = ParameterView.FromDictionary(new Dictionary<string, object?>
+        {
+            [nameof(DropZone.OnFileSelected)] = EventCallback.Factory.Create<string>(
+                this, filePath => selectedFile = filePath)
+        });
+
+        var rendered = await context.RenderAsync<DropZone>(parameters);
+
+        await rendered.KeyDownAsync(
+            element => element.Name == "div" && element.Attributes.ContainsKey("id")
+                       && element.Attributes["id"]?.ToString() == "file-drop-zone",
+            "drop zone div",
+            "Enter");
+
+        Assert.Equal("/tmp/keyboard-test.wav", selectedFile);
+    }
+
+    [Fact]
+    public async Task DropZone_KeyboardSpace_InvokesBrowse()
+    {
+        string? selectedFile = null;
+
+        await using var context = DesktopUiTestContext.Create();
+        VoxFlow.Desktop.Platform.MacFilePicker.PickAudioFileAsyncHandler =
+            static () => Task.FromResult<string?>("/tmp/space-key.wav");
+        var parameters = ParameterView.FromDictionary(new Dictionary<string, object?>
+        {
+            [nameof(DropZone.OnFileSelected)] = EventCallback.Factory.Create<string>(
+                this, filePath => selectedFile = filePath)
+        });
+
+        var rendered = await context.RenderAsync<DropZone>(parameters);
+
+        await rendered.KeyDownAsync(
+            element => element.Name == "div" && element.Attributes.ContainsKey("id")
+                       && element.Attributes["id"]?.ToString() == "file-drop-zone",
+            "drop zone div",
+            " ");
+
+        Assert.Equal("/tmp/space-key.wav", selectedFile);
+    }
+
+    [Fact]
+    public async Task DropZone_KeyboardOtherKey_DoesNotInvokeBrowse()
+    {
+        string? selectedFile = null;
+
+        await using var context = DesktopUiTestContext.Create();
+        VoxFlow.Desktop.Platform.MacFilePicker.PickAudioFileAsyncHandler =
+            static () => Task.FromResult<string?>("/tmp/should-not-select.wav");
+        var parameters = ParameterView.FromDictionary(new Dictionary<string, object?>
+        {
+            [nameof(DropZone.OnFileSelected)] = EventCallback.Factory.Create<string>(
+                this, filePath => selectedFile = filePath)
+        });
+
+        var rendered = await context.RenderAsync<DropZone>(parameters);
+
+        await rendered.KeyDownAsync(
+            element => element.Name == "div" && element.Attributes.ContainsKey("id")
+                       && element.Attributes["id"]?.ToString() == "file-drop-zone",
+            "drop zone div",
+            "Tab");
+
+        Assert.Null(selectedFile);
+    }
+
+    [Fact]
+    public async Task CompleteView_OpenFolder_InvokesLauncherWithCorrectDirectory()
+    {
+        await using var context = DesktopUiTestContext.Create();
+        AppViewModelStateAccessor.SetState(
+            context.ViewModel,
+            currentState: AppState.Complete,
+            transcriptionResult: new TranscribeFileResult(
+                Success: true,
+                DetectedLanguage: "en",
+                ResultFilePath: "/tmp/output/result.txt",
+                AcceptedSegmentCount: 5,
+                SkippedSegmentCount: 0,
+                Duration: TimeSpan.FromSeconds(10),
+                Warnings: [],
+                TranscriptPreview: "Some text"));
+
+        var rendered = await context.RenderAsync<CompleteView>();
+
+        await rendered.ClickAsync(
+            element => element.Name == "button" && element.TextContent == "Open Folder",
+            "open folder button");
+
+        var launcher = Launcher.Default;
+        var opened = Assert.Single(launcher.OpenedTargets);
+        Assert.Equal("/tmp/output", opened);
+    }
+
+    [Fact]
+    public async Task DropZone_WhenPickerReturnsNull_NoErrorShown_StateUnchanged()
+    {
+        string? selectedFile = null;
+
+        await using var context = DesktopUiTestContext.Create();
+        VoxFlow.Desktop.Platform.MacFilePicker.PickAudioFileAsyncHandler =
+            static () => Task.FromResult<string?>(null);
+        var parameters = ParameterView.FromDictionary(new Dictionary<string, object?>
+        {
+            [nameof(DropZone.OnFileSelected)] = EventCallback.Factory.Create<string>(
+                this, filePath => selectedFile = filePath)
+        });
+
+        var rendered = await context.RenderAsync<DropZone>(parameters);
+
+        await rendered.ClickAsync(
+            element => element.Name == "button" && element.TextContent == "+ Browse Files",
+            "browse files button");
+
+        Assert.Null(selectedFile);
+        Assert.DoesNotContain("File picker failed", rendered.TextContent);
+    }
+
+    [Fact]
+    public async Task Routes_WhenStartupRetryFailsAgain_StillShowsError()
+    {
+        var configurationService = new DelegateConfigurationService(_ =>
+            throw new InvalidOperationException("persistent config error"));
+
+        await using var context = DesktopUiTestContext.Create(configurationService: configurationService);
+        var rendered = await context.RenderAsync<Routes>();
+
+        Assert.Contains("Startup Failed", rendered.TextContent);
+        Assert.Contains("persistent config error", rendered.TextContent);
+
+        // Click Retry — should still fail
+        await rendered.ClickAsync(
+            element => element.Name == "button" && element.TextContent == "Retry",
+            "startup retry button");
+
+        Assert.Contains("Startup Failed", rendered.TextContent);
+        Assert.Contains("persistent config error", rendered.TextContent);
+    }
+
+    [Fact]
+    public async Task RunningView_WithNoProgress_ShowsSpinnerAndNoBars()
+    {
+        await using var context = DesktopUiTestContext.Create();
+        AppViewModelStateAccessor.SetState(
+            context.ViewModel,
+            currentState: AppState.Running,
+            lastFilePath: "/tmp/audio.m4a");
+
+        var rendered = await context.RenderAsync<RunningView>();
+
+        // Spinner is static HTML rendered as a Markup frame, so verify via TextContent
+        Assert.Contains("spinner", rendered.TextContent);
+        Assert.DoesNotContain("Elapsed Time", rendered.TextContent);
+        Assert.DoesNotContain("Language:", rendered.TextContent);
+        // No progress bar elements should exist
+        Assert.Empty(rendered.FindElements(
+            element => element.Name == "div" && element.HasClass("progress-bar")));
+    }
+
+    [Fact]
+    public async Task RunningView_ValidatingStage_ShowsStageWithoutLanguage()
+    {
+        await using var context = DesktopUiTestContext.Create();
+        AppViewModelStateAccessor.SetState(
+            context.ViewModel,
+            currentState: AppState.Running,
+            currentProgress: new ProgressUpdate(
+                ProgressStage.Validating,
+                10,
+                TimeSpan.FromSeconds(3),
+                "Checking input file",
+                null));
+
+        var rendered = await context.RenderAsync<RunningView>();
+
+        Assert.Contains("Validating", rendered.TextContent);
+        Assert.Contains("Checking input file", rendered.TextContent);
+        Assert.DoesNotContain("Language:", rendered.TextContent);
+    }
+
+    [Fact]
+    public async Task RunningView_WritingStage_ShowsCorrectStage()
+    {
+        await using var context = DesktopUiTestContext.Create();
+        AppViewModelStateAccessor.SetState(
+            context.ViewModel,
+            currentState: AppState.Running,
+            currentProgress: new ProgressUpdate(
+                ProgressStage.Writing,
+                95,
+                TimeSpan.FromSeconds(60),
+                "Writing result file",
+                null));
+
+        var rendered = await context.RenderAsync<RunningView>();
+
+        Assert.Contains("Writing", rendered.TextContent);
+        Assert.Contains("Writing result file", rendered.TextContent);
+        Assert.Contains("1:00", rendered.TextContent);
+        Assert.DoesNotContain("Language:", rendered.TextContent);
+
+        var progressBar = rendered.FindElement(
+            element => element.Name == "div" && element.HasClass("progress-bar"),
+            "progress bar");
+
+        Assert.Contains("95%", progressBar.Attributes["style"]?.ToString());
+    }
+
+    [Fact]
+    public async Task DropZone_WhenDisabled_ClickDoesNothing()
+    {
+        string? selectedFile = null;
+
+        await using var context = DesktopUiTestContext.Create();
+        VoxFlow.Desktop.Platform.MacFilePicker.PickAudioFileAsyncHandler =
+            static () => Task.FromResult<string?>("/tmp/should-not-select.wav");
+        var parameters = ParameterView.FromDictionary(new Dictionary<string, object?>
+        {
+            [nameof(DropZone.IsDisabled)] = true,
+            [nameof(DropZone.OnFileSelected)] = EventCallback.Factory.Create<string>(
+                this, filePath => selectedFile = filePath)
+        });
+
+        var rendered = await context.RenderAsync<DropZone>(parameters);
+
+        // Click the drop zone div itself (not the button)
+        await rendered.ClickAsync(
+            element => element.Name == "div" && element.Attributes.ContainsKey("id")
+                       && element.Attributes["id"]?.ToString() == "file-drop-zone",
+            "drop zone div");
+
+        Assert.Null(selectedFile);
+    }
+
     private static string WriteSingleFileConfig(string repositoryRoot, string tempDir, string inputPath)
     {
         var rootConfigPath = Path.Combine(repositoryRoot, "appsettings.json");
