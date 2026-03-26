@@ -48,3 +48,5 @@ coverage.*
 
 # Logs
 *.log
+
+.fake
