@@ -126,32 +126,36 @@ internal sealed class DesktopCliTranscriptionService : ITranscriptionService
 
     private static ProcessStartInfo CreateProcessStartInfo(string configurationPath)
     {
-        var repositoryRoot = DesktopCliSupport.FindRepositoryRoot(AppContext.BaseDirectory);
-        var builtCliAssembly = DesktopCliSupport.ResolveBuiltCliAssemblyPath(repositoryRoot);
+        var invocation = DesktopCliSupport.ResolveCliInvocation(AppContext.BaseDirectory);
 
         var startInfo = new ProcessStartInfo
         {
             FileName = "dotnet",
-            WorkingDirectory = repositoryRoot,
+            WorkingDirectory = invocation.WorkingDirectory,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
             CreateNoWindow = true
         };
 
-        if (!string.IsNullOrWhiteSpace(builtCliAssembly))
+        if (!string.IsNullOrWhiteSpace(invocation.AssemblyPath))
         {
-            // Prefer an existing build to avoid paying a `dotnet run` rebuild on every desktop transcription.
+            // Prefer a bundled or prebuilt CLI assembly to avoid paying a `dotnet run` rebuild on every transcription.
             startInfo.ArgumentList.Add("exec");
-            startInfo.ArgumentList.Add(builtCliAssembly);
+            startInfo.ArgumentList.Add(invocation.AssemblyPath);
         }
-        else
+        else if (!string.IsNullOrWhiteSpace(invocation.ProjectPath))
         {
             startInfo.ArgumentList.Add("run");
             startInfo.ArgumentList.Add("--project");
-            startInfo.ArgumentList.Add(DesktopCliSupport.ResolveCliProjectPath(repositoryRoot));
+            startInfo.ArgumentList.Add(invocation.ProjectPath);
             startInfo.ArgumentList.Add("-c");
             startInfo.ArgumentList.Add("Debug");
+        }
+        else
+        {
+            throw new InvalidOperationException(
+                "Could not locate the VoxFlow CLI bridge. Rebuild the Desktop app so the CLI output is available.");
         }
 
         startInfo.Environment["TRANSCRIPTION_SETTINGS_PATH"] = configurationPath;

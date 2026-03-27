@@ -10,6 +10,30 @@ internal static partial class DesktopCliSupport
         => OperatingSystem.IsMacCatalyst()
             && RuntimeInformation.ProcessArchitecture == Architecture.X64;
 
+    public static DesktopCliInvocation ResolveCliInvocation(string baseDirectory)
+    {
+        var bundledAssemblyPath = ResolveBundledCliAssemblyPath(baseDirectory);
+        if (!string.IsNullOrWhiteSpace(bundledAssemblyPath))
+        {
+            return new DesktopCliInvocation(
+                Path.GetDirectoryName(bundledAssemblyPath)!,
+                bundledAssemblyPath,
+                null);
+        }
+
+        var repositoryRoot = FindRepositoryRoot(baseDirectory);
+        var builtCliAssembly = ResolveBuiltCliAssemblyPath(repositoryRoot);
+        if (!string.IsNullOrWhiteSpace(builtCliAssembly))
+        {
+            return new DesktopCliInvocation(repositoryRoot, builtCliAssembly, null);
+        }
+
+        return new DesktopCliInvocation(
+            repositoryRoot,
+            null,
+            ResolveCliProjectPath(repositoryRoot));
+    }
+
     public static string FindRepositoryRoot(string baseDirectory)
     {
         var currentDirectory = new DirectoryInfo(baseDirectory);
@@ -30,6 +54,18 @@ internal static partial class DesktopCliSupport
 
     public static string ResolveCliProjectPath(string repositoryRoot)
         => Path.Combine(repositoryRoot, "src", "VoxFlow.Cli", "VoxFlow.Cli.csproj");
+
+    public static string? ResolveBundledCliAssemblyPath(string baseDirectory)
+    {
+        var candidates = new[]
+        {
+            Path.Combine(baseDirectory, "cli", "VoxFlow.Cli.dll"),
+            Path.GetFullPath(Path.Combine(baseDirectory, "..", "MonoBundle", "cli", "VoxFlow.Cli.dll")),
+            Path.GetFullPath(Path.Combine(baseDirectory, "..", "..", "MonoBundle", "cli", "VoxFlow.Cli.dll"))
+        };
+
+        return candidates.FirstOrDefault(File.Exists);
+    }
 
     public static string? ResolveBuiltCliAssemblyPath(string repositoryRoot)
     {

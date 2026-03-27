@@ -1,8 +1,10 @@
 using Foundation;
 using Microsoft.Maui.Controls;
+using VoxFlow.Desktop.Services;
 using VoxFlow.Desktop.ViewModels;
 
 #if MACCATALYST
+using System.Runtime.InteropServices;
 using UIKit;
 #endif
 #if DEBUG && MACCATALYST
@@ -15,25 +17,58 @@ public partial class MainPage : ContentPage
 {
     private readonly AppViewModel _viewModel;
 #if DEBUG && MACCATALYST
-    private readonly DesktopUiAutomationHost? _uiAutomationHost;
+    private DesktopUiAutomationHost? _uiAutomationHost;
 #endif
 
     public MainPage(AppViewModel viewModel)
     {
         InitializeComponent();
         _viewModel = viewModel;
+        TryEnableOptionalPlatformFeatures();
+    }
+
+    private void TryEnableOptionalPlatformFeatures()
+    {
 #if DEBUG && MACCATALYST
-        _uiAutomationHost = DesktopUiAutomationHost.TryStart(blazorWebView);
+        try
+        {
+            _uiAutomationHost = DesktopUiAutomationHost.TryStart(blazorWebView);
+        }
+        catch (Exception ex)
+        {
+            DesktopDiagnostics.LogException("MainPage.DesktopUiAutomationHost", ex);
+        }
 #endif
 
-        var dropGestureRecognizer = new DropGestureRecognizer
-        {
-            AllowDrop = true
-        };
+        TryConfigureNativeDragAndDrop();
+    }
 
-        dropGestureRecognizer.DragOver += HandleNativeDragOver;
-        dropGestureRecognizer.Drop += HandleNativeDrop;
-        blazorWebView.GestureRecognizers.Add(dropGestureRecognizer);
+    private void TryConfigureNativeDragAndDrop()
+    {
+#if MACCATALYST
+        if (RuntimeInformation.ProcessArchitecture == Architecture.X64)
+        {
+            DesktopDiagnostics.LogInfo(
+                "Skipping native drag and drop registration on Intel Mac Catalyst. Browse Files remains available.");
+            return;
+        }
+#endif
+
+        try
+        {
+            var dropGestureRecognizer = new DropGestureRecognizer
+            {
+                AllowDrop = true
+            };
+
+            dropGestureRecognizer.DragOver += HandleNativeDragOver;
+            dropGestureRecognizer.Drop += HandleNativeDrop;
+            blazorWebView.GestureRecognizers.Add(dropGestureRecognizer);
+        }
+        catch (Exception ex)
+        {
+            DesktopDiagnostics.LogException("MainPage.TryConfigureNativeDragAndDrop", ex);
+        }
     }
 
     private static void HandleNativeDragOver(object? sender, DragEventArgs e)

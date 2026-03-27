@@ -37,6 +37,7 @@
     <Compile Include="..\..\src\VoxFlow.Desktop\ViewModels\AppViewModel.cs" Link="ViewModels\AppViewModel.cs" />
     <Compile Include="..\..\src\VoxFlow.Desktop\Configuration\DesktopConfigurationService.cs" Link="Configuration\DesktopConfigurationService.cs" />
     <Compile Include="..\..\src\VoxFlow.Desktop\Services\BlazorProgressHandler.cs" Link="Services\BlazorProgressHandler.cs" />
+    <Compile Include="..\..\src\VoxFlow.Desktop\Services\DesktopCliInvocation.cs" Link="Services\DesktopCliInvocation.cs" />
     <Compile Include="..\..\src\VoxFlow.Desktop\Services\DesktopCliSupport.cs" Link="Services\DesktopCliSupport.cs" />
     <Compile Include="..\..\src\VoxFlow.Desktop\Services\DesktopCliTranscriptionService.cs" Link="Services\DesktopCliTranscriptionService.cs" />
   </ItemGroup>

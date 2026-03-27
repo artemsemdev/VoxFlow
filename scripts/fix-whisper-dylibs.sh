@@ -73,3 +73,6 @@ fix_runtime_dir() {
 
 fix_runtime_dir "$APP_BUNDLE_PATH/Contents/MonoBundle/runtimes/macos-x64"
 fix_runtime_dir "$APP_BUNDLE_PATH/Contents/MonoBundle/runtimes/macos-arm64"
+fix_runtime_dir "$APP_BUNDLE_PATH/Contents/MonoBundle/cli"
+fix_runtime_dir "$APP_BUNDLE_PATH/Contents/MonoBundle/cli/runtimes/macos-x64"
+fix_runtime_dir "$APP_BUNDLE_PATH/Contents/MonoBundle/cli/runtimes/macos-arm64"

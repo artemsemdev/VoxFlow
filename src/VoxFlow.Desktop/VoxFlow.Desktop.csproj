@@ -186,9 +186,31 @@
     Name="FixWhisperDylibInstallNames"
     AfterTargets="_PostProcessAppBundle"
     BeforeTargets="Codesign"
+    DependsOnTargets="CopyBundledCliBridge"
     Condition="'$(TargetFramework)' == 'net9.0-maccatalyst' and Exists('$(MSBuildProjectDirectory)/$(_AppBundlePath)')">
     <Exec
       Command="bash &quot;$(MSBuildProjectDirectory)/../../scripts/fix-whisper-dylibs.sh&quot; &quot;$(MSBuildProjectDirectory)/$(_AppBundlePath)&quot;" />
+  </Target>
+
+  <Target
+    Name="CopyBundledCliBridge"
+    AfterTargets="_PostProcessAppBundle"
+    BeforeTargets="Codesign"
+    Condition="'$(TargetFramework)' == 'net9.0-maccatalyst' and Exists('$(MSBuildProjectDirectory)/$(_AppBundlePath)')">
+    <ItemGroup>
+      <BundledCliFiles Include="$(MSBuildProjectDirectory)/../VoxFlow.Cli/bin/$(Configuration)/net9.0/*.dll" />
+      <BundledCliFiles Include="$(MSBuildProjectDirectory)/../VoxFlow.Cli/bin/$(Configuration)/net9.0/*.deps.json" />
+      <BundledCliFiles Include="$(MSBuildProjectDirectory)/../VoxFlow.Cli/bin/$(Configuration)/net9.0/*.runtimeconfig.json" />
+      <BundledCliFiles Include="$(MSBuildProjectDirectory)/../VoxFlow.Cli/bin/$(Configuration)/net9.0/ggml-metal.metal" />
+      <BundledCliFiles Include="$(MSBuildProjectDirectory)/../VoxFlow.Cli/bin/$(Configuration)/net9.0/runtimes/macos-x64/**/*" />
+      <BundledCliFiles Include="$(MSBuildProjectDirectory)/../VoxFlow.Cli/bin/$(Configuration)/net9.0/runtimes/macos-arm64/**/*" />
+    </ItemGroup>
+
+    <MakeDir Directories="$(MSBuildProjectDirectory)/$(_AppBundlePath)/Contents/MonoBundle/cli" />
+    <Copy
+      SourceFiles="@(BundledCliFiles)"
+      DestinationFiles="@(BundledCliFiles->'$(MSBuildProjectDirectory)/$(_AppBundlePath)/Contents/MonoBundle/cli/%(RecursiveDir)%(Filename)%(Extension)')"
+      SkipUnchangedFiles="true" />
   </Target>
 
 </Project>

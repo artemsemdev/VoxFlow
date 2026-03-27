@@ -46,4 +46,23 @@ public sealed class DesktopCliSupportTests
             Directory.Delete(repositoryRoot, recursive: true);
         }
     }
+
+    [Fact]
+    public void ResolveBundledCliAssemblyPath_ReturnsBundledAssemblyWhenPresent()
+    {
+        var baseDirectory = Path.Combine(Path.GetTempPath(), $"voxflow-cli-bundle-{Guid.NewGuid():N}");
+        var cliDirectory = Path.Combine(baseDirectory, "cli");
+        Directory.CreateDirectory(cliDirectory);
+        var assemblyPath = Path.Combine(cliDirectory, "VoxFlow.Cli.dll");
+        File.WriteAllText(assemblyPath, string.Empty);
+
+        try
+        {
+            Assert.Equal(assemblyPath, DesktopCliSupport.ResolveBundledCliAssemblyPath(baseDirectory));
+        }
+        finally
+        {
+            Directory.Delete(baseDirectory, recursive: true);
+        }
+    }
 }
