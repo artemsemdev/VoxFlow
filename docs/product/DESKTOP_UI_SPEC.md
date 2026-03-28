@@ -1223,29 +1223,29 @@ The automation bridge SHOULD also report visibility of critical message ids, not
 
 ## 22. Known Gaps in Current Implementation
 
-The following gaps exist in the current repository implementation and are material to future UI work.
+The following gaps existed in the repository implementation. Gaps marked **[CLOSED]** were resolved during Phase 1 stabilization (March 2026).
 
-1. The Ready screen and drop zone copy currently claim `M4A` and `multiple files`, but the Desktop workflow is single-file and the runtime accepts broader audio types.
-2. The UI currently uses `upload` language in the Ready footer even though the Desktop app is local-only.
-3. Drag-and-drop is advertised in the Ready UI, but Intel Mac Catalyst explicitly skips native drag-and-drop registration and the JavaScript drop-zone helper is not wired into the actual Razor component.
-4. Blocking startup validation currently disables the visible drop zone controls, but native app-level drag-and-drop can still call `TranscribeFileAsync()` because the shell layer does not enforce the blocked-ready precondition.
-5. File intake is not fully gated to Ready Available. The native drag-and-drop handler is attached at the shell level and can start a run outside the visible Ready state.
-6. `AppViewModel.TranscribeFileAsync()` does not clear stale progress or stale prior result state at run start. Retry flows can therefore inherit stale transient data until new progress arrives.
-7. Cancellation returns to Ready, but `CurrentProgress` is not explicitly cleared in the cancellation path.
-8. The Running screen currently renders progress visually but does not show a user-visible numeric percent and does not expose proper `progressbar` accessibility semantics.
-9. Running stage text currently uses raw enum `ToString()` output, which will render strings such as `LoadingModel` instead of a human-friendly label.
-10. Before the first `ProgressUpdate`, the Running screen shows only a spinner and no textual “starting” status.
-11. Startup validation warnings are not surfaced on the Ready screen when `CanStart == true` but `HasWarnings == true`.
-12. Result preview behavior is inconsistent across runtime paths. The in-process path builds preview text from accepted segments, while the Intel CLI bridge reads back up to `4,000` characters from the result file.
-13. The UI does not currently surface whether the preview is truncated.
-14. `Copy Transcript` currently copies `TranscriptPreview`, not the full transcript file contents, so the action label over-promises on long transcripts.
-15. The Complete screen always shows `Open Folder` and `Copy Text` buttons even when the underlying data may be missing, and it does not surface action failures.
-16. Clipboard failure handling is not surfaced to the user.
-17. Folder-opening failure handling is not surfaced to the user.
-18. Unsupported-path validation is not performed consistently before run start; some invalid intake may fail late instead of as a Ready-state selection error.
-19. Accessibility focus management across screen transitions is currently unspecified and not implemented in the views.
-20. The automation bridge currently tracks only a subset of critical elements and does not include startup error or validation-message visibility in its tracked-id list.
-21. Real UI automation currently covers browse-based happy path, copy, failure recovery, and repeated use, but does not yet cover fatal startup error, Ready Blocked, drag-and-drop, cancellation, or missing-result metadata states.
+1. **[CLOSED]** The Ready screen and drop zone copy currently claim `M4A` and `multiple files`, but the Desktop workflow is single-file and the runtime accepts broader audio types. *Fixed: copy now describes single local audio file with multi-format support.*
+2. **[CLOSED]** The UI currently uses `upload` language in the Ready footer even though the Desktop app is local-only. *Fixed: no “upload” or “multiple files” language remains.*
+3. **[CLOSED]** Drag-and-drop is advertised in the Ready UI, but Intel Mac Catalyst explicitly skips native drag-and-drop registration and the JavaScript drop-zone helper is not wired into the actual Razor component. *Fixed: drop zone copy is runtime-neutral (“Choose an audio file to transcribe”).*
+4. **[CLOSED]** Blocking startup validation currently disables the visible drop zone controls, but native app-level drag-and-drop can still call `TranscribeFileAsync()` because the shell layer does not enforce the blocked-ready precondition. *Fixed: native drop handler checks `CanStart` before proceeding.*
+5. **[CLOSED]** File intake is not fully gated to Ready Available. The native drag-and-drop handler is attached at the shell level and can start a run outside the visible Ready state. *Fixed: `TranscribeFileAsync` enforces `CanStart` guard; native drop also checks `CanStart`.*
+6. **[CLOSED]** `AppViewModel.TranscribeFileAsync()` does not clear stale progress or stale prior result state at run start. Retry flows can therefore inherit stale transient data until new progress arrives. *Fixed: `TranscriptionResult`, `CurrentProgress`, and `ErrorMessage` are cleared at run start.*
+7. **[CLOSED]** Cancellation returns to Ready, but `CurrentProgress` is not explicitly cleared in the cancellation path. *Fixed: cancellation now calls `GoToReady()` which clears all transient state.*
+8. **[CLOSED]** The Running screen currently renders progress visually but does not show a user-visible numeric percent and does not expose proper `progressbar` accessibility semantics. *Fixed: numeric percent is visible as text; progress track has `role=”progressbar”` and `aria-valuenow`.*
+9. **[CLOSED]** Running stage text currently uses raw enum `ToString()` output, which will render strings such as `LoadingModel` instead of a human-friendly label. *Fixed: `FormatStage()` renders human-readable labels (e.g., “Loading model”).*
+10. **[CLOSED]** Before the first `ProgressUpdate`, the Running screen shows only a spinner and no textual “starting” status. *Fixed: “Starting transcription...” is shown before the first progress event.*
+11. **[CLOSED]** Startup validation warnings are not surfaced on the Ready screen when `CanStart == true` but `HasWarnings == true`. *Fixed: non-blocking warnings are shown in a `startup-warning-message` element.*
+12. Result preview behavior is inconsistent across runtime paths. The in-process path builds preview text from accepted segments, while the Intel CLI bridge reads back up to `4,000` characters from the result file. *Remains open: preview normalization across runtime paths is a future improvement.*
+13. **[CLOSED]** The UI does not currently surface whether the preview is truncated. *Fixed: a “Preview shows a portion of the full transcript” notice appears when preview is shorter than full transcript.*
+14. **[CLOSED]** `Copy Transcript` currently copies `TranscriptPreview`, not the full transcript file contents, so the action label over-promises on long transcripts. *Fixed: `GetFullTranscript()` reads the full file; copy sends the full text.*
+15. **[CLOSED]** The Complete screen always shows `Open Folder` and `Copy Text` buttons even when the underlying data may be missing, and it does not surface action failures. *Fixed: buttons are hidden when data is missing; action errors are shown non-fatally.*
+16. **[CLOSED]** Clipboard failure handling is not surfaced to the user. *Fixed: clipboard errors are caught and shown in `action-error-message`.*
+17. **[CLOSED]** Folder-opening failure handling is not surfaced to the user. *Fixed: folder-open errors are caught and shown in `action-error-message`.*
+18. Unsupported-path validation is not performed consistently before run start; some invalid intake may fail late instead of as a Ready-state selection error. *Remains open: the start guard prevents invalid states but file-type validation at the Razor layer is not yet added.*
+19. Accessibility focus management across screen transitions is currently unspecified and not implemented in the views. *Remains open: deferred to future accessibility work.*
+20. **[CLOSED]** The automation bridge currently tracks only a subset of critical elements and does not include startup error or validation-message visibility in its tracked-id list. *Fixed: 27 element IDs are now tracked, including startup-error-screen, startup-validation-message, running-stage, running-percent, transcript-preview, action-error-message, and others.*
+21. Real UI automation currently covers browse-based happy path, copy, failure recovery, and repeated use, but does not yet cover fatal startup error, Ready Blocked, drag-and-drop, cancellation, or missing-result metadata states. *Partially addressed: automation bridge now supports these scenarios; B3/B4 real UI test scenarios are defined but require manual execution with the built app.*
 
 ## 23. Acceptance Criteria
 
@@ -1272,28 +1272,13 @@ The Desktop UI is acceptable only when all of the following are true.
 
 ## 24. Future Implementation and Testing Guidance
 
-Later implementation work should prioritize:
+Phase 1 addressed the majority of known gaps. Remaining future work:
 
-- enforcing file-intake gating in the shell and view-model layers
-- correcting misleading Ready-screen copy
-- normalizing preview and copy semantics across Apple Silicon and Intel
-- surfacing startup warnings, copy failures, and folder-open failures
-- adding proper progress accessibility and focus management
-
-Later UI automation should prioritize:
-
-- startup fatal error and retry
-- Ready Blocked behavior
-- drag-and-drop success and rejection cases
-- cancel behavior
-- missing preview and missing result path handling
-
-Later non-UI tests should prioritize:
-
-- transient-state clearing on new run and cancellation
-- preview normalization rules
-- full-transcript copy behavior
-- prevention of blocked-ready bypass through native shell paths
+- Normalizing preview generation across Apple Silicon (in-process) and Intel (CLI bridge) runtime paths (gap 12)
+- Unsupported-file-type validation at the Razor layer before run start (gap 18)
+- Accessibility focus management across screen transitions (gap 19)
+- Real UI automation scenarios for startup failure, blocked ready, cancel, and failure recovery (gap 21 — bridge support is in place, scenarios need manual or CI execution)
+- Drag-and-drop real UI automation (native drop is only available on Apple Silicon)
 
 ## 25. Related Documents
 

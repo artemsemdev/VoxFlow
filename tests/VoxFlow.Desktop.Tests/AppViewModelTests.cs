@@ -196,6 +196,7 @@ public sealed class AppViewModelTests
     {
         var states = new List<AppState>();
         var vm = ViewModelFactory.Create(transcriptionService: new StubTranscriptionService(success: true));
+        await vm.InitializeAsync();
         vm.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(AppViewModel.CurrentState))
@@ -220,6 +221,7 @@ public sealed class AppViewModelTests
     {
         var vm = ViewModelFactory.Create(
             transcriptionService: new StubTranscriptionService(success: false, warnings: ["low quality"]));
+        await vm.InitializeAsync();
 
         await vm.TranscribeFileAsync("/tmp/audio.wav");
 
@@ -237,6 +239,7 @@ public sealed class AppViewModelTests
     {
         var vm = ViewModelFactory.Create(
             transcriptionService: new StubTranscriptionService(new InvalidOperationException("disk full")));
+        await vm.InitializeAsync();
 
         await vm.TranscribeFileAsync("/tmp/audio.wav");
 
@@ -253,6 +256,7 @@ public sealed class AppViewModelTests
     {
         var vm = ViewModelFactory.Create(
             transcriptionService: new StubTranscriptionService(success: true));
+        await vm.InitializeAsync();
 
         // Trigger a first run so _lastFilePath is populated
         await vm.TranscribeFileAsync("/tmp/audio.wav");
@@ -283,6 +287,7 @@ public sealed class AppViewModelTests
     public async Task GoToReady_AfterComplete_ResetsState()
     {
         var vm = ViewModelFactory.Create();
+        await vm.InitializeAsync();
         await vm.TranscribeFileAsync("/tmp/audio.wav");
         Assert.Equal(AppState.Complete, vm.CurrentState);
 
@@ -302,6 +307,7 @@ public sealed class AppViewModelTests
     public async Task CurrentFileName_ReturnsFileNameFromLastPath()
     {
         var vm = ViewModelFactory.Create();
+        await vm.InitializeAsync();
 
         Assert.Null(vm.CurrentFileName);
 
@@ -318,13 +324,11 @@ public sealed class AppViewModelTests
     public async Task CancelTranscription_DuringRun_ReturnsToReady()
     {
         var tcs = new TaskCompletionSource<TranscribeFileResult>();
-        var stub = new StubTranscriptionService(success: true);
-        var vm = ViewModelFactory.Create(transcriptionService: stub);
-
-        // Replace the stub with a blocking version
-        var blockingStub = new BlockingTranscriptionService(tcs);
-        var blockingVm = new AppViewModel(blockingStub, new StubValidationService(true),
+        var blockingVm = new AppViewModel(
+            new BlockingTranscriptionService(tcs),
+            new StubValidationService(true),
             new StubConfigurationService(ViewModelFactory.ResolveRootSettingsPath()));
+        await blockingVm.InitializeAsync();
 
         // Start transcription (will block)
         var transcribeTask = blockingVm.TranscribeFileAsync("/tmp/audio.wav");
@@ -351,5 +355,157 @@ public sealed class AppViewModelTests
 
         Assert.Contains(nameof(AppViewModel.CurrentState), changedProperties);
         Assert.Contains(nameof(AppViewModel.ValidationResult), changedProperties);
+    }
+
+    // -----------------------------------------------------------------------
+    // B1: Phase 1 — Start guard (A2)
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task TranscribeFileAsync_WhenBlockedValidation_DoesNotStart()
+    {
+        var vm = ViewModelFactory.Create(validationCanStart: false);
+        await vm.InitializeAsync();
+
+        await vm.TranscribeFileAsync("/tmp/audio.wav");
+
+        Assert.Equal(AppState.Ready, vm.CurrentState);
+        Assert.Null(vm.TranscriptionResult);
+    }
+
+    [Fact]
+    public async Task TranscribeFileAsync_WhenAlreadyRunning_DoesNotStart()
+    {
+        var tcs = new TaskCompletionSource<TranscribeFileResult>();
+        var blockingVm = new AppViewModel(
+            new BlockingTranscriptionService(tcs),
+            new StubValidationService(true),
+            new StubConfigurationService(ViewModelFactory.ResolveRootSettingsPath()));
+
+        await blockingVm.InitializeAsync();
+
+        // Start first transcription (will block)
+        var firstTask = blockingVm.TranscribeFileAsync("/tmp/first.wav");
+        Assert.Equal(AppState.Running, blockingVm.CurrentState);
+
+        // Attempt second transcription while running — should be blocked
+        await blockingVm.TranscribeFileAsync("/tmp/second.wav");
+
+        // Still running the first one
+        Assert.Equal(AppState.Running, blockingVm.CurrentState);
+        Assert.Equal("first.wav", blockingVm.CurrentFileName);
+
+        // Clean up
+        tcs.TrySetCanceled();
+        try { await firstTask; } catch { }
+    }
+
+    // -----------------------------------------------------------------------
+    // B1: Phase 1 — Transient state clearing (A4)
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task TranscribeFileAsync_ClearsTransientStateOnNewRun()
+    {
+        var vm = ViewModelFactory.Create(transcriptionService: new StubTranscriptionService(success: true));
+        await vm.InitializeAsync();
+
+        await vm.TranscribeFileAsync("/tmp/audio.wav");
+        Assert.Equal(AppState.Complete, vm.CurrentState);
+        Assert.NotNull(vm.TranscriptionResult);
+
+        // Go back to Ready and start a new run — transient state should be cleared during the run
+        vm.GoToReady();
+        var states = new List<(AppState State, TranscribeFileResult? Result, ProgressUpdate? Progress)>();
+        vm.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(AppViewModel.CurrentState) && vm.CurrentState == AppState.Running)
+                states.Add((vm.CurrentState, vm.TranscriptionResult, vm.CurrentProgress));
+        };
+
+        await vm.TranscribeFileAsync("/tmp/audio2.wav");
+
+        // When entering Running, result and progress should have been cleared
+        Assert.NotEmpty(states);
+        var (_, result, progress) = states.First();
+        Assert.Null(result);
+        Assert.Null(progress);
+    }
+
+    [Fact]
+    public async Task CancelTranscription_ClearsProgressAndResult()
+    {
+        var tcs = new TaskCompletionSource<TranscribeFileResult>();
+        var blockingVm = new AppViewModel(
+            new BlockingTranscriptionService(tcs),
+            new StubValidationService(true),
+            new StubConfigurationService(ViewModelFactory.ResolveRootSettingsPath()));
+
+        await blockingVm.InitializeAsync();
+        var transcribeTask = blockingVm.TranscribeFileAsync("/tmp/audio.wav");
+        Assert.Equal(AppState.Running, blockingVm.CurrentState);
+
+        blockingVm.CancelTranscription();
+        tcs.TrySetCanceled();
+        await transcribeTask;
+
+        Assert.Equal(AppState.Ready, blockingVm.CurrentState);
+        Assert.Null(blockingVm.CurrentProgress);
+        Assert.Null(blockingVm.TranscriptionResult);
+        Assert.Null(blockingVm.ErrorMessage);
+    }
+
+    // -----------------------------------------------------------------------
+    // B1: Phase 1 — CanStart, HasWarnings, WarningMessage (A7)
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task CanStart_IsTrueOnlyWhenReadyAndNoBlockingErrors()
+    {
+        var vm = ViewModelFactory.Create(validationCanStart: true);
+        Assert.False(vm.CanStart); // Before initialization, state is Ready but no validation done
+
+        await vm.InitializeAsync();
+        Assert.True(vm.CanStart);
+
+        var blockedVm = ViewModelFactory.Create(validationCanStart: false);
+        await blockedVm.InitializeAsync();
+        Assert.False(blockedVm.CanStart);
+    }
+
+    [Fact]
+    public async Task HasWarnings_ReflectsValidationWarnings()
+    {
+        var settingsPath = ViewModelFactory.ResolveRootSettingsPath();
+        var warningValidation = new StubValidationServiceWithWarnings();
+        var vm = new AppViewModel(
+            new StubTranscriptionService(success: true),
+            warningValidation,
+            new StubConfigurationService(settingsPath));
+
+        await vm.InitializeAsync();
+
+        Assert.True(vm.HasWarnings);
+        Assert.NotNull(vm.WarningMessage);
+        Assert.Contains("model may be slow", vm.WarningMessage!);
+    }
+}
+
+/// <summary>
+/// Validation service that returns a result with warnings but CanStart == true.
+/// </summary>
+internal sealed class StubValidationServiceWithWarnings : IValidationService
+{
+    public Task<ValidationResult> ValidateAsync(
+        TranscriptionOptions options,
+        CancellationToken cancellationToken = default)
+    {
+        var result = new ValidationResult(
+            Outcome: "OK",
+            CanStart: true,
+            HasWarnings: true,
+            ResolvedConfigurationPath: options.ConfigurationPath,
+            Checks: [new ValidationCheck("model", ValidationCheckStatus.Warning, "model may be slow")]);
+        return Task.FromResult(result);
     }
 }

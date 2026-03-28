@@ -231,15 +231,30 @@ internal sealed class DesktopUiAutomationHost : IAsyncDisposable
                     "ready-screen",
                     "browse-files-button",
                     "file-selection-error",
+                    "startup-error-screen",
+                    "startup-retry-button",
+                    "startup-validation-message",
+                    "startup-warning-message",
                     "running-screen",
+                    "running-file-name",
+                    "running-stage",
+                    "running-percent",
+                    "running-starting-label",
                     "cancel-transcription-button",
                     "failed-screen",
+                    "transcription-error-message",
                     "retry-transcription-button",
                     "choose-different-file-button",
                     "complete-screen",
                     "back-to-ready-button",
+                    "result-file-name",
+                    "result-language",
+                    "transcript-preview",
+                    "preview-truncation-notice",
+                    "preview-unavailable",
                     "open-folder-button",
-                    "copy-text-button"
+                    "copy-text-button",
+                    "action-error-message"
                 ];
 
                 const isVisible = (el) => {
@@ -251,7 +266,7 @@ internal sealed class DesktopUiAutomationHost : IAsyncDisposable
                     return style.display !== "none" && style.visibility !== "hidden";
                 };
 
-                const activeScreenId = ["ready-screen", "running-screen", "failed-screen", "complete-screen"]
+                const activeScreenId = ["startup-error-screen", "ready-screen", "running-screen", "failed-screen", "complete-screen"]
                     .find((id) => isVisible(document.getElementById(id))) ?? null;
 
                 const visibleElementIds = trackedIds

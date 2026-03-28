@@ -165,16 +165,17 @@ The architecture supports testability through module isolation:
 - **Unit tests** cover configuration validation, startup reporting, WAV parsing, transcript filtering, language selection logic, output formatting, file discovery, and batch summary generation.
 - **End-to-end tests** validate full application startup, transcription flow entry, batch processing, and error handling using generated WAV fixtures and fake ffmpeg executables.
 - **MCP server tests** cover path policy validation, MCP configuration binding, application contract DTOs, and facade behavior (transcript reading with real file I/O).
-- **Desktop UI tests** cover headless Razor rendering for `Routes`, `MainLayout`, `ReadyView`, `DropZone`, status/progress/result states, settings panel behavior, and real-audio browse integration at the `ReadyView` level.
+- **Desktop UI tests** cover headless Razor rendering for `Routes`, `MainLayout`, `ReadyView`, `RunningView`, `CompleteView`, `FailedView`, `DropZone`, status/progress/result states, start-guard validation, transient-state clearing, cancellation cleanup, warning handling, progress accessibility, human-readable stage labels, full-transcript copy, preview truncation, action error handling, and real-audio browse integration at the `ReadyView` level.
+- **Desktop real UI automation** covers app launch, browse-file happy path, transcript copy, failure recovery, and repeated sequential processing against the actual `.app` bundle.
 - **Test support utilities** (`tests/TestSupport/`) provide deterministic test infrastructure: temporary directories, generated settings files, WAV fixtures, and mock ffmpeg.
 
 All tests run locally without network access, consistent with the local-only architecture.
 
-Current verification status as of March 24, 2026:
+Current verification status as of March 28, 2026:
 
 - Core and CLI processing are verified against `artifacts/Input/Test 1.m4a` and `artifacts/Input/Test 2.m4a`.
 - The Desktop `ReadyView -> DropZone -> AppViewModel -> VoxFlow.Core` path passes with real audio.
-- The fully integrated `Routes`-based Desktop shell still has open browse-flow failures in the UI integration suite and remains an active stabilization area.
+- The fully integrated `Routes`-based Desktop shell is stable: all headless and real UI tests pass. Phase 1 Desktop stabilization is complete.
 
 ## Related Documents
 

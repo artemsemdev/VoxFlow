@@ -436,6 +436,36 @@ dotnet test tests/VoxFlow.Desktop.Tests/VoxFlow.Desktop.Tests.csproj --no-restor
 ./scripts/run-desktop-ui-tests.sh --filter HappyPath_UserSelectsFile_SeesRunningState_AndGetsResult
 ```
 
+### Per-Host Smoke Routines
+
+**CLI smoke:**
+
+```bash
+cp appsettings.example.json appsettings.local.json
+# Edit appsettings.local.json: set processingMode to single, inputFilePath to a real audio file,
+# set wavFilePath and resultFilePath to writable locations, set modelFilePath.
+TRANSCRIPTION_SETTINGS_PATH=$PWD/appsettings.local.json dotnet run --project src/VoxFlow.Cli/VoxFlow.Cli.csproj
+# Verify: exit code 0, result file exists and contains timestamped transcript lines.
+```
+
+**Desktop smoke:**
+
+```bash
+dotnet build src/VoxFlow.Desktop/VoxFlow.Desktop.csproj -f net9.0-maccatalyst --no-restore
+dotnet run --project src/VoxFlow.Desktop/VoxFlow.Desktop.csproj -f net9.0-maccatalyst
+# Verify: app launches, Ready screen shows "Audio Transcription".
+# Click Browse Files, select an audio file, verify Running screen shows progress,
+# verify Complete screen shows transcript preview and actions.
+```
+
+**MCP smoke:**
+
+```bash
+TRANSCRIPTION_SETTINGS_PATH=$PWD/appsettings.json dotnet run --project src/VoxFlow.McpServer/VoxFlow.McpServer.csproj
+# Verify: the server starts on stdio without errors on stderr.
+# Send a JSON-RPC initialize request on stdin to confirm the server responds.
+```
+
 Most recent Desktop E2E baseline:
 
 - the integrated Desktop shell launches successfully

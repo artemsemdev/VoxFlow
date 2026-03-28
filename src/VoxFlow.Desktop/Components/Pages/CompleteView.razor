@@ -24,7 +24,23 @@
     @if (!string.IsNullOrEmpty(result.TranscriptPreview))
     {
         <div class="transcript-preview mt-4" id="transcript-preview">@result.TranscriptPreview</div>
+        @if (_isPreviewTruncated)
+        {
+            <p class="text-muted mt-1" id="preview-truncation-notice">Preview shows a portion of the full transcript.</p>
+        }
     }
+    else
+    {
+        <p class="text-muted mt-4" id="preview-unavailable">Transcript preview is not available.</p>
+    }
+}
+
+@if (!string.IsNullOrWhiteSpace(_actionError))
+{
+    <div class="message message-error mt-2" id="action-error-message" aria-label="Action Error">
+        <span class="message-icon">&#x2717;</span>
+        <span>@_actionError</span>
+    </div>
 }
 
 <div class="btn-group mt-4">
@@ -46,34 +62,66 @@
 
 @code {
     private bool _copied;
+    private string? _actionError;
+    private bool _isPreviewTruncated;
+
+    protected override void OnParametersSet()
+    {
+        var result = ViewModel.TranscriptionResult;
+        if (result is not null && !string.IsNullOrEmpty(result.TranscriptPreview) && !string.IsNullOrEmpty(result.ResultFilePath))
+        {
+            var fullText = ViewModel.GetFullTranscript();
+            _isPreviewTruncated = fullText is not null && fullText.Length > result.TranscriptPreview.Length;
+        }
+        else
+        {
+            _isPreviewTruncated = false;
+        }
+    }
 
     private async Task OpenFolder()
     {
+        _actionError = null;
         var result = ViewModel.TranscriptionResult;
         if (result is not null && !string.IsNullOrEmpty(result.ResultFilePath))
         {
             var directory = Path.GetDirectoryName(result.ResultFilePath);
             if (!string.IsNullOrEmpty(directory))
             {
-                await Launcher.Default.OpenAsync(directory);
+                try
+                {
+                    await Launcher.Default.OpenAsync(directory);
+                }
+                catch (Exception ex)
+                {
+                    _actionError = $"Could not open folder: {ex.Message}";
+                }
             }
         }
     }
 
     private async Task CopyTranscript()
     {
-        var result = ViewModel.TranscriptionResult;
-        if (result is not null && !string.IsNullOrEmpty(result.TranscriptPreview))
+        _actionError = null;
+        var fullTranscript = ViewModel.GetFullTranscript();
+        if (!string.IsNullOrEmpty(fullTranscript))
         {
-            await JSRuntime.InvokeVoidAsync("voxFlowInterop.copyToClipboard", result.TranscriptPreview);
-            _copied = true;
-            StateHasChanged();
-
-            _ = Task.Delay(2000).ContinueWith(_ =>
+            try
             {
-                _copied = false;
-                InvokeAsync(StateHasChanged);
-            });
+                await JSRuntime.InvokeVoidAsync("voxFlowInterop.copyToClipboard", fullTranscript);
+                _copied = true;
+                StateHasChanged();
+
+                _ = Task.Delay(2000).ContinueWith(_ =>
+                {
+                    _copied = false;
+                    InvokeAsync(StateHasChanged);
+                });
+            }
+            catch (Exception ex)
+            {
+                _actionError = $"Could not copy to clipboard: {ex.Message}";
+            }
         }
     }
 }

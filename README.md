@@ -45,6 +45,7 @@ The shared pipeline remains configuration loading, startup validation, ffmpeg-ba
 - Desktop has both headless component tests in `tests/VoxFlow.Desktop.Tests` and real macOS UI automation in `tests/VoxFlow.Desktop.UiTests`.
 - The real Desktop happy path is green end-to-end: app launch, `Browse Files`, running state, transcript completion, and result actions are exercised against the actual `.app`.
 - On Intel Mac Catalyst, Desktop routes transcription through the local `VoxFlow.Cli` host so the UI uses the same working transcription pipeline as CLI while keeping all processing on-device.
+- Desktop Phase 1 stabilization is complete: Ready-screen copy is accurate (multi-format, local-only, single-file), file intake is guarded by validation state, transient state is cleared on new runs and cancellation, progress shows numeric percent with human-readable stage labels and progressbar accessibility, transcript copy sends the full file (not preview), action errors are surfaced non-fatally, and non-blocking startup warnings are visible.
 
 ## Project Documentation
 

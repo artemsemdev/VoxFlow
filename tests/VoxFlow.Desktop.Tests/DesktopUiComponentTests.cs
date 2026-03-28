@@ -300,7 +300,7 @@ public sealed class DesktopUiComponentTests
             transcriptionResult: new TranscribeFileResult(
                 Success: true,
                 DetectedLanguage: "en",
-                ResultFilePath: "/tmp/result.txt",
+                ResultFilePath: null,
                 AcceptedSegmentCount: 7,
                 SkippedSegmentCount: 0,
                 Duration: TimeSpan.FromSeconds(12),
@@ -401,8 +401,8 @@ public sealed class DesktopUiComponentTests
         var rendered = await context.RenderAsync<ReadyView>();
 
         Assert.Contains("Audio Transcription", rendered.TextContent);
-        Assert.Contains("Drop your M4A files here to convert speech into text", rendered.TextContent);
-        Assert.Contains("No files added yet", rendered.TextContent);
+        Assert.Contains("Select an audio file to transcribe locally on this Mac", rendered.TextContent);
+        Assert.Contains("No file selected", rendered.TextContent);
     }
 
     [Fact]
@@ -691,6 +691,204 @@ public sealed class DesktopUiComponentTests
             "drop zone div");
 
         Assert.Null(selectedFile);
+    }
+
+    // -----------------------------------------------------------------------
+    // B1: Phase 1 — Expanded tests for Workstream A UI contract changes
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task ReadyView_ShowsCorrectedCopy_NoM4AOnly_NoUpload_NoMultipleFiles()
+    {
+        await using var context = DesktopUiTestContext.Create();
+        AppViewModelStateAccessor.SetState(context.ViewModel, currentState: AppState.Ready);
+
+        var rendered = await context.RenderAsync<ReadyView>();
+
+        Assert.Contains("Select an audio file to transcribe locally on this Mac", rendered.TextContent);
+        Assert.Contains("Supported formats: M4A, WAV, MP3, AAC, FLAC, OGG, AIFF, MP4", rendered.TextContent);
+        Assert.DoesNotContain("upload", rendered.TextContent, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("multiple files", rendered.TextContent, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Drop your M4A files", rendered.TextContent);
+    }
+
+    [Fact]
+    public async Task DropZone_ShowsCorrectedCopy_NoM4AOnly()
+    {
+        await using var context = DesktopUiTestContext.Create();
+        var rendered = await context.RenderAsync<DropZone>();
+
+        Assert.Contains("Choose an audio file to transcribe", rendered.TextContent);
+        Assert.DoesNotContain("Drop your M4A files", rendered.TextContent);
+        Assert.DoesNotContain("upload", rendered.TextContent, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ReadyView_ShowsNonBlockingWarnings_WhenCanStartButHasWarnings()
+    {
+        var validationService = new DelegateValidationService((_, _) =>
+            Task.FromResult(TestValidationFactory.Create(
+                canStart: true,
+                new ValidationCheck("model", ValidationCheckStatus.Warning, "Using a small model; accuracy may be limited."))));
+
+        await using var context = DesktopUiTestContext.Create(validationService: validationService);
+        var rendered = await context.RenderAsync<Routes>();
+
+        Assert.Equal(AppState.Ready, context.ViewModel.CurrentState);
+        Assert.True(context.ViewModel.HasWarnings);
+        Assert.Contains("Using a small model", rendered.TextContent);
+    }
+
+    [Fact]
+    public async Task RunningView_BeforeFirstProgress_ShowsStartingTranscription()
+    {
+        await using var context = DesktopUiTestContext.Create();
+        AppViewModelStateAccessor.SetState(
+            context.ViewModel,
+            currentState: AppState.Running,
+            lastFilePath: "/tmp/audio.m4a");
+
+        var rendered = await context.RenderAsync<RunningView>();
+
+        Assert.Contains("Starting transcription...", rendered.TextContent);
+    }
+
+    [Fact]
+    public async Task RunningView_WithProgress_ShowsNumericPercent()
+    {
+        await using var context = DesktopUiTestContext.Create();
+        AppViewModelStateAccessor.SetState(
+            context.ViewModel,
+            currentState: AppState.Running,
+            currentProgress: new ProgressUpdate(
+                ProgressStage.Transcribing,
+                67,
+                TimeSpan.FromSeconds(30),
+                "Processing segments"));
+
+        var rendered = await context.RenderAsync<RunningView>();
+
+        Assert.Contains("67%", rendered.TextContent);
+    }
+
+    [Fact]
+    public async Task RunningView_WithLoadingModel_ShowsHumanReadableLabel()
+    {
+        await using var context = DesktopUiTestContext.Create();
+        AppViewModelStateAccessor.SetState(
+            context.ViewModel,
+            currentState: AppState.Running,
+            currentProgress: new ProgressUpdate(
+                ProgressStage.LoadingModel,
+                15,
+                TimeSpan.FromSeconds(5),
+                "Loading ggml-base.bin"));
+
+        var rendered = await context.RenderAsync<RunningView>();
+
+        Assert.Contains("Loading model", rendered.TextContent);
+        Assert.DoesNotContain("LoadingModel", rendered.TextContent);
+    }
+
+    [Fact]
+    public async Task RunningView_ProgressBar_HasAccessibilityAttributes()
+    {
+        await using var context = DesktopUiTestContext.Create();
+        AppViewModelStateAccessor.SetState(
+            context.ViewModel,
+            currentState: AppState.Running,
+            currentProgress: new ProgressUpdate(
+                ProgressStage.Transcribing,
+                50,
+                TimeSpan.FromSeconds(10),
+                "Half done"));
+
+        var rendered = await context.RenderAsync<RunningView>();
+
+        var progressTrack = rendered.FindElement(
+            element => element.Name == "div" && element.HasClass("progress-track")
+                       && element.Attributes.ContainsKey("role"),
+            "progress track with role");
+
+        Assert.Equal("progressbar", progressTrack.Attributes["role"]?.ToString());
+        Assert.Equal("50", progressTrack.Attributes["aria-valuenow"]?.ToString());
+    }
+
+    [Fact]
+    public async Task CompleteView_WhenPreviewUnavailable_ShowsUnavailableMessage()
+    {
+        await using var context = DesktopUiTestContext.Create();
+        AppViewModelStateAccessor.SetState(
+            context.ViewModel,
+            currentState: AppState.Complete,
+            transcriptionResult: new TranscribeFileResult(
+                Success: true,
+                DetectedLanguage: "en",
+                ResultFilePath: "/tmp/result.txt",
+                AcceptedSegmentCount: 5,
+                SkippedSegmentCount: 0,
+                Duration: TimeSpan.FromSeconds(8),
+                Warnings: [],
+                TranscriptPreview: null));
+
+        var rendered = await context.RenderAsync<CompleteView>();
+
+        Assert.Contains("Transcript preview is not available", rendered.TextContent);
+    }
+
+    [Fact]
+    public async Task CompleteView_WhenResultPathMissing_OpenFolderIsNoOp()
+    {
+        await using var context = DesktopUiTestContext.Create();
+        AppViewModelStateAccessor.SetState(
+            context.ViewModel,
+            currentState: AppState.Complete,
+            transcriptionResult: new TranscribeFileResult(
+                Success: true,
+                DetectedLanguage: "en",
+                ResultFilePath: null,
+                AcceptedSegmentCount: 5,
+                SkippedSegmentCount: 0,
+                Duration: TimeSpan.FromSeconds(8),
+                Warnings: [],
+                TranscriptPreview: "Some text"));
+
+        var rendered = await context.RenderAsync<CompleteView>();
+
+        // Button is always present but gracefully does nothing when path is missing
+        await rendered.ClickAsync(
+            element => element.Name == "button" && element.TextContent == "Open Folder",
+            "open folder button");
+
+        var launcher = Launcher.Default;
+        Assert.Empty(launcher.OpenedTargets);
+    }
+
+    [Fact]
+    public async Task CompleteView_WhenNoPreviewAndNoResultPath_CopyIsNoOp()
+    {
+        await using var context = DesktopUiTestContext.Create();
+        AppViewModelStateAccessor.SetState(
+            context.ViewModel,
+            currentState: AppState.Complete,
+            transcriptionResult: new TranscribeFileResult(
+                Success: true,
+                DetectedLanguage: "en",
+                ResultFilePath: null,
+                AcceptedSegmentCount: 5,
+                SkippedSegmentCount: 0,
+                Duration: TimeSpan.FromSeconds(8),
+                Warnings: [],
+                TranscriptPreview: null));
+
+        var rendered = await context.RenderAsync<CompleteView>();
+
+        // Button is always present but gracefully does nothing when no text is available
+        await rendered.ClickAsync(
+            element => element.Name == "button" && element.TextContent == "Copy Text",
+            "copy text button");
+
+        Assert.Empty(context.JsRuntime.Invocations);
     }
 
     private static string WriteSingleFileConfig(string repositoryRoot, string tempDir, string inputPath)

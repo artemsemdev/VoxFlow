@@ -78,6 +78,12 @@ public partial class MainPage : ContentPage
 
     private async void HandleNativeDrop(object? sender, DropEventArgs e)
     {
+        if (!_viewModel.CanStart)
+        {
+            DesktopDiagnostics.LogInfo("Native drop ignored: CanStart is false.");
+            return;
+        }
+
         var filePath = await TryGetDroppedAudioFilePathAsync(e);
         if (string.IsNullOrWhiteSpace(filePath))
         {

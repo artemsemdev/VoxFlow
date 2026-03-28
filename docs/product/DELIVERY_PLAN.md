@@ -24,6 +24,30 @@ Current repo reality:
 
 That means the next job is not broad architecture work. The next job is disciplined execution against the existing Desktop workflow and its tests.
 
+## Phase 1 Status (March 28, 2026)
+
+**Phase 1 is complete.** All Workstream A (Desktop UI Contract), Workstream B (Desktop Test Gate), and Workstream C (Operational Clarity) deliverables have been implemented and verified.
+
+Completed issues:
+
+| Issue | Status | Summary |
+|---|---|---|
+| 1 | **Done** | Ready-screen copy corrected — no M4A-only, no upload, no multiple files |
+| 2 | **Done** | ViewModel start guard enforced via `CanStart` property |
+| 3 | **Done** | Shell-level native drop checks `CanStart` before proceeding |
+| 4 | **Done** | Transient state cleared on new run, retry, and cancel |
+| 5 | **Done** | Numeric percent, human-readable stage labels, progressbar a11y, "Starting transcription..." |
+| 6 | **Done** | Full transcript copied via `GetFullTranscript()`; preview truncation surfaced |
+| 7 | **Done** | Startup warnings visible; action errors shown non-fatally; buttons hidden when data missing |
+| 8 | **Done** | 10+ new fast tests covering start guard, transient state, warnings, progress, copy, preview |
+| 9 | **Done** | Automation bridge tracks 27 element IDs including startup-error, validation, progress, preview |
+| 10–11 | **Deferred** | Real UI scenarios for startup failure, blocked ready, cancel, and failure recovery — automation bridge support is in place; execution requires the built `.app` |
+| 12 | **Done** | Per-host smoke routines documented in SETUP.md |
+| 13 | **Done** | README, ARCHITECTURE, DESKTOP_UI_SPEC known gaps updated |
+| 14 | **Done** | Demo-ready release checklist created at `docs/product/RELEASE_CHECKLIST.md` |
+
+Remaining open DESKTOP_UI_SPEC gaps: 12 (preview normalization across runtimes), 18 (Razor-layer file-type validation), 19 (accessibility focus management), 21 (real UI scenario execution).
+
 ## 2. Delivery Stages
 
 ### Stage 0: Execution Baseline

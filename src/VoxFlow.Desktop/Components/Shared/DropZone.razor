@@ -9,15 +9,15 @@
      @onclick="BrowseFiles"
      @onkeydown="HandleKeyDown">
 
-    <div class="upload-icon">
+    <div class="file-icon">
         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
             <polyline points="17 8 12 3 7 8"/>
             <line x1="12" y1="3" x2="12" y2="15"/>
         </svg>
     </div>
-    <span id="drop-zone-label" class="drop-label">@(Label ?? "No files added yet")</span>
-    <span class="drop-hint">Drop your M4A files here or <span class="drop-browse-link">browse</span> from your device.</span>
+    <span id="drop-zone-label" class="drop-label">@(Label ?? "No file selected")</span>
+    <span class="drop-hint">Choose an audio file to transcribe.</span>
     <button id="browse-files-button"
             class="btn btn-primary mt-4"
             aria-label="Browse Files"

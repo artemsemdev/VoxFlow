@@ -41,7 +41,7 @@ public class AppViewModel : INotifyPropertyChanged
     public AppState CurrentState
     {
         get => _currentState;
-        private set { _currentState = value; OnPropertyChanged(); }
+        private set { _currentState = value; OnPropertyChanged(); OnPropertyChanged(nameof(CanStart)); }
     }
 
     public ValidationResult? ValidationResult
@@ -53,6 +53,9 @@ public class AppViewModel : INotifyPropertyChanged
             OnPropertyChanged();
             OnPropertyChanged(nameof(HasBlockingValidationErrors));
             OnPropertyChanged(nameof(BlockingValidationMessage));
+            OnPropertyChanged(nameof(HasWarnings));
+            OnPropertyChanged(nameof(WarningMessage));
+            OnPropertyChanged(nameof(CanStart));
         }
     }
 
@@ -76,6 +79,8 @@ public class AppViewModel : INotifyPropertyChanged
 
     public bool HasBlockingValidationErrors => ValidationResult?.CanStart == false;
 
+    public bool HasWarnings => ValidationResult?.HasWarnings == true && ValidationResult.CanStart;
+
     public string? BlockingValidationMessage => ValidationResult?.Checks is null
         ? null
         : string.Join(
@@ -84,7 +89,42 @@ public class AppViewModel : INotifyPropertyChanged
                 .Where(check => check.Status == ValidationCheckStatus.Failed)
                 .Select(check => check.Details));
 
+    public string? WarningMessage => ValidationResult?.Checks is null
+        ? null
+        : string.Join(
+            "; ",
+            ValidationResult.Checks
+                .Where(check => check.Status == ValidationCheckStatus.Warning)
+                .Select(check => check.Details));
+
+    public bool CanStart => CurrentState == AppState.Ready && ValidationResult is not null && !HasBlockingValidationErrors;
+
     public string? CurrentFileName => _lastFilePath is not null ? Path.GetFileName(_lastFilePath) : null;
+
+    /// <summary>
+    /// Reads the full transcript from the result file when available.
+    /// Falls back to the preview if the file cannot be read.
+    /// </summary>
+    public string? GetFullTranscript()
+    {
+        var result = TranscriptionResult;
+        if (result is null)
+            return null;
+
+        if (!string.IsNullOrEmpty(result.ResultFilePath) && File.Exists(result.ResultFilePath))
+        {
+            try
+            {
+                return File.ReadAllText(result.ResultFilePath);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[AppViewModel] Failed to read full transcript: {ex.Message}");
+            }
+        }
+
+        return result.TranscriptPreview;
+    }
 
     /// <summary>
     /// Loads effective configuration, runs startup validation, and initializes the UI state.
@@ -99,14 +139,23 @@ public class AppViewModel : INotifyPropertyChanged
 
     /// <summary>
     /// Starts transcription for the selected file and updates the UI as progress changes.
+    /// Guards against invalid states: only starts when <see cref="CanStart"/> is true.
     /// </summary>
     public async Task TranscribeFileAsync(string filePath)
     {
+        if (!CanStart)
+        {
+            System.Diagnostics.Debug.WriteLine($"[AppViewModel] TranscribeFileAsync blocked: CanStart={CanStart}, State={CurrentState}");
+            return;
+        }
+
         System.Diagnostics.Debug.WriteLine($"[AppViewModel] TranscribeFileAsync started: {filePath}");
         _lastFilePath = filePath;
         OnPropertyChanged(nameof(CurrentFileName));
-        CurrentState = AppState.Running;
+        TranscriptionResult = null;
+        CurrentProgress = null;
         ErrorMessage = null;
+        CurrentState = AppState.Running;
         _cts?.Dispose();
         var cts = new CancellationTokenSource();
         _cts = cts;
@@ -122,7 +171,7 @@ public class AppViewModel : INotifyPropertyChanged
         catch (OperationCanceledException)
         {
             System.Diagnostics.Debug.WriteLine("[AppViewModel] Transcription cancelled.");
-            CurrentState = AppState.Ready;
+            GoToReady();
         }
         catch (Exception ex)
         {
@@ -143,10 +192,14 @@ public class AppViewModel : INotifyPropertyChanged
 
     /// <summary>
     /// Re-runs transcription for the previously selected file when one is available.
+    /// Resets state to Ready first so the start guard is satisfied.
     /// </summary>
     public async Task RetryAsync()
     {
-        if (_lastFilePath != null) await TranscribeFileAsync(_lastFilePath);
+        if (_lastFilePath == null) return;
+        var filePath = _lastFilePath;
+        GoToReady();
+        await TranscribeFileAsync(filePath);
     }
 
     /// <summary>
