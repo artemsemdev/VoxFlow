@@ -66,6 +66,78 @@ public sealed class BatchTranscriptionServiceTests
         Assert.Equal("Skipped", result.Results[0].Status);
     }
 
+    [Fact]
+    public async Task TranscribeBatchAsync_ReportsNestedProgress_ForCurrentFile()
+    {
+        using var directory = new TemporaryDirectory();
+        var inputDir = Path.Combine(directory.Path, "input");
+        var outputDir = Path.Combine(directory.Path, "output");
+        var tempDir = Path.Combine(directory.Path, "temp");
+        Directory.CreateDirectory(inputDir);
+        Directory.CreateDirectory(outputDir);
+        Directory.CreateDirectory(tempDir);
+
+        var inputPath = Path.Combine(inputDir, "demo.m4a");
+        var outputPath = Path.Combine(outputDir, "demo.txt");
+        var tempWavPath = Path.Combine(tempDir, "demo.wav");
+        File.WriteAllText(inputPath, "stub");
+
+        var settingsPath = TestSettingsFileFactory.Write(
+            directory.Path,
+            inputFilePath: string.Empty,
+            wavFilePath: string.Empty,
+            resultFilePath: string.Empty,
+            modelFilePath: Path.Combine(directory.Path, "model.bin"),
+            ffmpegExecutablePath: "ffmpeg",
+            processingMode: "batch",
+            batch: new
+            {
+                inputDirectory = inputDir,
+                outputDirectory = outputDir,
+                tempDirectory = tempDir,
+                filePattern = "*.m4a",
+                summaryFilePath = Path.Combine(outputDir, "summary.txt")
+            });
+
+        var discovery = new RecordingFileDiscoveryService(
+            [
+                new DiscoveredFile(
+                    inputPath,
+                    outputPath,
+                    tempWavPath,
+                    DiscoveryStatus.Ready,
+                    null)
+            ]);
+        var progressUpdates = new List<ProgressUpdate>();
+        var progress = new Progress<ProgressUpdate>(update => progressUpdates.Add(update));
+
+        var service = new BatchTranscriptionService(
+            new StubBatchConfigurationService(settingsPath),
+            new StubBatchValidationService(),
+            discovery,
+            new SuccessfulAudioConversionService(),
+            new NoOpModelService(),
+            new SuccessfulWavAudioLoader(),
+            new ReportingLanguageSelectionService(),
+            new RecordingOutputWriter(),
+            new RecordingBatchSummaryWriter());
+
+        var result = await service.TranscribeBatchAsync(
+            new BatchTranscribeRequest(inputDir, outputDir, ConfigurationPath: settingsPath),
+            progress);
+
+        Assert.Single(result.Results);
+        Assert.Equal("Success", result.Results[0].Status);
+        Assert.Contains(
+            progressUpdates,
+            update => update.Stage == ProgressStage.Transcribing &&
+                      update.PercentComplete > 10 &&
+                      update.PercentComplete < 90 &&
+                      update.Message is not null &&
+                      update.Message.Contains("[1/1] demo.m4a", StringComparison.Ordinal) &&
+                      update.Message.Contains("Transcribing English", StringComparison.Ordinal));
+    }
+
     private sealed class StubBatchConfigurationService(string settingsPath) : IConfigurationService
     {
         public Task<TranscriptionOptions> LoadAsync(string? configurationPath = null)
@@ -122,6 +194,24 @@ public sealed class BatchTranscriptionServiceTests
         }
     }
 
+    private sealed class SuccessfulAudioConversionService : IAudioConversionService
+    {
+        public Task ConvertToWavAsync(
+            string inputPath,
+            string outputPath,
+            TranscriptionOptions options,
+            CancellationToken cancellationToken = default)
+        {
+            File.WriteAllText(outputPath, "wav");
+            return Task.CompletedTask;
+        }
+
+        public Task<bool> ValidateFfmpegAsync(
+            TranscriptionOptions options,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult(true);
+    }
+
     private sealed class NoOpModelService : IModelService
     {
         public Task<WhisperFactory> GetOrCreateFactoryAsync(
@@ -146,6 +236,17 @@ public sealed class BatchTranscriptionServiceTests
         }
     }
 
+    private sealed class SuccessfulWavAudioLoader : IWavAudioLoader
+    {
+        public Task<float[]> LoadSamplesAsync(
+            string wavPath,
+            TranscriptionOptions options,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(new float[160_000]);
+        }
+    }
+
     private sealed class NoOpLanguageSelectionService : ILanguageSelectionService
     {
         public Task<LanguageSelectionResult> SelectBestCandidateAsync(
@@ -156,6 +257,37 @@ public sealed class BatchTranscriptionServiceTests
             CancellationToken cancellationToken = default)
         {
             throw new NotSupportedException("Skipped files should not run language selection.");
+        }
+    }
+
+    private sealed class ReportingLanguageSelectionService : ILanguageSelectionService
+    {
+        public Task<LanguageSelectionResult> SelectBestCandidateAsync(
+            WhisperFactory factory,
+            float[] audioSamples,
+            TranscriptionOptions options,
+            IProgress<ProgressUpdate>? progress = null,
+            CancellationToken cancellationToken = default)
+        {
+            progress?.Report(new ProgressUpdate(
+                ProgressStage.Transcribing,
+                25,
+                TimeSpan.Zero,
+                "Transcribing English",
+                "English"));
+            progress?.Report(new ProgressUpdate(
+                ProgressStage.Transcribing,
+                75,
+                TimeSpan.Zero,
+                "Transcribing English",
+                "English"));
+
+            return Task.FromResult(new LanguageSelectionResult(
+                new SupportedLanguage("en", "English", 0),
+                0.8,
+                TimeSpan.FromSeconds(10),
+                [new FilteredSegment(TimeSpan.Zero, TimeSpan.FromSeconds(2), "hello", 0.9)],
+                Array.Empty<SkippedSegment>()));
         }
     }
 
@@ -171,6 +303,21 @@ public sealed class BatchTranscriptionServiceTests
 
         public string BuildOutputText(IReadOnlyList<FilteredSegment> segments)
             => string.Empty;
+    }
+
+    private sealed class RecordingOutputWriter : IOutputWriter
+    {
+        public Task WriteAsync(
+            string outputPath,
+            IReadOnlyList<FilteredSegment> segments,
+            CancellationToken cancellationToken = default)
+        {
+            File.WriteAllText(outputPath, string.Join(Environment.NewLine, segments.Select(segment => segment.Text)));
+            return Task.CompletedTask;
+        }
+
+        public string BuildOutputText(IReadOnlyList<FilteredSegment> segments)
+            => string.Join(Environment.NewLine, segments.Select(segment => segment.Text));
     }
 
     private sealed class RecordingBatchSummaryWriter : IBatchSummaryWriter

@@ -103,6 +103,11 @@ public sealed class Clipboard
 
 public static class MainThread
 {
+    public static void BeginInvokeOnMainThread(Action callback)
+    {
+        callback();
+    }
+
     public static Task<T> InvokeOnMainThreadAsync<T>(Func<Task<T>> callback)
     {
         return callback();

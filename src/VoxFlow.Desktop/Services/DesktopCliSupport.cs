@@ -1,11 +1,15 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
+using System.Text.Json;
 using System.Text.RegularExpressions;
+using VoxFlow.Core.Models;
 
 namespace VoxFlow.Desktop.Services;
 
 internal static partial class DesktopCliSupport
 {
+    private const string StructuredProgressPrefix = "VOXFLOW_PROGRESS ";
+
     public static bool ShouldUseCliBridge()
         => OperatingSystem.IsMacCatalyst()
             && RuntimeInformation.ProcessArchitecture == Architecture.X64;
@@ -134,8 +138,57 @@ internal static partial class DesktopCliSupport
             acceptedSegments);
     }
 
+    public static bool TryParseProgressUpdate(string line, [NotNullWhen(true)] out ProgressUpdate? progressUpdate)
+    {
+        progressUpdate = null;
+
+        if (!line.StartsWith(StructuredProgressPrefix, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var payload = line[StructuredProgressPrefix.Length..].Trim();
+        if (string.IsNullOrWhiteSpace(payload))
+        {
+            return false;
+        }
+
+        try
+        {
+            var envelope = JsonSerializer.Deserialize<CliProgressEnvelope>(payload);
+            if (envelope is null ||
+                !Enum.TryParse<ProgressStage>(envelope.Stage, ignoreCase: true, out var stage))
+            {
+                return false;
+            }
+
+            progressUpdate = new ProgressUpdate(
+                stage,
+                envelope.PercentComplete,
+                TimeSpan.FromMilliseconds(Math.Max(0, envelope.ElapsedMilliseconds)),
+                envelope.Message,
+                envelope.CurrentLanguage,
+                envelope.BatchFileIndex,
+                envelope.BatchFileTotal);
+            return true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
     [GeneratedRegex(@"Done\.\s+Language:\s*(?<language>.+?),\s*Segments:\s*(?<segments>\d+)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex SuccessLineRegex();
 }
+
+internal sealed record CliProgressEnvelope(
+    string Stage,
+    double PercentComplete,
+    long ElapsedMilliseconds,
+    string? Message,
+    string? CurrentLanguage,
+    int? BatchFileIndex,
+    int? BatchFileTotal);
 
 internal sealed record CliSuccessMetadata(string? DetectedLanguage, int AcceptedSegmentCount);

@@ -768,6 +768,36 @@ public sealed class DesktopUiComponentTests
     }
 
     [Fact]
+    public async Task RunningView_WhenProgressChangesAfterRender_RefreshesPercentAndStage()
+    {
+        await using var context = DesktopUiTestContext.Create();
+        AppViewModelStateAccessor.SetState(
+            context.ViewModel,
+            currentState: AppState.Running,
+            currentProgress: new ProgressUpdate(
+                ProgressStage.Validating,
+                0,
+                TimeSpan.Zero,
+                "Running CLI transcription pipeline..."));
+
+        var rendered = await context.RenderAsync<RunningView>();
+
+        context.ViewModel.CurrentProgress = new ProgressUpdate(
+            ProgressStage.Transcribing,
+            38,
+            TimeSpan.FromSeconds(12),
+            "Processing audio",
+            "English");
+
+        await rendered.SynchronizeAsync();
+
+        Assert.Contains("38%", rendered.TextContent);
+        Assert.Contains("Transcribing", rendered.TextContent);
+        Assert.Contains("Processing audio", rendered.TextContent);
+        Assert.Contains("Language: English", rendered.TextContent);
+    }
+
+    [Fact]
     public async Task RunningView_WithLoadingModel_ShowsHumanReadableLabel()
     {
         await using var context = DesktopUiTestContext.Create();

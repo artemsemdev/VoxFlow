@@ -63,14 +63,22 @@ internal sealed class DesktopCliTranscriptionService : ITranscriptionService
 
             using var cancellationRegistration = cancellationToken.Register(() => TryKill(process));
 
-            var standardOutputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
-            var standardErrorTask = process.StandardError.ReadToEndAsync(cancellationToken);
+            var standardOutput = new StringBuilder();
+            var standardError = new StringBuilder();
+
+            var standardOutputTask = PumpReaderAsync(
+                process.StandardOutput,
+                line => AppendOutputLine(line, standardOutput, progress),
+                cancellationToken);
+            var standardErrorTask = PumpReaderAsync(
+                process.StandardError,
+                line => AppendOutputLine(line, standardError, progress),
+                cancellationToken);
 
             await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+            await Task.WhenAll(standardOutputTask, standardErrorTask).ConfigureAwait(false);
 
-            var standardOutput = await standardOutputTask.ConfigureAwait(false);
-            var standardError = await standardErrorTask.ConfigureAwait(false);
-            var combinedOutput = CombineOutput(standardOutput, standardError);
+            var combinedOutput = CombineOutput(standardOutput.ToString(), standardError.ToString());
 
             if (process.ExitCode != 0)
             {
@@ -159,6 +167,7 @@ internal sealed class DesktopCliTranscriptionService : ITranscriptionService
         }
 
         startInfo.Environment["TRANSCRIPTION_SETTINGS_PATH"] = configurationPath;
+        startInfo.Environment["VOXFLOW_PROGRESS_STREAM"] = "1";
         return startInfo;
     }
 
@@ -176,6 +185,37 @@ internal sealed class DesktopCliTranscriptionService : ITranscriptionService
         }
 
         return builder.ToString().Trim();
+    }
+
+    private static async Task PumpReaderAsync(
+        StreamReader reader,
+        Action<string> handleLine,
+        CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            var line = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
+            if (line is null)
+            {
+                return;
+            }
+
+            handleLine(line);
+        }
+    }
+
+    private static void AppendOutputLine(
+        string line,
+        StringBuilder builder,
+        IProgress<ProgressUpdate>? progress)
+    {
+        if (DesktopCliSupport.TryParseProgressUpdate(line, out var progressUpdate))
+        {
+            progress?.Report(progressUpdate);
+            return;
+        }
+
+        builder.AppendLine(line);
     }
 
     private static void TryKill(Process process)

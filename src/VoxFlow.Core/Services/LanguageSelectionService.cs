@@ -53,6 +53,12 @@ internal sealed class LanguageSelectionService : ILanguageSelectionService
                     audioSamples,
                     language,
                     options,
+                    candidatePercent => progress?.Report(new ProgressUpdate(
+                        ProgressStage.Transcribing,
+                        candidatePercent,
+                        TimeSpan.Zero,
+                        $"Transcribing {language.DisplayName}",
+                        language.DisplayName)),
                     cancellationToken)
                 .ConfigureAwait(false);
 
@@ -68,7 +74,7 @@ internal sealed class LanguageSelectionService : ILanguageSelectionService
         for (var index = 0; index < options.SupportedLanguages.Count; index++)
         {
             var language = options.SupportedLanguages[index];
-            var percentComplete = (double)index / options.SupportedLanguages.Count * 100;
+            var percentComplete = MapCandidateProgressToOverallPercent(index, options.SupportedLanguages.Count, 0);
             progress?.Report(new ProgressUpdate(
                 ProgressStage.Transcribing, percentComplete,
                 TimeSpan.Zero,
@@ -80,6 +86,12 @@ internal sealed class LanguageSelectionService : ILanguageSelectionService
                     audioSamples,
                     language,
                     options,
+                    candidatePercent => progress?.Report(new ProgressUpdate(
+                        ProgressStage.Transcribing,
+                        MapCandidateProgressToOverallPercent(index, options.SupportedLanguages.Count, candidatePercent),
+                        TimeSpan.Zero,
+                        $"Transcribing {language.DisplayName}",
+                        language.DisplayName)),
                     cancellationToken)
                 .ConfigureAwait(false);
 
@@ -128,11 +140,13 @@ internal sealed class LanguageSelectionService : ILanguageSelectionService
         float[] audioSamples,
         SupportedLanguage language,
         TranscriptionOptions options,
+        Action<double>? reportCandidateProgress = null,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         processor.ChangeLanguage(language.Code);
         var segments = new List<SegmentData>();
+        var lastReportedPercent = -1d;
 
         // The Whisper processor streams segments incrementally, so cancellation can
         // stop a long-running candidate pass without waiting for the full transcript.
@@ -141,7 +155,21 @@ internal sealed class LanguageSelectionService : ILanguageSelectionService
                            .ConfigureAwait(false))
         {
             segments.Add(segment);
+
+            var candidatePercent = CalculateCandidateProgressPercent(
+                segment.End,
+                audioSamples.Length,
+                options.OutputSampleRate);
+            if (!ShouldReportCandidateProgress(lastReportedPercent, candidatePercent))
+            {
+                continue;
+            }
+
+            lastReportedPercent = candidatePercent;
+            reportCandidateProgress?.Invoke(candidatePercent);
         }
+
+        reportCandidateProgress?.Invoke(100);
 
         var filteringResult = _filter.FilterSegments(language, segments, options);
         var acceptedSpeechDuration = TimeSpan.FromSeconds(
@@ -156,6 +184,40 @@ internal sealed class LanguageSelectionService : ILanguageSelectionService
             filteringResult.Accepted,
             filteringResult.Skipped);
     }
+
+    internal static double MapCandidateProgressToOverallPercent(
+        int candidateIndex,
+        int candidateCount,
+        double candidatePercent)
+    {
+        var normalizedCount = Math.Max(candidateCount, 1);
+        var normalizedIndex = Math.Clamp(candidateIndex, 0, normalizedCount - 1);
+        var normalizedPercent = Math.Clamp(candidatePercent, 0d, 100d) / 100d;
+
+        return ((normalizedIndex + normalizedPercent) / normalizedCount) * 100d;
+    }
+
+    internal static double CalculateCandidateProgressPercent(
+        TimeSpan segmentEnd,
+        int totalSampleCount,
+        int sampleRate)
+    {
+        if (totalSampleCount <= 0 || sampleRate <= 0)
+        {
+            return 0d;
+        }
+
+        var totalDurationSeconds = totalSampleCount / (double)sampleRate;
+        if (totalDurationSeconds <= 0d)
+        {
+            return 0d;
+        }
+
+        return Math.Clamp((segmentEnd.TotalSeconds / totalDurationSeconds) * 100d, 0d, 100d);
+    }
+
+    private static bool ShouldReportCandidateProgress(double lastReportedPercent, double candidatePercent)
+        => candidatePercent >= 100d || Math.Floor(candidatePercent) > Math.Floor(lastReportedPercent);
 
     /// <summary>
     /// Applies the business rules that decide whether a candidate can be accepted.

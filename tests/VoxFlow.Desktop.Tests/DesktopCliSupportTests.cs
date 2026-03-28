@@ -32,6 +32,25 @@ public sealed class DesktopCliSupportTests
     }
 
     [Fact]
+    public void TryParseProgressUpdate_ParsesStructuredProgressEnvelope()
+    {
+        var line =
+            """
+            VOXFLOW_PROGRESS {"Stage":"Transcribing","PercentComplete":47.5,"ElapsedMilliseconds":12345,"Message":"Transcribing English","CurrentLanguage":"English","BatchFileIndex":null,"BatchFileTotal":null}
+            """;
+
+        var parsed = DesktopCliSupport.TryParseProgressUpdate(line, out var update);
+
+        Assert.True(parsed);
+        Assert.NotNull(update);
+        Assert.Equal(VoxFlow.Core.Models.ProgressStage.Transcribing, update!.Stage);
+        Assert.Equal(47.5, update.PercentComplete);
+        Assert.Equal(TimeSpan.FromMilliseconds(12345), update.Elapsed);
+        Assert.Equal("Transcribing English", update.Message);
+        Assert.Equal("English", update.CurrentLanguage);
+    }
+
+    [Fact]
     public void ResolveBuiltCliAssemblyPath_ReturnsNullWhenCliOutputIsMissing()
     {
         var repositoryRoot = Path.Combine(Path.GetTempPath(), $"voxflow-cli-missing-{Guid.NewGuid():N}");

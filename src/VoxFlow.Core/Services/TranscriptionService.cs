@@ -7,6 +7,9 @@ using VoxFlow.Core.Models;
 
 internal sealed class TranscriptionService : ITranscriptionService
 {
+    private const double TranscribingStageStartPercent = 30d;
+    private const double TranscribingStageEndPercent = 90d;
+
     private readonly IConfigurationService _configService;
     private readonly IValidationService _validationService;
     private readonly IAudioConversionService _audioConversion;
@@ -81,9 +84,14 @@ internal sealed class TranscriptionService : ITranscriptionService
         var audioSamples = await _wavLoader.LoadSamplesAsync(wavPath, options, cancellationToken);
 
         // 6. Transcribe + select language
-        progress?.Report(new ProgressUpdate(ProgressStage.Transcribing, 30, stopwatch.Elapsed, "Transcribing..."));
+        progress?.Report(new ProgressUpdate(
+            ProgressStage.Transcribing,
+            TranscribingStageStartPercent,
+            stopwatch.Elapsed,
+            "Transcribing..."));
+        var selectionProgress = CreateLanguageSelectionProgressReporter(progress, stopwatch);
         var selectionResult = await _languageSelection.SelectBestCandidateAsync(
-            factory, audioSamples, options, progress, cancellationToken);
+            factory, audioSamples, options, selectionProgress, cancellationToken);
 
         if (selectionResult.Warning != null)
             warnings.Add(selectionResult.Warning);
@@ -109,5 +117,31 @@ internal sealed class TranscriptionService : ITranscriptionService
             stopwatch.Elapsed,
             warnings,
             preview);
+    }
+
+    internal static double MapLanguageSelectionPercentToPipelinePercent(double selectionPercent)
+    {
+        var clamped = Math.Clamp(selectionPercent, 0d, 100d);
+        return TranscribingStageStartPercent +
+               ((TranscribingStageEndPercent - TranscribingStageStartPercent) * (clamped / 100d));
+    }
+
+    private static IProgress<ProgressUpdate>? CreateLanguageSelectionProgressReporter(
+        IProgress<ProgressUpdate>? progress,
+        Stopwatch stopwatch)
+    {
+        if (progress is null)
+        {
+            return null;
+        }
+
+        return new Progress<ProgressUpdate>(update =>
+        {
+            progress.Report(update with
+            {
+                PercentComplete = MapLanguageSelectionPercentToPipelinePercent(update.PercentComplete),
+                Elapsed = stopwatch.Elapsed
+            });
+        });
     }
 }

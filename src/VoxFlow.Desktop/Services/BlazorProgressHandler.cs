@@ -14,7 +14,10 @@ public sealed class BlazorProgressHandler : IProgress<ProgressUpdate>
 
     public void Report(ProgressUpdate value)
     {
-        _viewModel.CurrentProgress = value;
-        _viewModel.NotifyStateChanged();
+        MainThread.BeginInvokeOnMainThread(() =>
+        {
+            _viewModel.CurrentProgress = value;
+            _viewModel.NotifyStateChanged();
+        });
     }
 }

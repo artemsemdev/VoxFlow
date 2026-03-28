@@ -1,5 +1,6 @@
 namespace VoxFlow.Cli;
 
+using System.Text.Json;
 using VoxFlow.Core.Models;
 
 /// <summary>
@@ -7,8 +8,25 @@ using VoxFlow.Core.Models;
 /// </summary>
 internal sealed class CliProgressHandler : IProgress<ProgressUpdate>
 {
+    private const string StructuredProgressPrefix = "VOXFLOW_PROGRESS ";
+
     public void Report(ProgressUpdate value)
     {
+        if (string.Equals(Environment.GetEnvironmentVariable("VOXFLOW_PROGRESS_STREAM"), "1", StringComparison.Ordinal))
+        {
+            var payload = JsonSerializer.Serialize(new CliProgressEnvelope(
+                value.Stage.ToString(),
+                value.PercentComplete,
+                (long)value.Elapsed.TotalMilliseconds,
+                value.Message,
+                value.CurrentLanguage,
+                value.BatchFileIndex,
+                value.BatchFileTotal));
+
+            Console.Error.WriteLine($"{StructuredProgressPrefix}{payload}");
+            return;
+        }
+
         var prefix = value.Stage switch
         {
             ProgressStage.Validating => "Validating",
@@ -30,3 +48,12 @@ internal sealed class CliProgressHandler : IProgress<ProgressUpdate>
             Console.WriteLine();
     }
 }
+
+internal sealed record CliProgressEnvelope(
+    string Stage,
+    double PercentComplete,
+    long ElapsedMilliseconds,
+    string? Message,
+    string? CurrentLanguage,
+    int? BatchFileIndex,
+    int? BatchFileTotal);

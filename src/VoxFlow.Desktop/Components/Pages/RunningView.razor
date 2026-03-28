@@ -1,3 +1,5 @@
+@using System.ComponentModel
+@implements IDisposable
 @inject AppViewModel ViewModel
 
 <div class="file-card" id="running-screen" aria-label="Running Screen">
@@ -63,6 +65,16 @@
 </div>
 
 @code {
+    protected override void OnInitialized()
+    {
+        ViewModel.PropertyChanged += HandleViewModelChanged;
+    }
+
+    private void HandleViewModelChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        _ = InvokeAsync(StateHasChanged);
+    }
+
     private static string FormatElapsed(TimeSpan elapsed)
     {
         if (elapsed.TotalHours >= 1)
@@ -82,4 +94,9 @@
         VoxFlow.Core.Models.ProgressStage.Failed => "Failed",
         _ => stage.ToString()
     };
+
+    public void Dispose()
+    {
+        ViewModel.PropertyChanged -= HandleViewModelChanged;
+    }
 }

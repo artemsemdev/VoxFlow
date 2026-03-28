@@ -7,6 +7,11 @@ using VoxFlow.Core.Models;
 
 internal sealed class BatchTranscriptionService : IBatchTranscriptionService
 {
+    private const double BatchProcessingStartPercent = 10d;
+    private const double BatchProcessingEndPercent = 90d;
+    private const double FileTranscribingStartPercent = 10d;
+    private const double FileTranscribingEndPercent = 90d;
+
     private readonly IConfigurationService _configService;
     private readonly IValidationService _validationService;
     private readonly IFileDiscoveryService _fileDiscovery;
@@ -84,7 +89,6 @@ internal sealed class BatchTranscriptionService : IBatchTranscriptionService
         {
             cancellationToken.ThrowIfCancellationRequested();
             var file = discoveredFiles[i];
-            var pct = (int)(10 + (80.0 * i / discoveredFiles.Count));
 
             if (file.Status == DiscoveryStatus.Skipped)
             {
@@ -94,16 +98,42 @@ internal sealed class BatchTranscriptionService : IBatchTranscriptionService
                 continue;
             }
 
-            progress?.Report(new ProgressUpdate(
-                ProgressStage.Transcribing, pct, totalStopwatch.Elapsed,
-                $"[{i + 1}/{discoveredFiles.Count}] {Path.GetFileName(file.InputPath)}"));
+            ReportBatchFileProgress(
+                progress,
+                totalStopwatch,
+                i,
+                discoveredFiles.Count,
+                file.InputPath,
+                ProgressStage.Converting,
+                0,
+                "Converting audio...");
 
             var fileStopwatch = Stopwatch.StartNew();
             try
             {
                 await _audioConversion.ConvertToWavAsync(file.InputPath, file.TempWavPath, options, cancellationToken);
                 var samples = await _wavLoader.LoadSamplesAsync(file.TempWavPath, options, cancellationToken);
-                var selection = await _languageSelection.SelectBestCandidateAsync(factory, samples, options, null, cancellationToken);
+                var fileProgress = CreateBatchFileProgressReporter(
+                    progress,
+                    totalStopwatch,
+                    i,
+                    discoveredFiles.Count,
+                    file.InputPath);
+                var selection = await _languageSelection.SelectBestCandidateAsync(
+                    factory,
+                    samples,
+                    options,
+                    fileProgress,
+                    cancellationToken);
+                ReportBatchFileProgress(
+                    progress,
+                    totalStopwatch,
+                    i,
+                    discoveredFiles.Count,
+                    file.InputPath,
+                    ProgressStage.Writing,
+                    95,
+                    "Writing transcript...");
                 await _outputWriter.WriteAsync(file.OutputPath, selection.AcceptedSegments, cancellationToken);
 
                 fileStopwatch.Stop();
@@ -146,6 +176,79 @@ internal sealed class BatchTranscriptionService : IBatchTranscriptionService
         return new BatchTranscribeResult(
             results.Count, succeeded, failed, skipped,
             batchOptions.SummaryFilePath, totalStopwatch.Elapsed, results);
+    }
+
+    internal static double MapBatchFilePercent(int fileIndex, int totalFiles, double filePercent)
+    {
+        var normalizedCount = Math.Max(totalFiles, 1);
+        var normalizedIndex = Math.Clamp(fileIndex, 0, normalizedCount - 1);
+        var normalizedPercent = Math.Clamp(filePercent, 0d, 100d) / 100d;
+
+        return BatchProcessingStartPercent +
+               (((normalizedIndex + normalizedPercent) / normalizedCount) *
+                (BatchProcessingEndPercent - BatchProcessingStartPercent));
+    }
+
+    private static IProgress<ProgressUpdate>? CreateBatchFileProgressReporter(
+        IProgress<ProgressUpdate>? progress,
+        Stopwatch totalStopwatch,
+        int fileIndex,
+        int totalFiles,
+        string inputPath)
+    {
+        if (progress is null)
+        {
+            return null;
+        }
+
+        return new Progress<ProgressUpdate>(update =>
+        {
+            var filePercent = FileTranscribingStartPercent +
+                              ((FileTranscribingEndPercent - FileTranscribingStartPercent) *
+                               (Math.Clamp(update.PercentComplete, 0d, 100d) / 100d));
+
+            progress.Report(update with
+            {
+                PercentComplete = MapBatchFilePercent(fileIndex, totalFiles, filePercent),
+                Elapsed = totalStopwatch.Elapsed,
+                Message = FormatBatchFileMessage(fileIndex, totalFiles, inputPath, update.Message),
+                BatchFileIndex = fileIndex + 1,
+                BatchFileTotal = totalFiles
+            });
+        });
+    }
+
+    private static void ReportBatchFileProgress(
+        IProgress<ProgressUpdate>? progress,
+        Stopwatch totalStopwatch,
+        int fileIndex,
+        int totalFiles,
+        string inputPath,
+        ProgressStage stage,
+        double filePercent,
+        string message,
+        string? currentLanguage = null)
+    {
+        progress?.Report(new ProgressUpdate(
+            stage,
+            MapBatchFilePercent(fileIndex, totalFiles, filePercent),
+            totalStopwatch.Elapsed,
+            FormatBatchFileMessage(fileIndex, totalFiles, inputPath, message),
+            currentLanguage,
+            fileIndex + 1,
+            totalFiles));
+    }
+
+    private static string FormatBatchFileMessage(
+        int fileIndex,
+        int totalFiles,
+        string inputPath,
+        string? message)
+    {
+        var prefix = $"[{fileIndex + 1}/{totalFiles}] {Path.GetFileName(inputPath)}";
+        return string.IsNullOrWhiteSpace(message)
+            ? prefix
+            : $"{prefix} - {message}";
     }
 
     private static void CleanupTempWav(string wavPath, bool keepIntermediateFiles)
