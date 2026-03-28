@@ -96,6 +96,14 @@ Important limitation:
 
 - Drag-and-drop behavior is currently architecture-dependent in the implementation. This specification defines the intended user contract and explicitly calls out the current mismatch later.
 
+### Visual Design Expectations
+
+- The Desktop app uses a dark theme consistent with macOS design conventions.
+- The color palette, typography, and spacing should feel native to macOS rather than web-first.
+- The visual hierarchy must make the current workflow state immediately obvious: ready, busy, failed, or complete.
+- Interactive controls must have visible focus indicators for keyboard navigation.
+- This specification does not prescribe exact colors, fonts, or pixel values. Visual details are an implementation concern within the design constraints above.
+
 ## 5. Target User and Usage Context
 
 The Desktop app targets Mac users who need private, local transcription of recorded audio such as meetings, interviews, calls, and voice notes.
@@ -1286,3 +1294,13 @@ Later non-UI tests should prioritize:
 - preview normalization rules
 - full-transcript copy behavior
 - prevention of blocked-ready bypass through native shell paths
+
+## 25. Related Documents
+
+| Document | Relationship |
+|---|---|
+| [PRD.md](PRD.md) | Product requirements that this UI spec implements (see FR-11: Desktop Application, FR-12: Desktop Platform Compatibility) |
+| [ROADMAP.md](ROADMAP.md) | Delivery plan; Priority 1 directly addresses the known gaps in this spec |
+| [Phase 1.md](Phase%201.md) | Phase 1 workstream and issue breakdown derived from this spec's known gaps and acceptance criteria |
+| [ARCHITECTURE.md](../../ARCHITECTURE.md) | System architecture, Desktop host responsibilities, and CLI bridge design |
+| [SETUP.md](../../SETUP.md) | Build, test, and packaging instructions for the Desktop app |

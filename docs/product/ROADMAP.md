@@ -14,8 +14,9 @@ It is not a PRD rewrite. It is an execution sequence for a solo developer workin
 
 The roadmap is based on:
 
-- `docs/product/PRD.md`
-- `docs/product/DESKTOP_UI_SPEC.md`
+- `docs/product/PRD.md` (product requirements, functional requirements FR-01 through FR-12, success metrics)
+- `docs/product/DESKTOP_UI_SPEC.md` (Desktop screen specifications, state model, known implementation gaps)
+- `docs/product/Phase 1.md` (Phase 1 workstreams, issue set, and PR sequence)
 - `ARCHITECTURE.md`
 - `SETUP.md`
 - the current Desktop implementation and test suites in the repository
@@ -47,9 +48,9 @@ Repository state checked on March 28, 2026:
 
 ## Priority 1: Implement And Stabilize The Desktop App UI
 
-This is the immediate delivery priority.
+This is the immediate delivery priority. It addresses PRD requirements FR-11 (Desktop Application) and FR-12 (Desktop Platform Compatibility).
 
-The work here should be driven by the known gaps and acceptance criteria in `docs/product/DESKTOP_UI_SPEC.md`, not by net-new feature ideas.
+The work here should be driven by the known gaps and acceptance criteria in `docs/product/DESKTOP_UI_SPEC.md`, not by net-new feature ideas. The detailed issue breakdown and PR sequence for this priority are in `docs/product/Phase 1.md`.
 
 ### 1.1 Ready Screen Contract
 
@@ -177,8 +178,9 @@ Only after the Desktop UI and Desktop UI tests are stable:
 - update `README.md` so Desktop claims match the actual passing coverage
 - update `ARCHITECTURE.md` where Desktop verification notes are stale
 - update `SETUP.md` so Desktop test instructions and current baseline stay accurate
-- keep `docs/product/DESKTOP_UI_SPEC.md` as the Desktop contract and remove closed items from its known-gap list
+- keep `docs/product/DESKTOP_UI_SPEC.md` as the Desktop contract and remove closed items from its known-gap list (section 22)
 - verify `scripts/build-macos.sh` still produces the expected macOS artifact after the UI changes
+- verify that `docs/product/PRD.md` success metrics (section 14) align with the actual Desktop state
 
 ### Exit Criteria For Priority 3
 

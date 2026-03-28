@@ -1,238 +1,314 @@
-# VoxFlow Phase 1
+# VoxFlow Phase 1: Desktop Stabilization
 
 ## Phase Goal
 
 Ship a stable, demoable macOS Desktop single-file transcription workflow and back it with enough test coverage that ongoing delivery can stay disciplined.
 
-This phase intentionally does not try to finish the entire PRD. It focuses on the most visible execution path in the current repo:
+This phase intentionally does not try to finish the entire PRD. It focuses on the most visible execution path in the current repository:
 
-- Desktop launch
-- startup validation handling
-- single-file intake
-- running progress
-- failure and cancel recovery
-- result review actions
+- Desktop launch and startup validation handling
+- single-file intake and Ready-state gating
+- running progress with truthful status
+- failure, cancel, and recovery flows
+- result review and result actions
+
+This phase addresses PRD functional requirements FR-11 (Desktop Application) and FR-12 (Desktop Platform Compatibility), and contributes to the Desktop-specific PRD success metrics in section 14.
 
 ## Why This Is Phase 1
 
 The repository already has:
 
-- a shared Core transcription pipeline
-- a working CLI
-- batch support in CLI/Core
-- MCP tools and path safety
-- a Desktop app with real UI automation already covering launch and happy path
+- a shared Core transcription pipeline (FR-01 through FR-09)
+- a working CLI for single-file and batch processing
+- MCP Server with tools, prompts, and path safety (FR-10)
+- a Desktop app with real UI automation covering launch and happy path
 
-The immediate delivery gap is therefore not foundational engineering. It is product-surface closure:
+The immediate delivery gap is not foundational engineering. It is product-surface closure:
 
-- finish the Desktop UI contract
-- make Desktop behavior safe and truthful
-- close the remaining test coverage gaps
+- finish the Desktop UI contract per the [Desktop UI Specification](DESKTOP_UI_SPEC.md)
+- make Desktop behavior safe and truthful across both runtime paths (Apple Silicon and Intel Mac Catalyst)
+- close the 21 known implementation gaps documented in the UI spec (section 22)
+- create enough test coverage that regressions are expensive and visible
 
 ## Phase 1 Scope
 
-In scope:
+**In scope:**
 
-- Desktop UI contract fixes from `docs/product/DESKTOP_UI_SPEC.md`
-- Desktop state-management hardening
-- Desktop fast tests
-- Desktop real UI automation
-- enough doc alignment to support iterative shipping
+- Desktop UI contract fixes from the [Desktop UI Specification](DESKTOP_UI_SPEC.md) known gaps (section 22)
+- Desktop state-management hardening (transient state clearing, Ready-state gating)
+- Desktop fast tests in `tests/VoxFlow.Desktop.Tests`
+- Desktop real macOS UI automation in `tests/VoxFlow.Desktop.UiTests`
+- Enough documentation alignment to support iterative shipping
 
-Out of scope:
+**Out of scope:**
 
-- Desktop batch UI
-- Desktop settings editor
-- Windows/Linux desktop support
-- new MCP features
+- Desktop batch UI (batch processing exists in the pipeline but Desktop is single-file per PRD FR-11)
+- Desktop settings editor (configuration overrides remain file-based per PRD section 7)
+- Windows or Linux desktop support (deferred per PRD section 7)
+- New MCP features
 - CLI feature expansion
-- notarized release pipeline
+- Notarized release pipeline
+- New Core pipeline features
 
 ## Phase 1 Success Criteria
 
+These criteria map to PRD success metrics (section 14):
+
 - Desktop Ready, Running, Failed, and Complete states behave consistently and truthfully
-- no file intake path can bypass blocked startup validation or invalid workflow state
-- transcript preview and copy behavior are honest and consistent across Desktop runtime paths
-- the fast Desktop suite covers the corrected behavior
-- the real UI suite covers more than launch and happy path
-- the repo has a clear first-wave GitHub backlog and release gate
+- No file-intake path can bypass blocked startup validation or invalid workflow state
+- Transcript preview and copy behavior are honest and consistent across Apple Silicon and Intel Mac Catalyst
+- Progress reporting shows truthful stage labels, numeric percentage, and accessible progressbar semantics
+- The fast Desktop suite covers the corrected behavior
+- The real macOS UI suite covers more than launch and happy path
+- The repository has a clear first-wave GitHub backlog and release gate
 
 ## Phase 1 Workstreams
 
 ### Workstream A: Desktop UI Contract
 
-Target outcome:
+**Target outcome:** The Desktop app matches the actual single-file local workflow documented in the PRD (FR-11) and the [Desktop UI Specification](DESKTOP_UI_SPEC.md).
 
-- the Desktop app matches the actual single-file local workflow documented in the PRD and UI spec
+**Deliverables:**
 
-Deliverables:
+- Corrected Ready-screen copy (remove M4A-only and upload claims, UI spec section 11 and 17)
+- Guarded file intake (Ready-state gating at both ViewModel and shell layers, UI spec sections 12.9 and 9.4)
+- Cleaned-up run transitions (transient state clearing, UI spec section 9.5)
+- Improved Running progress semantics (numeric percent, human-readable labels, progressbar a11y, UI spec section 13)
+- Hardened Complete-screen actions (full-transcript copy, preview truncation, action error handling, UI spec section 15)
+- Hardened Failed-screen recovery (clear state transitions, UI spec section 14)
+- Non-blocking startup warning visibility (UI spec section 11.6)
 
-- corrected Ready-screen copy
-- guarded file intake
-- cleaned-up run transitions
-- improved Running progress semantics
-- hardened Complete-screen actions
+**Addresses UI spec known gaps:** 1-18
 
 ### Workstream B: Desktop Test Gate
 
-Target outcome:
+**Target outcome:** Desktop regressions are caught early and visibly through a test pyramid.
 
-- Desktop regressions are caught early and visibly
+**Deliverables:**
 
-Deliverables:
+- Expanded ViewModel and component tests in `tests/VoxFlow.Desktop.Tests`
+- Expanded real macOS UI automation in `tests/VoxFlow.Desktop.UiTests`
+- Updated automation bridge with broader element tracking
+- Stable automation IDs preserved per UI spec section 21
 
-- expanded `tests/VoxFlow.Desktop.Tests`
-- expanded `tests/VoxFlow.Desktop.UiTests`
-- stable automation ids and tracked state
+**Addresses UI spec known gaps:** 19-21
 
 ### Workstream C: Operational Clarity
 
-Target outcome:
+**Target outcome:** A solo developer can build, test, and demo the active product without reading the entire repository.
 
-- a solo developer can build, test, and demo the active product without reading the whole repo
+**Deliverables:**
 
-Deliverables:
-
-- explicit smoke routine
-- status docs aligned with the current repo
-- manual demo-release checklist
+- Explicit smoke routine for all active hosts (CLI, Desktop, MCP)
+- Status docs aligned with the actual repository state
+- Manual demo-release checklist for macOS packaging
 
 ## Phase 1 Issue Set
 
-### A1. Correct Ready-screen copy and capability messaging
+### Workstream A Issues
+
+#### A1. Correct Ready-screen copy and capability messaging
+
+Fix misleading copy in `ReadyView.razor` and `DropZone.razor`.
+
+Current problems (UI spec gaps 1, 2, 3):
+- ReadyView says "Drop your M4A files here to convert speech into text"
+- DropZone says "Drop your M4A files here or browse from your device"
+- Footer says "Supported format: M4A. You can upload multiple files."
+- The runtime accepts 10+ audio formats, not just M4A
+- "upload" implies network transfer in a local-first product
+- "multiple files" contradicts the single-file Desktop scope
+- Drag-and-drop is advertised even when it is not available on the current runtime
 
 Acceptance criteria:
+- Ready-screen describes one local audio file
+- No "upload" or "multiple files" claims remain
+- Drag-and-drop wording is runtime-aware
+- Format claims match actual supported types
 
-- Ready state describes one local audio file
-- no `upload` or `multiple files` claims remain
-- drag-and-drop wording is runtime-aware
+#### A2. Enforce Ready-state start guard in AppViewModel
 
-### A2. Enforce Ready-state start guard in AppViewModel
-
-Acceptance criteria:
-
-- blocked validation cannot start a run
-- invalid workflow states cannot start a run
-- tests cover the guard
-
-### A3. Make shell-level drag-and-drop obey the Ready-state contract
+Fix the ViewModel to prevent transcription from starting outside the Ready Available state (UI spec gap 5).
 
 Acceptance criteria:
+- Blocked validation cannot start a run
+- Invalid workflow states (Running, Failed, Complete) cannot start a run
+- Tests cover the guard
 
-- drop cannot bypass blocked Ready
-- drop cannot start outside the valid Ready state
-- unsupported dropped files fail before `Running`
+#### A3. Make shell-level drag-and-drop obey the Ready-state contract
 
-### A4. Clear transient Desktop state on new run, retry, and cancel
-
-Acceptance criteria:
-
-- new runs start clean
-- cancel returns to a clean Ready state
-- retries do not leak stale state
-
-### A5. Improve Running-screen progress semantics and labels
+Fix `MainPage.xaml.cs` to enforce the same state gating as the Razor UI (UI spec gaps 4, 5).
 
 Acceptance criteria:
+- Native drop cannot bypass blocked Ready
+- Native drop cannot start a run outside Ready Available
+- Unsupported dropped files are rejected before entering Running
 
-- numeric percent is visible
-- labels are human-readable
-- progressbar semantics exist
-- starting state is visible before first progress event
+#### A4. Clear transient Desktop state on new run, retry, and cancel
 
-### A6. Normalize preview and full-transcript copy behavior
+Fix stale state issues in `AppViewModel.TranscribeFileAsync()` and the cancellation path (UI spec gaps 6, 7).
 
-Acceptance criteria:
-
-- preview rules are consistent across Desktop runtime paths
-- full transcript is copied when available
-- preview truncation or preview-unavailable state is explicit
-
-### A7. Surface startup warnings and non-fatal Complete-screen action errors
+Current problems:
+- `TranscribeFileAsync()` does not clear `TranscriptionResult` or `CurrentProgress` at run start
+- The cancellation path sets `CurrentState = Ready` directly instead of calling `GoToReady()`, leaving `CurrentProgress` stale
 
 Acceptance criteria:
+- New runs start with cleared progress and result state
+- Cancel returns to a clean Ready state with no stale data
+- Retries do not leak stale state from the previous run
 
-- non-blocking startup warnings are visible
-- missing result metadata disables or hides invalid actions
-- copy/open-folder failures remain non-fatal and visible
+#### A5. Improve Running-screen progress semantics and labels
 
-### B1. Expand fast Desktop tests for the updated UI contract
+Bring `RunningView.razor` up to the UI spec (UI spec gaps 8, 9, 10).
 
-Acceptance criteria:
-
-- ViewModel and component tests cover the new guard, cleanup, warning, progress, and result rules
-
-### B2. Extend the Desktop automation bridge tracked ids
-
-Acceptance criteria:
-
-- startup error and validation-message visibility are exposed to the UI suite
-- existing scenarios keep passing
-
-### B3. Add real UI scenario for startup failure and blocked-ready
+Current problems:
+- Percent is used only as CSS width, not as visible text
+- Stage labels render raw enum names like `LoadingModel`
+- Before the first progress event, only a spinner is shown with no text
 
 Acceptance criteria:
+- Numeric percent is visible as text alongside the progress bar
+- Stage labels are human-readable (e.g., "Loading model" not "LoadingModel")
+- Progressbar exposes `role="progressbar"` and `aria-valuenow` semantics
+- A truthful "Starting transcription..." state is visible before the first progress event
 
-- one real UI scenario covers startup retry
-- one real UI scenario covers Ready Blocked
+#### A6. Normalize preview and full-transcript copy behavior
 
-### B4. Add real UI scenario for cancel and failure recovery
+Fix `CompleteView.razor` to handle preview and copy correctly (UI spec gaps 12, 13, 14).
+
+Current problems:
+- Preview truncation is not surfaced to the user
+- "Copy Transcript" copies `TranscriptPreview` (partial), not the full transcript
+- Preview behavior differs between Apple Silicon (in-process) and Intel (CLI bridge) paths
 
 Acceptance criteria:
+- Preview rules are consistent across Desktop runtime paths
+- Full transcript is copied when available
+- Preview truncation or preview-unavailable state is explicit in the UI
 
-- cancel returns to Ready without stale state
-- failure recovery remains green end-to-end
+#### A7. Surface startup warnings and non-fatal Complete-screen action errors
 
-### C1. Document the local config and smoke workflow for all active hosts
+Fix missing feedback in ReadyView and CompleteView (UI spec gaps 11, 15, 16, 17).
+
+Current problems:
+- Non-blocking startup warnings are not shown when `CanStart == true` but `HasWarnings == true`
+- Open Folder and Copy Text buttons are always shown even when data is missing
+- Clipboard failures are not surfaced to the user
+- Folder-opening failures are not surfaced to the user
 
 Acceptance criteria:
+- Non-blocking startup warnings are visible on the Ready screen
+- Missing result metadata disables or hides invalid actions
+- Copy and open-folder failures remain non-fatal but are visible to the user
 
+### Workstream B Issues
+
+#### B1. Expand fast Desktop tests for the updated UI contract
+
+Add ViewModel and component tests in `tests/VoxFlow.Desktop.Tests` covering the behavior fixed in Workstream A.
+
+Acceptance criteria:
+- ViewModel tests cover: start-guard, transient-state clearing, cancellation cleanup, warning handling
+- Component tests cover: corrected Ready copy, blocked intake, progressbar semantics, numeric percent, human-readable stage labels, missing preview, missing result path, copy/folder action failures, full-transcript copy
+
+#### B2. Extend the Desktop automation bridge tracked IDs
+
+Update `DesktopUiAutomationHost.cs` to expose startup error screen, validation message visibility, and other critical elements (UI spec gap 20).
+
+Acceptance criteria:
+- Startup error and validation-message visibility are exposed to the UI automation suite
+- Existing automation scenarios keep passing
+
+#### B3. Add real UI scenario for startup failure and blocked-ready
+
+Add macOS UI automation coverage for non-happy-path startup states (UI spec gap 21).
+
+Acceptance criteria:
+- One real UI scenario covers startup fatal error and retry
+- One real UI scenario covers Ready Blocked with disabled intake
+
+#### B4. Add real UI scenario for cancel and failure recovery
+
+Add macOS UI automation coverage for cancel and failure flows (UI spec gap 21).
+
+Acceptance criteria:
+- Cancel during Running returns to Ready without stale state
+- Failure recovery via retry and choose-different-file remain green end-to-end
+
+### Workstream C Issues
+
+#### C1. Document the local config and smoke workflow for all active hosts
+
+Ensure all three hosts (CLI, Desktop, MCP) have explicit launch and smoke-test instructions.
+
+Acceptance criteria:
 - Desktop, CLI, and MCP launch contracts are explicit
-- one recommended smoke routine exists
+- One recommended smoke routine exists for each host
 
-### C2. Align status docs with the actual repo state
+#### C2. Align status docs with the actual repository state
 
-Acceptance criteria:
-
-- README, setup docs, and architecture notes no longer disagree about current Desktop status
-
-### C3. Create a demo-ready macOS release checklist
+Update documentation that disagrees about current Desktop status.
 
 Acceptance criteria:
+- README, SETUP, and ARCHITECTURE notes no longer disagree about Desktop state
+- The Desktop UI spec known-gap list (section 22) reflects which gaps were closed
 
-- build, smoke, package, and verification steps are documented
-- known release gaps are called out explicitly
+#### C3. Create a demo-ready macOS release checklist
+
+Document the steps to build, smoke, package, and verify a Desktop release.
+
+Acceptance criteria:
+- Build, smoke, package, and verification steps are documented
+- Known release gaps are called out explicitly
 
 ## Suggested PR Sequence
 
-1. `A1` Ready-screen copy cleanup
-2. `A2` ViewModel start guard
-3. `A3` shell-level drag-and-drop guard
-4. `A4` transient state cleanup
-5. `A5` Running-screen progress improvements
-6. `A6` preview and copy normalization
-7. `A7` warnings and non-fatal action errors
-8. `B1` fast-test expansion
-9. `B2` automation bridge update
-10. `B3` real UI startup/blocked-ready coverage
-11. `B4` real UI cancel/failure coverage
-12. `C1` local smoke workflow docs
-13. `C2` status-doc alignment
-14. `C3` demo-release checklist
+The following sequence keeps each PR individually reviewable and shippable. A solo developer may batch adjacent items when the changes are small and cohesive (e.g., A2+A3 both address intake gating).
+
+| PR | Issue | Summary |
+|---|---|---|
+| 1 | A1 | Ready-screen copy cleanup |
+| 2 | A2 + A3 | ViewModel start guard and shell-level DnD guard |
+| 3 | A4 | Transient state cleanup on run start, retry, and cancel |
+| 4 | A5 | Running-screen progress improvements |
+| 5 | A6 | Preview and copy normalization |
+| 6 | A7 | Startup warnings and non-fatal action errors |
+| 7 | B1 | Fast-test expansion for Workstream A changes |
+| 8 | B2 | Automation bridge update |
+| 9 | B3 + B4 | Real UI scenarios for startup/blocked/cancel/failure |
+| 10 | C1 | Local smoke workflow docs |
+| 11 | C2 + C3 | Status-doc alignment and demo-release checklist |
+
+Total: 11 PRs. Issues A2+A3 and B3+B4 are batched because they share context and are more natural as single reviews. C2+C3 are batched because they are both documentation.
+
+Tests in B1 may also be interleaved with the A-series PRs when the developer prefers to ship tests alongside the fixes. The sequence above separates them for clarity but does not require strict ordering.
 
 ## Phase 1 Release Gate
 
 Minimum verification before calling Phase 1 complete:
 
-- `dotnet test tests/VoxFlow.Desktop.Tests/VoxFlow.Desktop.Tests.csproj`
-- `./scripts/run-desktop-ui-tests.sh --filter AppStartsSuccessfully_AndReadyScreenIsVisible`
-- `./scripts/run-desktop-ui-tests.sh --filter HappyPath_UserSelectsFile_SeesRunningState_AndGetsResult`
-- targeted real UI filters for the new blocked-ready and cancel/failure scenarios
+```bash
+# Fast gate
+dotnet test tests/VoxFlow.Desktop.Tests/VoxFlow.Desktop.Tests.csproj
+
+# Real UI release gate
+./scripts/run-desktop-ui-tests.sh --filter AppStartsSuccessfully_AndReadyScreenIsVisible
+./scripts/run-desktop-ui-tests.sh --filter HappyPath_UserSelectsFile_SeesRunningState_AndGetsResult
+
+# New scenarios from B3 + B4
+./scripts/run-desktop-ui-tests.sh --filter StartupBlockedReady
+./scripts/run-desktop-ui-tests.sh --filter CancelDuringRunning
+./scripts/run-desktop-ui-tests.sh --filter FailureRecovery
+```
+
+All five gates must pass on the developer's macOS machine before Phase 1 is declared complete.
 
 ## After Phase 1
 
 Only after Phase 1 is complete should the active roadmap move to:
 
-- broader cross-host polish
+- broader cross-host polish (Roadmap Priority 4)
 - packaging and release maturity
-- post-MVP scope such as Desktop batch UI or settings UI
+- post-Phase-1 scope such as Desktop batch UI or settings UI (PRD section 7 non-goals for current phase)
+
+Phase 2 planning should start from the updated UI spec known-gap list and any new issues discovered during Phase 1 delivery.
