@@ -632,6 +632,8 @@ When drag-and-drop is available:
 
 - dropping one supported local audio file onto the app in Ready Available MUST start transcription for that file
 - dropping an unsupported or ambiguous input MUST show a selection error and remain on Ready
+- the implementation MAY stage dropped bytes into a temporary local working file before transcription begins
+- if a temporary working file is used, the Running and Complete screens MUST continue to show the original dropped file name rather than the internal temp file name
 
 When drag-and-drop is not available:
 
@@ -1227,7 +1229,7 @@ The following gaps existed in the repository implementation. Gaps marked **[CLOS
 
 1. **[CLOSED]** The Ready screen and drop zone copy currently claim `M4A` and `multiple files`, but the Desktop workflow is single-file and the runtime accepts broader audio types. *Fixed: copy now describes single local audio file with multi-format support.*
 2. **[CLOSED]** The UI currently uses `upload` language in the Ready footer even though the Desktop app is local-only. *Fixed: no “upload” or “multiple files” language remains.*
-3. **[CLOSED]** Drag-and-drop is advertised in the Ready UI, but Intel Mac Catalyst explicitly skips native drag-and-drop registration and the JavaScript drop-zone helper is not wired into the actual Razor component. *Fixed: drop zone copy is runtime-neutral (“Choose an audio file to transcribe”).*
+3. **[CLOSED]** Drag-and-drop is advertised in the Ready UI, but Intel Mac Catalyst explicitly skips native drag-and-drop registration and the JavaScript drop-zone helper is not wired into the actual Razor component. *Fixed: the visible `DropZone` now wires a browser-backed file-drop path in Blazor Hybrid, so dropping one supported audio file starts transcription through the same guarded Desktop workflow.*
 4. **[CLOSED]** Blocking startup validation currently disables the visible drop zone controls, but native app-level drag-and-drop can still call `TranscribeFileAsync()` because the shell layer does not enforce the blocked-ready precondition. *Fixed: native drop handler checks `CanStart` before proceeding.*
 5. **[CLOSED]** File intake is not fully gated to Ready Available. The native drag-and-drop handler is attached at the shell level and can start a run outside the visible Ready state. *Fixed: `TranscribeFileAsync` enforces `CanStart` guard; native drop also checks `CanStart`.*
 6. **[CLOSED]** `AppViewModel.TranscribeFileAsync()` does not clear stale progress or stale prior result state at run start. Retry flows can therefore inherit stale transient data until new progress arrives. *Fixed: `TranscriptionResult`, `CurrentProgress`, and `ErrorMessage` are cleared at run start.*

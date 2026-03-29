@@ -348,10 +348,11 @@ Current Desktop flow:
 - App startup runs through `Routes.razor`, loads a merged Desktop config, and validates the resolved options before the main shell renders
 - The main UI flow is driven by `AppViewModel` state: `Ready`, `Running`, `Failed`, `Complete`
 - `ReadyView` shows a blocking validation banner only when startup validation contains failures; `Browse Files` and the `DropZone` surface are disabled in that state
-- The intended file-entry paths are native drag-and-drop and `Browse Files`; current end-to-end automation covers the `Browse Files` path against the real macOS Open dialog
+- Supported file-entry paths are `Browse Files` and the visible `DropZone` drag-and-drop surface; in Blazor Hybrid, dropped files are staged into a temporary local working file before transcription while the UI keeps the original file name visible
+- Current end-to-end automation covers the `Browse Files` path against the real macOS Open dialog; drag-and-drop still requires manual verification against the built `.app`
 - Current UI scope is single-file transcription
 - `RunningView` shows progress stage, message, percentage, elapsed time, and current language when available
-- `CompleteView` supports opening the output folder and copying the transcript preview
+- `CompleteView` supports opening the output folder and copying the full transcript text
 - `FailedView` supports retrying the same file or returning to the ready screen
 - Intel Mac Catalyst uses `DesktopCliTranscriptionService` to spawn the local CLI host with a merged temp config; Apple Silicon keeps transcription in-process
 

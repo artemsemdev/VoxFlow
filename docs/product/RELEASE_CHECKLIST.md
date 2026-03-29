@@ -37,8 +37,10 @@ Manual verification:
 - [ ] No "upload" or "multiple files" language is visible
 - [ ] Browse Files button is enabled (no blocking validation errors)
 - [ ] Selecting an audio file transitions to Running screen
+- [ ] Drag-and-drop of one supported local audio file transitions to Running screen
 - [ ] Running screen shows numeric percent, human-readable stage label, and "Starting transcription..." before first progress
 - [ ] Complete screen shows transcript preview, detected language, and action buttons
+- [ ] Running and Complete screens show the original selected file name, not an internal temp file name
 - [ ] Copy Text copies the full transcript (not just preview)
 - [ ] Open Folder opens the output directory
 - [ ] Back button returns to Ready screen with clean state
