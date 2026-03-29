@@ -1,11 +1,13 @@
 using Foundation;
+using Microsoft.AspNetCore.Components.WebView;
 using Microsoft.Maui.Controls;
+using System.Linq;
 using VoxFlow.Desktop.Services;
 using VoxFlow.Desktop.ViewModels;
 
 #if MACCATALYST
-using System.Runtime.InteropServices;
 using UIKit;
+using WebKit;
 #endif
 #if DEBUG && MACCATALYST
 using VoxFlow.Desktop.Automation;
@@ -18,6 +20,11 @@ public partial class MainPage : ContentPage
     private readonly AppViewModel _viewModel;
 #if DEBUG && MACCATALYST
     private DesktopUiAutomationHost? _uiAutomationHost;
+#endif
+#if MACCATALYST
+    private readonly List<UIDropInteraction> _nativeDropInteractions = [];
+    private readonly List<DropGestureRecognizer> _mauiDropGestureRecognizers = [];
+    private NativeFileDropDelegate? _nativeFileDropDelegate;
 #endif
 
     public MainPage(AppViewModel viewModel)
@@ -45,17 +52,25 @@ public partial class MainPage : ContentPage
 
     private void TryConfigureNativeDragAndDrop()
     {
-#if MACCATALYST
-        if (RuntimeInformation.ProcessArchitecture == Architecture.X64)
-        {
-            DesktopDiagnostics.LogInfo(
-                "Skipping native drag and drop registration on Intel Mac Catalyst. Browse Files remains available.");
-            return;
-        }
-#endif
+        TryAttachMauiDropRecognizer(rootLayout, "RootLayout");
+        TryAttachMauiDropRecognizer(blazorWebView, "BlazorWebView");
 
+#if MACCATALYST
+        blazorWebView.BlazorWebViewInitialized += HandleBlazorWebViewInitialized;
+        TryAttachNativeDropTargetFromHandler();
+#else
+#endif
+    }
+
+    private void TryAttachMauiDropRecognizer(View view, string viewName)
+    {
         try
         {
+            if (_mauiDropGestureRecognizers.Any(recognizer => view.GestureRecognizers.Contains(recognizer)))
+            {
+                return;
+            }
+
             var dropGestureRecognizer = new DropGestureRecognizer
             {
                 AllowDrop = true
@@ -63,21 +78,90 @@ public partial class MainPage : ContentPage
 
             dropGestureRecognizer.DragOver += HandleNativeDragOver;
             dropGestureRecognizer.Drop += HandleNativeDrop;
-            blazorWebView.GestureRecognizers.Add(dropGestureRecognizer);
+            view.GestureRecognizers.Add(dropGestureRecognizer);
+            _mauiDropGestureRecognizers.Add(dropGestureRecognizer);
+            DesktopDiagnostics.LogInfo($"MAUI drop recognizer attached to {viewName}.");
         }
         catch (Exception ex)
         {
-            DesktopDiagnostics.LogException("MainPage.TryConfigureNativeDragAndDrop", ex);
+            DesktopDiagnostics.LogException($"MainPage.TryAttachMauiDropRecognizer({viewName})", ex);
         }
     }
 
+#if MACCATALYST
+    private void HandleBlazorWebViewInitialized(object? sender, BlazorWebViewInitializedEventArgs e)
+    {
+        AttachNativeDropTarget(e.WebView);
+    }
+
+    private void TryAttachNativeDropTargetFromHandler()
+    {
+        if (blazorWebView.Handler?.PlatformView is WKWebView webView)
+        {
+            AttachNativeDropTarget(webView);
+            return;
+        }
+
+        DesktopDiagnostics.LogInfo("Native drop target is waiting for WKWebView initialization.");
+    }
+
+    private void AttachNativeDropTarget(WKWebView webView)
+    {
+        try
+        {
+            _nativeFileDropDelegate ??= new NativeFileDropDelegate(this);
+            AttachNativeDropTarget(webView, "WKWebView");
+            AttachNativeDropTarget(webView.ScrollView, "WKWebView.ScrollView");
+        }
+        catch (Exception ex)
+        {
+            DesktopDiagnostics.LogException("MainPage.AttachNativeDropTarget", ex);
+        }
+    }
+
+    private void AttachNativeDropTarget(UIView view, string viewName)
+    {
+        if (_nativeDropInteractions.Any(interaction => ReferenceEquals(interaction.View, view)))
+        {
+            return;
+        }
+
+        var interaction = new UIDropInteraction(_nativeFileDropDelegate!);
+        view.AddInteraction(interaction);
+        _nativeDropInteractions.Add(interaction);
+        DesktopDiagnostics.LogInfo($"Native file drop target attached to {viewName}.");
+    }
+
+    private async Task HandleNativeDropAsync(IUIDropSession session)
+    {
+        if (!_viewModel.CanStart)
+        {
+            DesktopDiagnostics.LogInfo("Native drop ignored: CanStart is false.");
+            return;
+        }
+
+        DesktopDiagnostics.LogInfo("Native drop received.");
+        var filePath = await TryGetDroppedAudioFilePathAsync(session);
+        if (string.IsNullOrWhiteSpace(filePath))
+        {
+            DesktopDiagnostics.LogInfo("Native drop ignored: no supported local audio file path was resolved.");
+            return;
+        }
+
+        DesktopDiagnostics.LogInfo($"Native drop accepted: {filePath}");
+        await _viewModel.TranscribeFileAsync(filePath);
+    }
+#endif
+
     private static void HandleNativeDragOver(object? sender, DragEventArgs e)
     {
+        DesktopDiagnostics.LogInfo("MAUI drop recognizer DragOver.");
         e.AcceptedOperation = DataPackageOperation.Copy;
     }
 
     private async void HandleNativeDrop(object? sender, DropEventArgs e)
     {
+        DesktopDiagnostics.LogInfo("MAUI drop recognizer Drop invoked.");
         if (!_viewModel.CanStart)
         {
             DesktopDiagnostics.LogInfo("Native drop ignored: CanStart is false.");
@@ -87,10 +171,12 @@ public partial class MainPage : ContentPage
         var filePath = await TryGetDroppedAudioFilePathAsync(e);
         if (string.IsNullOrWhiteSpace(filePath))
         {
+            DesktopDiagnostics.LogInfo("MAUI drop recognizer ignored drop: no supported local audio file path was resolved.");
             return;
         }
 
         e.Handled = true;
+        DesktopDiagnostics.LogInfo($"MAUI drop recognizer accepted: {filePath}");
         await _viewModel.TranscribeFileAsync(filePath);
     }
 
@@ -117,21 +203,80 @@ public partial class MainPage : ContentPage
     }
 
 #if MACCATALYST
+    private static async Task<string?> TryGetDroppedAudioFilePathAsync(IUIDropSession session)
+    {
+        foreach (var item in session.Items)
+        {
+            var filePath = await TryLoadFilePathAsync(item.ItemProvider);
+            if (!string.IsNullOrWhiteSpace(filePath) && IsSupportedAudioFile(filePath))
+            {
+                return filePath;
+            }
+        }
+
+        return null;
+    }
+
     private static async Task<string?> TryLoadFilePathAsync(NSItemProvider itemProvider)
     {
-        foreach (var typeIdentifier in new[] { "public.file-url", "public.url", "public.item" })
+        var registeredTypeIdentifiers = itemProvider.RegisteredTypeIdentifiers ?? [];
+        DesktopDiagnostics.LogInfo(
+            $"Drop item provider: suggestedName='{itemProvider.SuggestedName ?? "(null)"}', types=[{string.Join(", ", registeredTypeIdentifiers)}]");
+
+        var candidateTypeIdentifiers = SupportedDropTypeIdentifiers
+            .Concat(registeredTypeIdentifiers)
+            .Distinct(StringComparer.Ordinal);
+
+        foreach (var typeIdentifier in candidateTypeIdentifiers)
         {
-            if (!itemProvider.HasItemConformingTo(typeIdentifier))
+            if (!itemProvider.HasItemConformingTo(typeIdentifier) &&
+                !registeredTypeIdentifiers.Contains(typeIdentifier, StringComparer.Ordinal))
             {
                 continue;
             }
 
-            var item = await LoadItemAsync(itemProvider, typeIdentifier);
-            var filePath = ExtractLocalPath(item);
+            var filePath = await TryLoadFilePathAsync(itemProvider, typeIdentifier);
             if (!string.IsNullOrWhiteSpace(filePath))
             {
                 return filePath;
             }
+        }
+
+        return null;
+    }
+
+    private static async Task<string?> TryLoadFilePathAsync(NSItemProvider itemProvider, string typeIdentifier)
+    {
+        try
+        {
+            var inPlaceResult = await itemProvider.LoadInPlaceFileRepresentationAsync(typeIdentifier);
+            var inPlacePath = ExtractLocalPath(inPlaceResult.FileUrl);
+            if (!string.IsNullOrWhiteSpace(inPlacePath))
+            {
+                DesktopDiagnostics.LogInfo(
+                    $"Resolved dropped file via in-place representation '{typeIdentifier}': {inPlacePath}");
+                return inPlacePath;
+            }
+        }
+        catch (Exception ex)
+        {
+            DesktopDiagnostics.LogInfo(
+                $"LoadInPlaceFileRepresentationAsync failed for '{typeIdentifier}': {ex.Message}");
+        }
+
+        try
+        {
+            var item = await LoadItemAsync(itemProvider, typeIdentifier);
+            var itemPath = ExtractLocalPath(item);
+            if (!string.IsNullOrWhiteSpace(itemPath))
+            {
+                DesktopDiagnostics.LogInfo($"Resolved dropped file via LoadItem '{typeIdentifier}': {itemPath}");
+                return itemPath;
+            }
+        }
+        catch (Exception ex)
+        {
+            DesktopDiagnostics.LogInfo($"LoadItem failed for '{typeIdentifier}': {ex.Message}");
         }
 
         return null;
@@ -169,7 +314,79 @@ public partial class MainPage : ContentPage
                 return null;
         }
     }
+
+    private sealed class NativeFileDropDelegate : UIDropInteractionDelegate
+    {
+        private static readonly string[] SupportedTypeIdentifiers =
+        [
+            "public.file-url",
+            "com.apple.file-url",
+            "com.apple.pasteboard.promised-file-url",
+            "public.url",
+            "public.audio",
+            "public.audiovisual-content",
+            "public.content",
+            "public.data",
+            "public.item"
+        ];
+
+        private readonly MainPage _page;
+
+        public NativeFileDropDelegate(MainPage page)
+        {
+            _page = page;
+        }
+
+        public override bool CanHandleSession(UIDropInteraction interaction, IUIDropSession session)
+        {
+            var canHandle = session.Items.Length > 0;
+            DesktopDiagnostics.LogInfo(
+                $"Native drop CanHandleSession={canHandle}; items={DescribeSession(session)}");
+            return canHandle;
+        }
+
+        public override void SessionDidEnter(UIDropInteraction interaction, IUIDropSession session)
+        {
+            DesktopDiagnostics.LogInfo($"Native drop SessionDidEnter; items={DescribeSession(session)}");
+        }
+
+        public override UIDropProposal SessionDidUpdate(UIDropInteraction interaction, IUIDropSession session)
+        {
+            var operation = _page._viewModel.CanStart ? UIDropOperation.Copy : UIDropOperation.Cancel;
+            DesktopDiagnostics.LogInfo($"Native drop SessionDidUpdate; operation={operation}");
+            return new(operation);
+        }
+
+        public override void PerformDrop(UIDropInteraction interaction, IUIDropSession session)
+        {
+            DesktopDiagnostics.LogInfo("Native drop PerformDrop invoked.");
+            _ = _page.HandleNativeDropAsync(session);
+        }
+
+        private static string DescribeSession(IUIDropSession session)
+            => string.Join(
+                " | ",
+                session.Items.Select(item =>
+                {
+                    var provider = item.ItemProvider;
+                    var types = provider.RegisteredTypeIdentifiers ?? [];
+                    return $"{provider.SuggestedName ?? "(unnamed)"} [{string.Join(", ", types)}]";
+                }));
+    }
 #endif
+
+    private static readonly string[] SupportedDropTypeIdentifiers =
+    [
+        "public.file-url",
+        "com.apple.file-url",
+        "com.apple.pasteboard.promised-file-url",
+        "public.url",
+        "public.audio",
+        "public.audiovisual-content",
+        "public.content",
+        "public.data",
+        "public.item"
+    ];
 
     private static string? ParseLocalPath(string? value)
     {

@@ -374,6 +374,18 @@ public sealed class DesktopUiComponentTests
     }
 
     [Fact]
+    public async Task DropZone_OnFirstRender_InitializesJsDropZone()
+    {
+        await using var context = DesktopUiTestContext.Create();
+
+        _ = await context.RenderAsync<DropZone>();
+
+        var invocation = Assert.Single(context.JsRuntime.Invocations, call => call.Identifier == "voxFlowInterop.initDropZone");
+        Assert.Equal("file-drop-zone", invocation.Arguments[0]);
+        Assert.Equal("file-drop-zone-input", invocation.Arguments[1]);
+    }
+
+    [Fact]
     public async Task DropZone_WhenPickerThrows_ShowsSelectionError()
     {
         await using var context = DesktopUiTestContext.Create();

@@ -1,20 +1,44 @@
 // VoxFlow JS Interop for Blazor
 window.voxFlowInterop = {
-    // Initialize drop zone with file path extraction
-    initDropZone: function (elementId, dotNetRef) {
+    initDropZone: function (elementId, inputId) {
         const el = document.getElementById(elementId);
-        if (!el) return;
+        const input = document.getElementById(inputId);
+        if (!el || !input || el.dataset.dropZoneInitialized === '1') return;
+
+        el.dataset.dropZoneInitialized = '1';
+
+        const assignFiles = (files) => {
+            try {
+                input.files = files;
+                return input.files && input.files.length > 0;
+            } catch {
+            }
+
+            try {
+                const dataTransfer = new DataTransfer();
+                for (const file of files) {
+                    dataTransfer.items.add(file);
+                }
+
+                input.files = dataTransfer.files;
+                return input.files && input.files.length > 0;
+            } catch {
+                return false;
+            }
+        };
 
         el.addEventListener('drop', async (e) => {
             e.preventDefault();
             el.classList.remove('drag-over');
 
-            // In MAUI Blazor Hybrid, dropped files come through the DataTransfer API
+            if (el.getAttribute('aria-disabled') === 'true') {
+                return;
+            }
+
             if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-                const file = e.dataTransfer.files[0];
-                // In a WebView2/WKWebView context, file.name is available
-                // The actual path resolution happens through MAUI's platform layer
-                await dotNetRef.invokeMethodAsync('OnFileDropped', file.name);
+                if (assignFiles(e.dataTransfer.files)) {
+                    input.dispatchEvent(new Event('change', { bubbles: true }));
+                }
             }
         });
 
@@ -35,8 +59,6 @@ window.voxFlowInterop = {
 
     // Open a folder in Finder
     openInFinder: function (path) {
-        // This will be handled by MAUI Launcher.OpenAsync via C# interop
-        // The JS side just triggers the C# call
         return true;
     },
 

@@ -141,6 +141,14 @@ html, body {
     color: var(--text-muted);
 }
 
+.drop-zone-file-input {
+    position: fixed;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
+}
+
 /* ---------- Progress Bar ---------- */
 .progress-container {
     width: 100%;
