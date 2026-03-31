@@ -164,6 +164,11 @@ public class AppViewModel : INotifyPropertyChanged
         {
             var request = new TranscribeFileRequest(filePath);
             TranscriptionResult = await _transcriptionService.TranscribeFileAsync(request, progress, cts.Token);
+            if (TranscriptionResult.Success)
+            {
+                try { await Task.Delay(1500, cts.Token); }
+                catch (OperationCanceledException) { GoToReady(); return; }
+            }
             CurrentState = TranscriptionResult.Success ? AppState.Complete : AppState.Failed;
             if (!TranscriptionResult.Success)
                 ErrorMessage = string.Join("; ", TranscriptionResult.Warnings);

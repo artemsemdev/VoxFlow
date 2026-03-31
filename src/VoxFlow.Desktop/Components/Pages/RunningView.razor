@@ -6,9 +6,10 @@
 @{
     var hasProgress = ViewModel.CurrentProgress is not null;
     var percent = hasProgress ? Math.Clamp(ViewModel.CurrentProgress!.PercentComplete, 0, 100) : 0;
+    var isComplete = hasProgress && ViewModel.CurrentProgress!.Stage == VoxFlow.Core.Models.ProgressStage.Complete;
     var radius = 80.0;
     var circumference = 2.0 * Math.PI * radius;
-    var dashOffset = circumference * (1.0 - percent / 100.0);
+    var dashOffset = isComplete ? 0 : circumference * (1.0 - percent / 100.0);
     var toRad = Math.PI / 180.0;
     var progressDeg = percent / 100.0 * 360.0;
 
@@ -23,10 +24,12 @@
 
     var indeterminateArc = circumference * 0.25;
     var indeterminateGap = circumference * 0.75;
+
+    var wrapperClass = isComplete ? "organic-progress-done" : hasProgress ? "" : "organic-progress-indeterminate";
 }
 
 <div id="running-screen" aria-label="Running Screen">
-    <div class="organic-progress-wrapper @(hasProgress ? "" : "organic-progress-indeterminate")"
+    <div class="organic-progress-wrapper @wrapperClass"
          role="progressbar"
          aria-valuenow="@(hasProgress ? $"{percent:F0}" : null)"
          aria-valuemin="0"
@@ -54,11 +57,11 @@
             </defs>
 
             <!-- Ambient glow -->
-            <circle cx="100" cy="100" r="80" fill="none"
+            <circle class="organic-ambient" cx="100" cy="100" r="80" fill="none"
                     stroke="rgba(74,74,255,0.05)" stroke-width="44" />
 
             <!-- Track ring -->
-            <circle cx="100" cy="100" r="80" fill="none"
+            <circle class="organic-track" cx="100" cy="100" r="80" fill="none"
                     stroke="rgba(42,42,74,0.4)" stroke-width="14" />
 
             @if (hasProgress)
@@ -114,11 +117,22 @@
 
             <!-- Inner circle -->
             <circle cx="100" cy="100" r="58" fill="url(#center-fill)" filter="url(#center-shadow)" />
-            <circle cx="100" cy="100" r="58" fill="none" stroke="rgba(74,74,255,0.10)" stroke-width="1" />
+            <circle class="organic-inner-border" cx="100" cy="100" r="58" fill="none"
+                    stroke="rgba(74,74,255,0.10)" stroke-width="1" />
         </svg>
 
         <div class="organic-progress-center">
-            @if (hasProgress)
+            @if (isComplete)
+            {
+                <div class="organic-done-content">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <path d="M20 6L9 17l-5-5" stroke="currentColor" stroke-width="2.5"
+                              stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                    <span class="organic-done-label">Done</span>
+                </div>
+            }
+            else if (hasProgress)
             {
                 <span class="organic-progress-value" id="running-percent">@($"{percent:F0}")</span>
                 <span class="organic-progress-unit">%</span>
@@ -131,7 +145,11 @@
     </div>
 
     <div class="progress-info">
-        @if (hasProgress)
+        @if (isComplete)
+        {
+            <p class="progress-message progress-message-done" id="running-stage">Transcription complete</p>
+        }
+        else if (hasProgress)
         {
             <p class="progress-message" id="running-stage" aria-live="polite">
                 @(!string.IsNullOrEmpty(ViewModel.CurrentProgress!.Message)
@@ -154,7 +172,7 @@
     </div>
 </div>
 
-<div class="btn-group mt-4">
+<div class="btn-group mt-4" style="@(isComplete ? "opacity:0;pointer-events:none" : "")">
     <button id="cancel-transcription-button"
             class="btn btn-secondary"
             aria-label="Cancel Transcription"
