@@ -68,14 +68,8 @@ public sealed class DesktopUiComponentTests
 
         Assert.Contains("audio file", rendered.TextContent);
         Assert.Contains("Processing audio", rendered.TextContent);
-        Assert.Contains("Language: English", rendered.TextContent);
         Assert.Contains("2:05", rendered.TextContent);
-
-        var progressBar = rendered.FindElement(
-            element => element.Name == "div" && element.HasClass("progress-bar"),
-            "progress bar");
-
-        Assert.Contains("42%", progressBar.Attributes["style"]?.ToString());
+        Assert.Contains("42", rendered.TextContent);
     }
 
     [Fact]
@@ -95,7 +89,7 @@ public sealed class DesktopUiComponentTests
         Assert.Contains("Audio Transcription", rendered.TextContent);
 
         await rendered.ClickAsync(
-            element => element.Name == "button" && element.TextContent == "+ Browse Files",
+            element => element.Name == "button" && element.TextContent == "Choose File",
             "browse files button");
 
         var delegateTranscriptionService = Assert.IsType<DelegateTranscriptionService>(context.TranscriptionService);
@@ -127,7 +121,7 @@ public sealed class DesktopUiComponentTests
         Assert.Contains("Intel Macs", rendered.TextContent);
 
         var browseButton = rendered.FindElement(
-            element => element.Name == "button" && element.TextContent == "+ Browse Files",
+            element => element.Name == "button" && element.TextContent == "Choose File",
             "browse files button");
 
         Assert.True(browseButton.Attributes.ContainsKey("disabled"));
@@ -145,7 +139,7 @@ public sealed class DesktopUiComponentTests
         var rendered = await context.RenderAsync<Routes>();
 
         await rendered.ClickAsync(
-            element => element.Name == "button" && element.TextContent == "+ Browse Files",
+            element => element.Name == "button" && element.TextContent == "Choose File",
             "browse files button");
 
         Assert.Equal(AppState.Failed, context.ViewModel.CurrentState);
@@ -176,7 +170,7 @@ public sealed class DesktopUiComponentTests
         var rendered = await context.RenderAsync<Routes>();
 
         await rendered.ClickAsync(
-            element => element.Name == "button" && element.TextContent == "+ Browse Files",
+            element => element.Name == "button" && element.TextContent == "Choose File",
             "browse files button");
 
         Assert.Equal(AppState.Failed, context.ViewModel.CurrentState);
@@ -221,7 +215,7 @@ public sealed class DesktopUiComponentTests
             Assert.Equal(AppState.Ready, context.ViewModel.CurrentState);
 
             await rendered.ClickAsync(
-                element => element.Name == "button" && element.TextContent == "+ Browse Files",
+                element => element.Name == "button" && element.TextContent == "Choose File",
                 "browse files button");
 
             var resultFilePath = Path.Combine(tempDir, $"{Path.GetFileNameWithoutExtension(fileName)}.txt");
@@ -267,7 +261,7 @@ public sealed class DesktopUiComponentTests
             var rendered = await context.RenderAsync<ReadyView>();
 
             await rendered.ClickAsync(
-                element => element.Name == "button" && element.TextContent == "+ Browse Files",
+                element => element.Name == "button" && element.TextContent == "Choose File",
                 "browse files button");
 
             var resultFilePath = Path.Combine(tempDir, "Test 1.txt");
@@ -310,7 +304,7 @@ public sealed class DesktopUiComponentTests
         var rendered = await context.RenderAsync<CompleteView>();
 
         await rendered.ClickAsync(
-            element => element.Name == "button" && element.TextContent == "Copy Text",
+            element => element.Name == "button" && element.TextContent.Contains("Copy Text"),
             "copy text button");
 
         Assert.Equal(["Clipboard text"], context.ResultActionService.CopiedTexts);
@@ -332,14 +326,14 @@ public sealed class DesktopUiComponentTests
         var rendered = await context.RenderAsync<Routes>();
 
         await rendered.ClickAsync(
-            element => element.Name == "button" && element.TextContent == "+ Browse Files",
+            element => element.Name == "button" && element.TextContent == "Choose File",
             "browse files button");
 
         Assert.Equal(AppState.Complete, context.ViewModel.CurrentState);
         Assert.Contains("meeting_01.m4a", rendered.TextContent);
 
         await rendered.ClickAsync(
-            element => element.Name == "button" && element.HasClass("result-back-btn"),
+            element => element.Name == "button" && element.HasClass("complete-new-btn"),
             "back button");
 
         Assert.Equal(AppState.Ready, context.ViewModel.CurrentState);
@@ -366,11 +360,11 @@ public sealed class DesktopUiComponentTests
         var rendered = await context.RenderAsync<DropZone>(parameters);
 
         await rendered.ClickAsync(
-            element => element.Name == "button" && element.TextContent == "+ Browse Files",
+            element => element.Name == "button" && element.TextContent == "Choose File",
             "browse files button");
 
         Assert.Equal("/tmp/interview.wav", selectedFile);
-        Assert.Contains("Pick audio", rendered.TextContent);
+        Assert.Contains("Drop audio file here", rendered.TextContent);
     }
 
     [Fact]
@@ -394,7 +388,7 @@ public sealed class DesktopUiComponentTests
         var rendered = await context.RenderAsync<DropZone>();
 
         await rendered.ClickAsync(
-            element => element.Name == "button" && element.TextContent == "+ Browse Files",
+            element => element.Name == "button" && element.TextContent == "Choose File",
             "browse files button");
 
         Assert.Contains("File picker failed: picker unavailable", rendered.TextContent);
@@ -411,8 +405,7 @@ public sealed class DesktopUiComponentTests
         var rendered = await context.RenderAsync<ReadyView>();
 
         Assert.Contains("Audio Transcription", rendered.TextContent);
-        Assert.Contains("Select an audio file to transcribe locally on this Mac", rendered.TextContent);
-        Assert.Contains("No file selected", rendered.TextContent);
+        Assert.Contains("M4A, WAV, MP3, AAC, FLAC, OGG, AIFF, MP4", rendered.TextContent);
     }
 
     [Fact]
@@ -436,7 +429,7 @@ public sealed class DesktopUiComponentTests
         var transcribeTask = Task.Run(async () =>
         {
             await rendered.ClickAsync(
-                element => element.Name == "button" && element.TextContent == "+ Browse Files",
+                element => element.Name == "button" && element.TextContent == "Choose File",
                 "browse files button");
         });
 
@@ -555,7 +548,7 @@ public sealed class DesktopUiComponentTests
         var rendered = await context.RenderAsync<CompleteView>();
 
         await rendered.ClickAsync(
-            element => element.Name == "button" && element.TextContent == "Open Folder",
+            element => element.Name == "button" && element.TextContent.Contains("Open Folder"),
             "open folder button");
 
         Assert.Equal(["/tmp/output/result.txt"], context.ResultActionService.OpenedResultPaths);
@@ -578,7 +571,7 @@ public sealed class DesktopUiComponentTests
         var rendered = await context.RenderAsync<DropZone>(parameters);
 
         await rendered.ClickAsync(
-            element => element.Name == "button" && element.TextContent == "+ Browse Files",
+            element => element.Name == "button" && element.TextContent == "Choose File",
             "browse files button");
 
         Assert.Null(selectedFile);
@@ -607,7 +600,7 @@ public sealed class DesktopUiComponentTests
     }
 
     [Fact]
-    public async Task RunningView_WithNoProgress_ShowsSpinnerAndNoBars()
+    public async Task RunningView_WithNoProgress_ShowsStartingLabelAndSpinner()
     {
         await using var context = DesktopUiTestContext.Create();
         AppViewModelStateAccessor.SetState(
@@ -617,17 +610,13 @@ public sealed class DesktopUiComponentTests
 
         var rendered = await context.RenderAsync<RunningView>();
 
-        // Spinner is static HTML rendered as a Markup frame, so verify via TextContent
-        Assert.Contains("spinner", rendered.TextContent);
+        Assert.Contains("Starting transcription", rendered.TextContent);
         Assert.DoesNotContain("Elapsed Time", rendered.TextContent);
         Assert.DoesNotContain("Language:", rendered.TextContent);
-        // No progress bar elements should exist
-        Assert.Empty(rendered.FindElements(
-            element => element.Name == "div" && element.HasClass("progress-bar")));
     }
 
     [Fact]
-    public async Task RunningView_ValidatingStage_ShowsStageWithoutLanguage()
+    public async Task RunningView_ValidatingStage_ShowsMessageWithoutLanguage()
     {
         await using var context = DesktopUiTestContext.Create();
         AppViewModelStateAccessor.SetState(
@@ -642,7 +631,6 @@ public sealed class DesktopUiComponentTests
 
         var rendered = await context.RenderAsync<RunningView>();
 
-        Assert.Contains("Validating", rendered.TextContent);
         Assert.Contains("Checking input file", rendered.TextContent);
         Assert.DoesNotContain("Language:", rendered.TextContent);
     }
@@ -663,16 +651,10 @@ public sealed class DesktopUiComponentTests
 
         var rendered = await context.RenderAsync<RunningView>();
 
-        Assert.Contains("Writing", rendered.TextContent);
         Assert.Contains("Writing result file", rendered.TextContent);
         Assert.Contains("1:00", rendered.TextContent);
+        Assert.Contains("95", rendered.TextContent);
         Assert.DoesNotContain("Language:", rendered.TextContent);
-
-        var progressBar = rendered.FindElement(
-            element => element.Name == "div" && element.HasClass("progress-bar"),
-            "progress bar");
-
-        Assert.Contains("95%", progressBar.Attributes["style"]?.ToString());
     }
 
     [Fact]
@@ -713,8 +695,7 @@ public sealed class DesktopUiComponentTests
 
         var rendered = await context.RenderAsync<ReadyView>();
 
-        Assert.Contains("Select an audio file to transcribe locally on this Mac", rendered.TextContent);
-        Assert.Contains("Supported formats: M4A, WAV, MP3, AAC, FLAC, OGG, AIFF, MP4", rendered.TextContent);
+        Assert.Contains("M4A, WAV, MP3, AAC, FLAC, OGG, AIFF, MP4", rendered.TextContent);
         Assert.DoesNotContain("upload", rendered.TextContent, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("multiple files", rendered.TextContent, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Drop your M4A files", rendered.TextContent);
@@ -726,7 +707,7 @@ public sealed class DesktopUiComponentTests
         await using var context = DesktopUiTestContext.Create();
         var rendered = await context.RenderAsync<DropZone>();
 
-        Assert.Contains("Choose an audio file to transcribe", rendered.TextContent);
+        Assert.Contains("Drop audio file here", rendered.TextContent);
         Assert.DoesNotContain("Drop your M4A files", rendered.TextContent);
         Assert.DoesNotContain("upload", rendered.TextContent, StringComparison.OrdinalIgnoreCase);
     }
@@ -776,7 +757,8 @@ public sealed class DesktopUiComponentTests
 
         var rendered = await context.RenderAsync<RunningView>();
 
-        Assert.Contains("67%", rendered.TextContent);
+        Assert.Contains("67", rendered.TextContent);
+        Assert.Contains("%", rendered.TextContent);
     }
 
     [Fact]
@@ -803,14 +785,12 @@ public sealed class DesktopUiComponentTests
 
         await rendered.SynchronizeAsync();
 
-        Assert.Contains("38%", rendered.TextContent);
-        Assert.Contains("Transcribing", rendered.TextContent);
+        Assert.Contains("38", rendered.TextContent);
         Assert.Contains("Processing audio", rendered.TextContent);
-        Assert.Contains("Language: English", rendered.TextContent);
     }
 
     [Fact]
-    public async Task RunningView_WithLoadingModel_ShowsHumanReadableLabel()
+    public async Task RunningView_WithLoadingModel_ShowsMessageText()
     {
         await using var context = DesktopUiTestContext.Create();
         AppViewModelStateAccessor.SetState(
@@ -824,7 +804,7 @@ public sealed class DesktopUiComponentTests
 
         var rendered = await context.RenderAsync<RunningView>();
 
-        Assert.Contains("Loading model", rendered.TextContent);
+        Assert.Contains("Loading ggml-base.bin", rendered.TextContent);
         Assert.DoesNotContain("LoadingModel", rendered.TextContent);
     }
 
@@ -843,13 +823,13 @@ public sealed class DesktopUiComponentTests
 
         var rendered = await context.RenderAsync<RunningView>();
 
-        var progressTrack = rendered.FindElement(
-            element => element.Name == "div" && element.HasClass("progress-track")
+        var progressWrapper = rendered.FindElement(
+            element => element.Name == "div" && element.HasClass("organic-progress-wrapper")
                        && element.Attributes.ContainsKey("role"),
-            "progress track with role");
+            "organic progress wrapper with role");
 
-        Assert.Equal("progressbar", progressTrack.Attributes["role"]?.ToString());
-        Assert.Equal("50", progressTrack.Attributes["aria-valuenow"]?.ToString());
+        Assert.Equal("progressbar", progressWrapper.Attributes["role"]?.ToString());
+        Assert.Equal("50", progressWrapper.Attributes["aria-valuenow"]?.ToString());
     }
 
     [Fact]
@@ -895,7 +875,7 @@ public sealed class DesktopUiComponentTests
 
         // Button is always present but gracefully does nothing when path is missing
         await rendered.ClickAsync(
-            element => element.Name == "button" && element.TextContent == "Open Folder",
+            element => element.Name == "button" && element.TextContent.Contains("Open Folder"),
             "open folder button");
 
         Assert.Empty(context.ResultActionService.OpenedResultPaths);
@@ -922,7 +902,7 @@ public sealed class DesktopUiComponentTests
 
         // Button is always present but gracefully does nothing when no text is available
         await rendered.ClickAsync(
-            element => element.Name == "button" && element.TextContent == "Copy Text",
+            element => element.Name == "button" && element.TextContent.Contains("Copy Text"),
             "copy text button");
 
         Assert.Empty(context.ResultActionService.CopiedTexts);

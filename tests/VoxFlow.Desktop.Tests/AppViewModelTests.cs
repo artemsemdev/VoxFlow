@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using VoxFlow.Core.Configuration;
 using VoxFlow.Core.Interfaces;
 using VoxFlow.Core.Models;
@@ -68,10 +70,10 @@ internal sealed class StubTranscriptionService : ITranscriptionService
     public StubTranscriptionService(bool success = true, string[]? warnings = null)
     {
         var w = (IReadOnlyList<string>)(warnings ?? Array.Empty<string>());
-        _factory = _ => new TranscribeFileResult(
+        _factory = request => new TranscribeFileResult(
             Success: success,
             DetectedLanguage: "en",
-            ResultFilePath: "/tmp/result.txt",
+            ResultFilePath: request.ResultFilePath ?? "/tmp/result.txt",
             AcceptedSegmentCount: 10,
             SkippedSegmentCount: 0,
             Duration: TimeSpan.FromSeconds(5),
@@ -488,6 +490,135 @@ public sealed class AppViewModelTests
         Assert.True(vm.HasWarnings);
         Assert.NotNull(vm.WarningMessage);
         Assert.Contains("model may be slow", vm.WarningMessage!);
+    }
+
+    // -----------------------------------------------------------------------
+    // Result file path — placed in output directory
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task TranscribeFileAsync_ResultFilePath_IsInOutputDirectory()
+    {
+        var vm = ViewModelFactory.Create(transcriptionService: new StubTranscriptionService(success: true));
+        await vm.InitializeAsync();
+
+        await vm.TranscribeFileAsync("/tmp/meeting_notes.m4a");
+
+        Assert.NotNull(vm.TranscriptionResult);
+        var expectedDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+            "VoxFlow", "output");
+        var expectedPath = Path.Combine(expectedDir, "meeting_notes.txt");
+        Assert.Equal(expectedPath, vm.TranscriptionResult!.ResultFilePath);
+    }
+
+    [Fact]
+    public async Task TranscribeFileAsync_ResultFileName_DerivedFromInputFile()
+    {
+        var vm = ViewModelFactory.Create(transcriptionService: new StubTranscriptionService(success: true));
+        await vm.InitializeAsync();
+
+        await vm.TranscribeFileAsync("/Users/test/recordings/interview.wav");
+
+        Assert.NotNull(vm.TranscriptionResult);
+        Assert.EndsWith("interview.txt", vm.TranscriptionResult!.ResultFilePath!);
+    }
+
+    // -----------------------------------------------------------------------
+    // WAV cleanup — temp file deleted after transcription
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task TranscribeFileAsync_Success_DeletesTempWavFile()
+    {
+        var tempWav = Path.Combine(Path.GetTempPath(), $"voxflow-test-{Guid.NewGuid():N}.wav");
+        File.WriteAllBytes(tempWav, new byte[] { 0x00 });
+        Assert.True(File.Exists(tempWav));
+
+        using var configService = new StubConfigurationServiceWithWavPath(
+            ViewModelFactory.ResolveRootSettingsPath(), tempWav);
+        var vm = new AppViewModel(
+            new StubTranscriptionService(success: true),
+            new StubValidationService(true),
+            configService);
+        await vm.InitializeAsync();
+
+        await vm.TranscribeFileAsync("/tmp/audio.wav");
+
+        Assert.False(File.Exists(tempWav), "Temp WAV file should be deleted after transcription");
+    }
+
+    [Fact]
+    public async Task TranscribeFileAsync_Failure_StillDeletesTempWavFile()
+    {
+        var tempWav = Path.Combine(Path.GetTempPath(), $"voxflow-test-{Guid.NewGuid():N}.wav");
+        File.WriteAllBytes(tempWav, new byte[] { 0x00 });
+        Assert.True(File.Exists(tempWav));
+
+        using var configService = new StubConfigurationServiceWithWavPath(
+            ViewModelFactory.ResolveRootSettingsPath(), tempWav);
+        var vm = new AppViewModel(
+            new StubTranscriptionService(new InvalidOperationException("conversion error")),
+            new StubValidationService(true),
+            configService);
+        await vm.InitializeAsync();
+
+        await vm.TranscribeFileAsync("/tmp/audio.wav");
+
+        Assert.False(File.Exists(tempWav), "Temp WAV file should be deleted even after failure");
+    }
+
+    [Fact]
+    public async Task TranscribeFileAsync_Cancelled_StillDeletesTempWavFile()
+    {
+        var tempWav = Path.Combine(Path.GetTempPath(), $"voxflow-test-{Guid.NewGuid():N}.wav");
+        File.WriteAllBytes(tempWav, new byte[] { 0x00 });
+        Assert.True(File.Exists(tempWav));
+
+        var tcs = new TaskCompletionSource<TranscribeFileResult>();
+        using var configService = new StubConfigurationServiceWithWavPath(
+            ViewModelFactory.ResolveRootSettingsPath(), tempWav);
+        var vm = new AppViewModel(
+            new BlockingTranscriptionService(tcs),
+            new StubValidationService(true),
+            configService);
+        await vm.InitializeAsync();
+
+        var task = vm.TranscribeFileAsync("/tmp/audio.wav");
+        vm.CancelTranscription();
+        tcs.TrySetCanceled();
+        await task;
+
+        Assert.False(File.Exists(tempWav), "Temp WAV file should be deleted after cancellation");
+    }
+}
+
+/// <summary>
+/// Configuration service that overrides the wavFilePath to a custom temp location.
+/// Creates a modified copy of the root settings file at load time.
+/// </summary>
+internal sealed class StubConfigurationServiceWithWavPath : IConfigurationService, IDisposable
+{
+    private readonly string _modifiedSettingsPath;
+
+    public StubConfigurationServiceWithWavPath(string settingsPath, string wavPath)
+    {
+        var json = File.ReadAllText(settingsPath);
+        var root = JsonNode.Parse(json)!.AsObject();
+        root["transcription"]!.AsObject()["wavFilePath"] = wavPath;
+        _modifiedSettingsPath = Path.Combine(Path.GetTempPath(), $"voxflow-test-settings-{Guid.NewGuid():N}.json");
+        File.WriteAllText(_modifiedSettingsPath, root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+    }
+
+    public Task<TranscriptionOptions> LoadAsync(string? configurationPath = null)
+        => Task.FromResult(TranscriptionOptions.LoadFromPath(configurationPath ?? _modifiedSettingsPath));
+
+    public IReadOnlyList<SupportedLanguage> GetSupportedLanguages(string? configurationPath = null)
+        => LoadAsync(configurationPath).GetAwaiter().GetResult().SupportedLanguages;
+
+    public void Dispose()
+    {
+        try { File.Delete(_modifiedSettingsPath); } catch { }
     }
 }
 
