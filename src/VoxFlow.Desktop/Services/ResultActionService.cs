@@ -25,6 +25,11 @@ public sealed class ResultActionService : IResultActionService
         });
     }
 
+    // 10s is generous for /usr/bin/open returning after handing the path to Finder.
+    // The hard cap exists so a stuck launch service or a broken Finder cannot block the
+    // UI thread that awaits this method indefinitely.
+    private static readonly TimeSpan OpenFolderTimeout = TimeSpan.FromSeconds(10);
+
     public async Task OpenResultFolderAsync(string resultFilePath, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(resultFilePath))
@@ -39,19 +44,56 @@ public sealed class ResultActionService : IResultActionService
             throw new InvalidOperationException("Result folder is unavailable.");
         }
 
+        using var timeoutCts = new CancellationTokenSource(OpenFolderTimeout);
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
+        var ct = linkedCts.Token;
+
         using var process = Process.Start(CreateOpenFolderProcessStartInfo(directory))
             ?? throw new InvalidOperationException("Could not start Finder.");
 
-        await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+        // Kill the launcher process if the caller cancels or the per-operation timeout fires.
+        // /usr/bin/open is short-lived in normal use, but this guards against a stuck Launch
+        // Services handoff blocking the UI await indefinitely.
+        using var registration = ct.Register(() =>
+        {
+            try
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                }
+            }
+            catch
+            {
+                // Process may have exited between HasExited check and Kill; swallow.
+            }
+        });
+
+        // Drain both streams concurrently with the wait. /usr/bin/open is small, but a
+        // child that fills the stderr pipe buffer (~64 KB on macOS) would otherwise block
+        // at exit waiting for a reader — the same anti-pattern flagged in #40.
+        var stdOutTask = process.StandardOutput.ReadToEndAsync(ct);
+        var stdErrTask = process.StandardError.ReadToEndAsync(ct);
+
+        try
+        {
+            await process.WaitForExitAsync(ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        {
+            throw new InvalidOperationException(
+                $"Finder did not return within {OpenFolderTimeout.TotalSeconds:0}s and was terminated.");
+        }
+
+        var stdOut = await stdOutTask.ConfigureAwait(false);
+        var stdErr = await stdErrTask.ConfigureAwait(false);
+
         if (process.ExitCode == 0)
         {
             return;
         }
 
-        var error = await process.StandardError.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
-        var output = await process.StandardOutput.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
-        var detail = string.IsNullOrWhiteSpace(error) ? output : error;
-
+        var detail = string.IsNullOrWhiteSpace(stdErr) ? stdOut : stdErr;
         throw new InvalidOperationException(
             string.IsNullOrWhiteSpace(detail)
                 ? $"Finder exited with code {process.ExitCode}."
