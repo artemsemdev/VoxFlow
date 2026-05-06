@@ -34,12 +34,26 @@ dotnet test VoxFlow.sln
 
 Expected: **all tests pass.** You should see roughly:
 
-- `VoxFlow.Core.Tests`: 296 passed, 7 skipped (the skipped tests are `Category=RequiresPython` / real-sidecar integration tests that need pyannote preinstalled — they stay skipped in a clean environment)
-- `VoxFlow.McpServer.Tests`: 35 passed
-- `VoxFlow.Cli.Tests`: 6 passed
-- `VoxFlow.Desktop.Tests`: 70 passed, 2 skipped
+- `VoxFlow.Core.Tests`: ≈340 passed, **7 skipped** (the skipped tests are `Category=RequiresPython` / real-sidecar integration tests that need pyannote preinstalled — they stay skipped in a clean environment)
+- `VoxFlow.McpServer.Tests`: 39 passed
+- `VoxFlow.Cli.Tests`: 29 passed
+- `VoxFlow.Desktop.Tests`: ≈145 passed, **2 skipped** (the two `DesktopCliBundleTests` skip until the Mac Catalyst `.app` bundle is built locally — they pass once the bundle has been produced via Visual Studio for Mac or `dotnet build … -t:Run` from `src/VoxFlow.Desktop/`)
 
 If any test **fails**, stop here and report the failure.
+
+### 1a. Skip-count baselines and the CI gate
+
+Tests under `[SkippableFact]` write their skip reason to the xUnit test-output sink via `LoudSkip.IfNot` / `LoudSkip.If` (see `tests/TestSupport/LoudSkip.cs`). The reason is visible regardless of `--verbosity` — look for lines like `[SKIP] python3 not available on PATH`. The CI workflow (`.github/workflows/ci.yml`) hard-fails the job if a project's `Skipped: N` summary drifts from the documented baseline:
+
+| Job leg | Project | Expected Skipped |
+|---|---|---|
+| Linux `core-hosts` | `VoxFlow.Core.Tests` (with `--filter Category!=RequiresPython`) | **0** — every `[SkippableFact]` in Core is filtered out, not skipped |
+| Linux `core-hosts` | `VoxFlow.Cli.Tests` | **0** — no `[SkippableFact]` callsites |
+| Linux `core-hosts` | `VoxFlow.McpServer.Tests` | **0** — no `[SkippableFact]` callsites |
+| macOS `desktop` | `VoxFlow.Desktop.Tests` | **2** — runner Xcode forces `MtouchLink=SdkOnly`, which produces a Mac Catalyst bundle without the CLI bridge, so both `DesktopCliBundleTests` skip |
+| Local full solution (`dotnet test VoxFlow.sln`, no filter) | All projects | **7 + 2 = 9** — the 7 Core `RequiresPython` tests + the 2 Desktop bundle tests, both classes of skip described above |
+
+Drift = regression. If a count changes, the LoudSkip output names exactly which guard fired; update both this baseline table and the gate in `.github/workflows/ci.yml` only when the change is intentional.
 
 ## 2. Disabled-path regression guard
 
