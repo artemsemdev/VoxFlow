@@ -32,16 +32,21 @@ public sealed class PyannoteSidecarClient : IDiarizationSidecar
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
 
-    private static readonly Lazy<JsonSchema> ResponseSchema = new(LoadResponseSchema);
+    // Async lazy: NJsonSchema 11 only exposes JsonSchema.FromJsonAsync, so the
+    // previous Lazy<JsonSchema> factory had to call .GetAwaiter().GetResult().
+    // Lazy<Task<JsonSchema>> caches the in-flight Task so concurrent callers
+    // share a single load, and DiarizeAsync awaits it on its own async stack.
+    private static readonly Lazy<Task<JsonSchema>> ResponseSchema = new(LoadResponseSchemaAsync);
 
-    private static JsonSchema LoadResponseSchema()
+    private static Task<JsonSchema> LoadResponseSchemaAsync()
     {
         using var stream = typeof(PyannoteSidecarClient).Assembly
             .GetManifestResourceStream(SchemaResourceName)
             ?? throw new InvalidOperationException(
                 $"Embedded schema '{SchemaResourceName}' not found.");
         using var reader = new StreamReader(stream);
-        return JsonSchema.FromJsonAsync(reader.ReadToEnd()).GetAwaiter().GetResult();
+        var schemaText = reader.ReadToEnd();
+        return JsonSchema.FromJsonAsync(schemaText);
     }
 
     private readonly IPythonRuntime _runtime;
@@ -149,7 +154,8 @@ public sealed class PyannoteSidecarClient : IDiarizationSidecar
                     $"voxflow_diarize.py returned error envelope: {message}");
             }
 
-            var validationErrors = ResponseSchema.Value.Validate(process.StdOut);
+            var schema = await ResponseSchema.Value.ConfigureAwait(false);
+            var validationErrors = schema.Validate(process.StdOut);
             if (validationErrors.Count > 0)
             {
                 var joined = string.Join("; ", validationErrors.Select(e => e.ToString()));
