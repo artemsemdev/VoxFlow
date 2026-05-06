@@ -51,6 +51,12 @@ If you cannot run a relevant validation step, say so clearly in the pull request
 - When changing product behavior, update the relevant docs in `README.md`, `SETUP.md`, `docs/product/`, or `docs/architecture/`.
 - Add comments only where the code would otherwise be hard to understand.
 
+### Async / concurrency rules
+
+- **`async void` is only allowed for UI event handlers** (MAUI/Mac Catalyst handlers such as `*_Click`, `*_Tapped`, `*_Loaded`, drop handlers). Anything invoked from your own code returns `async Task`.
+- **Every `async void` event handler must wrap its body in a top-level `try`/`catch`** that logs via `DesktopDiagnostics.LogException` (or the equivalent host-specific logger) and surfaces a user-visible error. An exception that escapes an `async void` propagates to the synchronization context and crashes the app — the framework has no Task to observe.
+- **No `.GetAwaiter().GetResult()`, `.Result`, or `.Wait()` in `src/`.** These patterns deadlock under UI synchronization contexts and tie up thread-pool workers. If a sync API needs the result of async work, refactor to expose a sync core that both the async and sync paths call (`DesktopConfigurationService.LoadCore` is the reference example), or use the async-lazy `Lazy<Task<T>>` pattern (`PyannoteSidecarClient.ResponseSchema`).
+
 ## Pull Request Expectations
 
 Each pull request should include:

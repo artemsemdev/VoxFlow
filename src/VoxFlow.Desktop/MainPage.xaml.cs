@@ -160,7 +160,38 @@ public partial class MainPage : ContentPage
         e.AcceptedOperation = DataPackageOperation.Copy;
     }
 
+    // async void is reserved for UI event handlers like this one; the framework has no
+    // Task to observe so any uncaught exception escapes to the synchronization context
+    // and crashes the app. Wrap the body in a top-level try/catch that logs the failure
+    // and shows the user a non-crashing error dialog. The inner work runs in
+    // HandleNativeDropCoreAsync, which can be exercised independently of MAUI for tests
+    // that need it.
     private async void HandleNativeDrop(object? sender, DropEventArgs e)
+    {
+        try
+        {
+            await HandleNativeDropCoreAsync(e);
+        }
+        catch (Exception ex)
+        {
+            DesktopDiagnostics.LogException("MainPage.HandleNativeDrop", ex);
+            try
+            {
+                await DisplayAlert(
+                    "Drop failed",
+                    $"VoxFlow could not handle the dropped file: {ex.Message}",
+                    "OK");
+            }
+            catch (Exception alertEx)
+            {
+                // DisplayAlert can fail if the page is detached or the platform handler
+                // is not yet attached — last-ditch logging keeps the failure visible.
+                DesktopDiagnostics.LogException("MainPage.HandleNativeDrop.DisplayAlert", alertEx);
+            }
+        }
+    }
+
+    private async Task HandleNativeDropCoreAsync(DropEventArgs e)
     {
         DesktopDiagnostics.LogInfo("MAUI drop recognizer Drop invoked.");
         if (!_viewModel.CanStart)
