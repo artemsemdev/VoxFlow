@@ -42,12 +42,19 @@ public class DesktopConfigurationService : IConfigurationService
     }
 
     public Task<TranscriptionOptions> LoadAsync(string? configurationPath = null)
+        => Task.FromResult(LoadCore(configurationPath));
+
+    // Sync core for the configuration load. Both LoadAsync and GetSupportedLanguages
+    // share this so neither has to wait synchronously on the other's Task.
+    // The work is genuinely synchronous (file merge + parse + best-effort cleanup),
+    // so wrapping it in Task.FromResult inside LoadAsync keeps the existing async
+    // surface for callers that prefer it.
+    private TranscriptionOptions LoadCore(string? configurationPath)
     {
         var tempPath = WriteMergedConfigurationSnapshot(configurationPath, applyDesktopRuntimeOverrides: true);
         try
         {
-            var options = TranscriptionOptions.LoadFromPath(tempPath);
-            return Task.FromResult(options);
+            return TranscriptionOptions.LoadFromPath(tempPath);
         }
         finally
         {
@@ -109,7 +116,11 @@ public class DesktopConfigurationService : IConfigurationService
 
     public IReadOnlyList<SupportedLanguage> GetSupportedLanguages(string? configurationPath = null)
     {
-        var options = LoadAsync(configurationPath).GetAwaiter().GetResult();
+        // Use the sync core directly. Calling LoadAsync(...).GetAwaiter().GetResult()
+        // here would be sync-over-async even though LoadAsync's body is itself sync
+        // (Task.FromResult); the pattern still ties up a thread-pool worker on UI
+        // sync contexts and signals risk to readers.
+        var options = LoadCore(configurationPath);
         return options.SupportedLanguages
             .Select((lang, i) => new SupportedLanguage(lang.Code, lang.DisplayName, i))
             .ToList();
