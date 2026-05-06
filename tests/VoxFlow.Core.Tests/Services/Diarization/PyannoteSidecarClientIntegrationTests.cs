@@ -6,6 +6,7 @@ using VoxFlow.Core.Models;
 using VoxFlow.Core.Services.Diarization;
 using VoxFlow.Core.Services.Python;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace VoxFlow.Core.Tests.Services.Diarization;
 
@@ -20,6 +21,13 @@ namespace VoxFlow.Core.Tests.Services.Diarization;
 [Trait("Category", "RequiresPython")]
 public sealed class PyannoteSidecarClientIntegrationTests
 {
+    private readonly ITestOutputHelper _output;
+
+    public PyannoteSidecarClientIntegrationTests(ITestOutputHelper output)
+    {
+        _output = output;
+    }
+
     private static string ScriptPath => Path.Combine(
         AppContext.BaseDirectory, "python", "voxflow_diarize.py");
 
@@ -35,11 +43,11 @@ public sealed class PyannoteSidecarClientIntegrationTests
     [SkippableFact]
     public async Task DiarizeAsync_RealSidecar_SingleSpeakerWav_Returns1Speaker()
     {
-        Skip.IfNot(RequiresPythonOptedIn(), OptInSkipReason);
-        Skip.IfNot(File.Exists(ScriptPath), $"sidecar script missing at {ScriptPath}");
-        Skip.IfNot(await SystemPythonRuntimeReadyAsync(),
+        LoudSkip.IfNot(_output, RequiresPythonOptedIn(), OptInSkipReason);
+        LoudSkip.IfNot(_output, File.Exists(ScriptPath), $"sidecar script missing at {ScriptPath}");
+        LoudSkip.IfNot(_output, await SystemPythonRuntimeReadyAsync(),
             "system python3 not ready (missing or below required 3.10)");
-        Skip.IfNot(File.Exists(SingleSpeakerFixturePath),
+        LoudSkip.IfNot(_output, File.Exists(SingleSpeakerFixturePath),
             "fixture not yet committed; will be enabled in P0.8");
 
         var client = CreateClient();
@@ -55,11 +63,11 @@ public sealed class PyannoteSidecarClientIntegrationTests
     [SkippableFact]
     public async Task DiarizeAsync_RealSidecar_TwoSpeakerWav_Returns2Speakers()
     {
-        Skip.IfNot(RequiresPythonOptedIn(), OptInSkipReason);
-        Skip.IfNot(File.Exists(ScriptPath), $"sidecar script missing at {ScriptPath}");
-        Skip.IfNot(await SystemPythonRuntimeReadyAsync(),
+        LoudSkip.IfNot(_output, RequiresPythonOptedIn(), OptInSkipReason);
+        LoudSkip.IfNot(_output, File.Exists(ScriptPath), $"sidecar script missing at {ScriptPath}");
+        LoudSkip.IfNot(_output, await SystemPythonRuntimeReadyAsync(),
             "system python3 not ready (missing or below required 3.10)");
-        Skip.IfNot(File.Exists(TwoSpeakerFixturePath),
+        LoudSkip.IfNot(_output, File.Exists(TwoSpeakerFixturePath),
             "fixture not yet committed; will be enabled in P0.8");
 
         var client = CreateClient();
@@ -74,11 +82,11 @@ public sealed class PyannoteSidecarClientIntegrationTests
     [SkippableFact]
     public async Task DiarizeAsync_RealSidecar_ThreeSpeakerWav_ReturnsAtLeast3Speakers()
     {
-        Skip.IfNot(RequiresPythonOptedIn(), OptInSkipReason);
-        Skip.IfNot(File.Exists(ScriptPath), $"sidecar script missing at {ScriptPath}");
-        Skip.IfNot(await SystemPythonRuntimeReadyAsync(),
+        LoudSkip.IfNot(_output, RequiresPythonOptedIn(), OptInSkipReason);
+        LoudSkip.IfNot(_output, File.Exists(ScriptPath), $"sidecar script missing at {ScriptPath}");
+        LoudSkip.IfNot(_output, await SystemPythonRuntimeReadyAsync(),
             "system python3 not ready (missing or below required 3.10)");
-        Skip.IfNot(File.Exists(ThreeSpeakerFixturePath),
+        LoudSkip.IfNot(_output, File.Exists(ThreeSpeakerFixturePath),
             "fixture not yet committed; will be enabled in P0.8");
 
         var client = CreateClient();
