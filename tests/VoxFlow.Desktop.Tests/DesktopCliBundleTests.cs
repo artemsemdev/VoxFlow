@@ -1,14 +1,22 @@
 using Xunit;
+using Xunit.Abstractions;
 
 namespace VoxFlow.Desktop.Tests;
 
 public sealed class DesktopCliBundleTests
 {
+    private readonly ITestOutputHelper _output;
+
+    public DesktopCliBundleTests(ITestOutputHelper output)
+    {
+        _output = output;
+    }
+
     [SkippableFact]
     public void MonoBundleCli_IncludesPyannoteSidecarScript()
     {
         var cliBundleDir = ResolveBuiltCliBundleDir();
-        Skip.If(cliBundleDir is null, "Mac Catalyst Desktop app bundle has not been built yet.");
+        LoudSkip.If(_output, cliBundleDir is null, "Mac Catalyst Desktop app bundle has not been built yet.");
 
         var expectedScript = Path.Combine(cliBundleDir, "python", "voxflow_diarize.py");
         Assert.True(
@@ -21,7 +29,7 @@ public sealed class DesktopCliBundleTests
     public void MonoBundleCli_IncludesPythonRequirementsTxt()
     {
         var cliBundleDir = ResolveBuiltCliBundleDir();
-        Skip.If(cliBundleDir is null, "Mac Catalyst Desktop app bundle has not been built yet.");
+        LoudSkip.If(_output, cliBundleDir is null, "Mac Catalyst Desktop app bundle has not been built yet.");
 
         var expectedRequirements = Path.Combine(cliBundleDir, "python", "python-requirements.txt");
         Assert.True(

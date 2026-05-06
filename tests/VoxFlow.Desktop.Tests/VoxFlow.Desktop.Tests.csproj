@@ -35,6 +35,9 @@
     <RazorComponent Include="..\..\src\VoxFlow.Desktop\Components\**\*.razor" Link="Components\%(RecursiveDir)%(Filename)%(Extension)" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="..\TestSupport\LoudSkip.cs" Link="TestSupport\LoudSkip.cs" />
+  </ItemGroup>
+  <ItemGroup>
     <Compile Include="..\..\src\VoxFlow.Desktop\ViewModels\AppViewModel.cs" Link="ViewModels\AppViewModel.cs" />
     <Compile Include="..\..\src\VoxFlow.Desktop\ViewModels\PhaseProgressTracker.cs" Link="ViewModels\PhaseProgressTracker.cs" />
     <Compile Include="..\..\src\VoxFlow.Desktop\Configuration\DesktopConfigurationService.cs" Link="Configuration\DesktopConfigurationService.cs" />
