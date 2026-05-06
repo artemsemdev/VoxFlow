@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace VoxFlow.Core.Tests.Services.Python;
 
@@ -19,6 +20,13 @@ namespace VoxFlow.Core.Tests.Services.Python;
 [Trait("Category", "RequiresPython")]
 public sealed class SidecarScriptContractTests
 {
+    private readonly ITestOutputHelper _output;
+
+    public SidecarScriptContractTests(ITestOutputHelper output)
+    {
+        _output = output;
+    }
+
     private static string ScriptPath => Path.Combine(
         AppContext.BaseDirectory, "python", "voxflow_diarize.py");
 
@@ -31,10 +39,10 @@ public sealed class SidecarScriptContractTests
     [SkippableFact]
     public async Task RunAgainstSingleSpeakerWav_ReturnsOkResponse_WithOneSpeaker()
     {
-        Skip.IfNot(RequiresPythonOptedIn(), OptInSkipReason);
-        Skip.IfNot(Python3Available(), "python3 not available on PATH");
-        Skip.IfNot(File.Exists(ScriptPath), $"sidecar script missing at {ScriptPath}");
-        Skip.IfNot(File.Exists(SingleSpeakerFixturePath),
+        LoudSkip.IfNot(_output, RequiresPythonOptedIn(), OptInSkipReason);
+        LoudSkip.IfNot(_output, Python3Available(), "python3 not available on PATH");
+        LoudSkip.IfNot(_output, File.Exists(ScriptPath), $"sidecar script missing at {ScriptPath}");
+        LoudSkip.IfNot(_output, File.Exists(SingleSpeakerFixturePath),
             "fixture not yet committed; will be enabled in P0.8");
 
         var result = await RunSidecarAsync(
@@ -51,10 +59,10 @@ public sealed class SidecarScriptContractTests
     [SkippableFact]
     public async Task RunAgainstTwoSpeakerWav_ReturnsOkResponse_WithTwoSpeakers()
     {
-        Skip.IfNot(RequiresPythonOptedIn(), OptInSkipReason);
-        Skip.IfNot(Python3Available(), "python3 not available on PATH");
-        Skip.IfNot(File.Exists(ScriptPath), $"sidecar script missing at {ScriptPath}");
-        Skip.IfNot(File.Exists(TwoSpeakerFixturePath),
+        LoudSkip.IfNot(_output, RequiresPythonOptedIn(), OptInSkipReason);
+        LoudSkip.IfNot(_output, Python3Available(), "python3 not available on PATH");
+        LoudSkip.IfNot(_output, File.Exists(ScriptPath), $"sidecar script missing at {ScriptPath}");
+        LoudSkip.IfNot(_output, File.Exists(TwoSpeakerFixturePath),
             "fixture not yet committed; will be enabled in P0.8");
 
         var result = await RunSidecarAsync(
@@ -70,9 +78,9 @@ public sealed class SidecarScriptContractTests
     [SkippableFact]
     public async Task RunAgainstMissingWav_ReturnsErrorResponse()
     {
-        Skip.IfNot(RequiresPythonOptedIn(), OptInSkipReason);
-        Skip.IfNot(Python3Available(), "python3 not available on PATH");
-        Skip.IfNot(File.Exists(ScriptPath), $"sidecar script missing at {ScriptPath}");
+        LoudSkip.IfNot(_output, RequiresPythonOptedIn(), OptInSkipReason);
+        LoudSkip.IfNot(_output, Python3Available(), "python3 not available on PATH");
+        LoudSkip.IfNot(_output, File.Exists(ScriptPath), $"sidecar script missing at {ScriptPath}");
 
         var missing = Path.Combine(Path.GetTempPath(), $"voxflow-missing-{Guid.NewGuid():N}.wav");
         var result = await RunSidecarAsync(
@@ -89,9 +97,9 @@ public sealed class SidecarScriptContractTests
     [SkippableFact]
     public async Task RunWithMalformedJsonRequest_ReturnsErrorResponse_AndExitsNonZero()
     {
-        Skip.IfNot(RequiresPythonOptedIn(), OptInSkipReason);
-        Skip.IfNot(Python3Available(), "python3 not available on PATH");
-        Skip.IfNot(File.Exists(ScriptPath), $"sidecar script missing at {ScriptPath}");
+        LoudSkip.IfNot(_output, RequiresPythonOptedIn(), OptInSkipReason);
+        LoudSkip.IfNot(_output, Python3Available(), "python3 not available on PATH");
+        LoudSkip.IfNot(_output, File.Exists(ScriptPath), $"sidecar script missing at {ScriptPath}");
 
         var result = await RunSidecarAsync("{ this is not json");
 
