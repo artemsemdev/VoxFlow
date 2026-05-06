@@ -47,11 +47,11 @@ Tests under `[SkippableFact]` write their skip reason to the xUnit test-output s
 
 | Job leg | Project | Expected Skipped |
 |---|---|---|
-| Linux `core-hosts` | `VoxFlow.Core.Tests` (with `--filter Category!=RequiresPython`) | **1** — every `[SkippableFact]` is filtered out; the one explicit `[Fact(Skip=…)]` is `BatchTranscriptionServiceTests.TranscribeBatchAsync_ReportsNestedProgress_ForCurrentFile`, parallel-flaky and tracked by #42 |
+| Linux `core-hosts` | `VoxFlow.Core.Tests` (with `--filter Category!=RequiresPython`) | **0** — every `[SkippableFact]` is filtered out, no remaining `[Fact(Skip=…)]` |
 | Linux `core-hosts` | `VoxFlow.Cli.Tests` | **0** — no `[SkippableFact]` callsites |
 | Linux `core-hosts` | `VoxFlow.McpServer.Tests` | **0** — no `[SkippableFact]` callsites |
 | macOS `desktop` | `VoxFlow.Desktop.Tests` | **2** — runner Xcode forces `MtouchLink=SdkOnly`, which produces a Mac Catalyst bundle without the CLI bridge, so both `DesktopCliBundleTests` skip |
-| Local full solution (`dotnet test VoxFlow.sln`, no filter) | All projects | **7 + 1 + 2 = 10** — the 7 Core `RequiresPython` tests + the explicit `BatchTranscriptionService` skip + the 2 Desktop bundle tests |
+| Local full solution (`dotnet test VoxFlow.sln`, no filter) | All projects | **7 + 2 = 9** — the 7 Core `RequiresPython` tests + the 2 Desktop bundle tests |
 
 Drift = regression. If a count changes, the LoudSkip output names exactly which guard fired; update both this baseline table and the gate in `.github/workflows/ci.yml` only when the change is intentional.
 

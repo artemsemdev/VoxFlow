@@ -50,15 +50,11 @@ jobs:
       # verification checklist in docs/delivery/local-speaker-labeling/.
       #
       # Skip-count gate: with the RequiresPython filter every [SkippableFact] in Core is excluded
-      # (not skipped). Today exactly one Core test is skipped on CI: the parallel-flaky
-      # BatchTranscriptionServiceTests.TranscribeBatchAsync_ReportsNestedProgress_ForCurrentFile,
-      # tracked by #42. CLI and MCP have no SkippableFact and no skip-marked tests. Any other
-      # non-baseline value means a Skip.IfNot/Skip.If guard fired unexpectedly and the
-      # SkippableFact's [SKIP] reason in test output names exactly which one — silent skips on
-      # default CI verbosity used to hide this. See docs/delivery/local-speaker-labeling/
-      # phase-1-manual-verification.md for baselines.
-      # TODO(#42): drive Core skip count back to 0 by hardening the BatchTranscriptionService
-      # progress capture and assertion.
+      # (not skipped); CLI and MCP have no SkippableFact callsites. The expected Skipped count
+      # for all three Linux projects is 0. Any non-zero value means a Skip.IfNot/Skip.If guard
+      # fired unexpectedly and the SkippableFact's [SKIP] reason in the test output names which
+      # one — silent skips on default CI verbosity used to hide this. See docs/delivery/
+      # local-speaker-labeling/phase-1-manual-verification.md for baselines.
       - name: Run core tests
         run: |
           set -eo pipefail
@@ -82,7 +78,7 @@ jobs:
           dotnet test tests/VoxFlow.Cli.Tests/VoxFlow.Cli.Tests.csproj --no-restore --logger "trx;LogFileName=VoxFlow.Cli.Tests.trx" | tee "$cli_log"
           dotnet test tests/VoxFlow.McpServer.Tests/VoxFlow.McpServer.Tests.csproj --no-restore --logger "trx;LogFileName=VoxFlow.McpServer.Tests.trx" | tee "$mcp_log"
 
-          assert_skips "VoxFlow.Core.Tests"      "$core_log" 1
+          assert_skips "VoxFlow.Core.Tests"      "$core_log" 0
           assert_skips "VoxFlow.Cli.Tests"       "$cli_log"  0
           assert_skips "VoxFlow.McpServer.Tests" "$mcp_log"  0
 
