@@ -48,11 +48,38 @@ jobs:
       # and a diarization model available, which is out of scope for the default CI image. They
       # are run on machines with the full Python/pyannote environment as part of the Post-Phase-0
       # verification checklist in docs/delivery/local-speaker-labeling/.
+      #
+      # Skip-count gate: with the RequiresPython filter every [SkippableFact] in Core is excluded
+      # (not skipped), so the expected Skipped count for all three Linux projects is 0. Any non-zero
+      # value means a Skip.IfNot/Skip.If guard fired unexpectedly and the SkippableFact's [SKIP] reason
+      # in test output names exactly which one — silent skips on default CI verbosity used to hide
+      # this. See docs/delivery/local-speaker-labeling/phase-1-manual-verification.md for baselines.
       - name: Run core tests
         run: |
-          dotnet test tests/VoxFlow.Core.Tests/VoxFlow.Core.Tests.csproj --no-restore --filter "Category!=RequiresPython" --logger "trx;LogFileName=VoxFlow.Core.Tests.trx"
-          dotnet test tests/VoxFlow.Cli.Tests/VoxFlow.Cli.Tests.csproj --no-restore --logger "trx;LogFileName=VoxFlow.Cli.Tests.trx"
-          dotnet test tests/VoxFlow.McpServer.Tests/VoxFlow.McpServer.Tests.csproj --no-restore --logger "trx;LogFileName=VoxFlow.McpServer.Tests.trx"
+          set -eo pipefail
+          assert_no_skips() {
+            local label="$1" log="$2"
+            local skipped
+            # `|| true` keeps pipefail from aborting if dotnet test ever stops printing
+            # the "Skipped: N" summary line (older runner glitch); empty → treated as 0.
+            skipped=$(grep -oE "Skipped:[[:space:]]+[0-9]+" "$log" | tail -1 | grep -oE "[0-9]+" || true)
+            if [ "${skipped:-0}" != "0" ]; then
+              echo "::error::${label} reported ${skipped} skipped test(s); expected 0. Check the test output above for the [SKIP] reason and the uploaded .trx artifact."
+              exit 1
+            fi
+          }
+
+          core_log=$(mktemp)
+          cli_log=$(mktemp)
+          mcp_log=$(mktemp)
+
+          dotnet test tests/VoxFlow.Core.Tests/VoxFlow.Core.Tests.csproj --no-restore --filter "Category!=RequiresPython" --logger "trx;LogFileName=VoxFlow.Core.Tests.trx" | tee "$core_log"
+          dotnet test tests/VoxFlow.Cli.Tests/VoxFlow.Cli.Tests.csproj --no-restore --logger "trx;LogFileName=VoxFlow.Cli.Tests.trx" | tee "$cli_log"
+          dotnet test tests/VoxFlow.McpServer.Tests/VoxFlow.McpServer.Tests.csproj --no-restore --logger "trx;LogFileName=VoxFlow.McpServer.Tests.trx" | tee "$mcp_log"
+
+          assert_no_skips "VoxFlow.Core.Tests"      "$core_log"
+          assert_no_skips "VoxFlow.Cli.Tests"       "$cli_log"
+          assert_no_skips "VoxFlow.McpServer.Tests" "$mcp_log"
 
       - name: Upload test results
         if: always()
@@ -94,9 +121,27 @@ jobs:
 
       # Real Desktop UI automation is intentionally excluded from default CI because it is slower
       # and depends on a more specialized interactive macOS environment than the headless suite.
+      #
+      # Skip-count gate: the macOS CI build uses `-p:MtouchLink=SdkOnly` to stay compatible with
+      # the runner Xcode, which produces a Mac Catalyst .app that does NOT run CopyBundledCliBridge,
+      # so the two [SkippableFact] DesktopCliBundleTests both skip ("Mac Catalyst Desktop app bundle
+      # has not been built yet."). Expected Skipped: 2 — see docs/delivery/local-speaker-labeling/
+      # phase-1-manual-verification.md. Until the SdkOnly link is replaced and the bridge runs in CI,
+      # this gate freezes the count at 2 so any drift (1, 3, ...) surfaces a real change.
+      # TODO(#37 follow-up): drive Skipped down to 0 by populating the bundle in CI.
       - name: Run desktop tests
         run: |
-          dotnet test tests/VoxFlow.Desktop.Tests/VoxFlow.Desktop.Tests.csproj --no-restore --logger "trx;LogFileName=VoxFlow.Desktop.Tests.trx"
+          set -eo pipefail
+          desktop_log=$(mktemp)
+          dotnet test tests/VoxFlow.Desktop.Tests/VoxFlow.Desktop.Tests.csproj --no-restore --logger "trx;LogFileName=VoxFlow.Desktop.Tests.trx" | tee "$desktop_log"
+
+          expected_skips=2
+          # `|| true` keeps pipefail from aborting if the summary line is missing.
+          skipped=$(grep -oE "Skipped:[[:space:]]+[0-9]+" "$desktop_log" | tail -1 | grep -oE "[0-9]+" || true)
+          if [ "${skipped:-0}" != "$expected_skips" ]; then
+            echo "::error::VoxFlow.Desktop.Tests reported ${skipped} skipped test(s); expected ${expected_skips}. Check the test output above for the [SKIP] reason and the uploaded .trx artifact, then update phase-1-manual-verification.md and this workflow if the drift is intentional."
+            exit 1
+          fi
 
       - name: Upload test results
         if: always()
