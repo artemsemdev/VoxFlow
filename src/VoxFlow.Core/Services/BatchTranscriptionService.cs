@@ -97,9 +97,21 @@ internal sealed class BatchTranscriptionService : IBatchTranscriptionService
         var speakerLabelingEnabled = request.EnableSpeakers ?? options.SpeakerLabeling.Enabled;
 
         // 4. Process each file
+        var cancelled = false;
+        var remainingStartIndex = discoveredFiles.Count;
         for (var i = 0; i < discoveredFiles.Count; i++)
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            if (cancellationToken.IsCancellationRequested)
+            {
+                // Cancellation between files: stop the loop and let the post-loop
+                // block tag every remaining file as Cancelled in the result. This
+                // gives the caller a partial-progress BatchTranscribeResult instead
+                // of a bare OperationCanceledException with no visibility into
+                // which files completed.
+                cancelled = true;
+                remainingStartIndex = i;
+                break;
+            }
             var file = discoveredFiles[i];
 
             if (file.Status == DiscoveryStatus.Skipped)
@@ -204,7 +216,19 @@ internal sealed class BatchTranscriptionService : IBatchTranscriptionService
                     null, fileStopwatch.Elapsed,
                     detectedLanguage));
             }
-            catch (OperationCanceledException) { throw; }
+            catch (OperationCanceledException)
+            {
+                // Mid-file cancellation: record this file as Cancelled and exit the
+                // loop. The temp-WAV cleanup in `finally` still runs so the partially
+                // written WAV does not outlive the run.
+                fileStopwatch.Stop();
+                results.Add(new BatchFileResult(
+                    file.InputPath, file.OutputPath, "Cancelled",
+                    "Batch cancelled during transcription.", fileStopwatch.Elapsed, null));
+                cancelled = true;
+                remainingStartIndex = i + 1;
+                break;
+            }
             catch (Exception ex)
             {
                 fileStopwatch.Stop();
@@ -220,20 +244,42 @@ internal sealed class BatchTranscriptionService : IBatchTranscriptionService
             }
         }
 
+        // Mark every file that was discovered but never reached as Cancelled. This
+        // closes the gap left by the cancellation break above so caller-visible
+        // counts always satisfy succeeded + failed + skipped == TotalFiles.
+        for (var j = remainingStartIndex; j < discoveredFiles.Count; j++)
+        {
+            var remaining = discoveredFiles[j];
+            results.Add(new BatchFileResult(
+                remaining.InputPath, remaining.OutputPath, "Cancelled",
+                "Batch cancelled before this file started.", TimeSpan.Zero, null));
+        }
+
         // The summary writer already speaks the shared file-processing model, so project the batch-specific results once here.
+        // Cancelled buckets under Skipped for the summary file and for the integer
+        // counters: the existing FileProcessingStatus enum has Success/Failed/Skipped
+        // and the BatchTranscribeResult contract is positional, so adding a Cancelled
+        // counter would be a breaking record shape. The string Status preserves the
+        // distinction for callers that need it (Results[*].Status == "Cancelled").
         var fileResults = results.Select(r => new FileProcessingResult(
             r.InputPath, r.OutputPath,
             r.Status switch { "Success" => FileProcessingStatus.Success, "Failed" => FileProcessingStatus.Failed, _ => FileProcessingStatus.Skipped },
             r.ErrorMessage, r.Duration, r.DetectedLanguage)).ToList();
-        await _summaryWriter.WriteAsync(batchOptions.SummaryFilePath, fileResults, cancellationToken);
+        // The summary write itself uses the original (un-linked) cancellation token
+        // so an already-cancelled batch can still flush its partial summary to disk.
+        // Without this, a cancelled run would also lose its summary file.
+        await _summaryWriter.WriteAsync(batchOptions.SummaryFilePath, fileResults, CancellationToken.None);
 
         totalStopwatch.Stop();
         var succeeded = results.Count(r => r.Status == "Success");
         var failed = results.Count(r => r.Status == "Failed");
-        var skipped = results.Count(r => r.Status == "Skipped");
+        var skipped = results.Count(r => r.Status == "Skipped" || r.Status == "Cancelled");
+        var cancelledCount = results.Count(r => r.Status == "Cancelled");
 
-        progress?.Report(new ProgressUpdate(ProgressStage.Complete, 100, totalStopwatch.Elapsed,
-            $"Batch complete: {succeeded} succeeded, {failed} failed, {skipped} skipped"));
+        var completionMessage = cancelled
+            ? $"Batch cancelled: {succeeded} succeeded, {failed} failed, {skipped - cancelledCount} skipped, {cancelledCount} cancelled"
+            : $"Batch complete: {succeeded} succeeded, {failed} failed, {skipped} skipped";
+        progress?.Report(new ProgressUpdate(ProgressStage.Complete, 100, totalStopwatch.Elapsed, completionMessage));
 
         return new BatchTranscribeResult(
             results.Count, succeeded, failed, skipped,
