@@ -12,6 +12,14 @@ namespace VoxFlow.Desktop.Tests;
 
 public sealed class DesktopUiComponentTests
 {
+    // Hardcoded POSIX-style paths are non-portable (Windows lacks them). Path.GetTempPath()
+    // resolves to the platform's temp directory at runtime — these helper paths are passed
+    // to mocked services that don't actually touch the filesystem; the helpers exist purely
+    // so assertions and stub data stay platform-agnostic.
+    private static string FakeAudioPath(string fileName) => Path.Combine(Path.GetTempPath(), fileName);
+
+    private static string FakeResultPath(string fileName) => FakeAudioPath(fileName);
+
     [Fact]
     public async Task Routes_WhenInitializationFails_ShowsStartupError_AndRetryRecovers()
     {
@@ -78,11 +86,11 @@ public sealed class DesktopUiComponentTests
         var transcriptionService = new DelegateTranscriptionService((request, _, _) =>
             Task.FromResult(TestTranscriptionFactory.Create(
                 success: true,
-                path: $"/tmp/{Path.GetFileNameWithoutExtension(request.InputPath)}.txt")));
+                path: FakeResultPath($"{Path.GetFileNameWithoutExtension(request.InputPath)}.txt"))));
 
         await using var context = DesktopUiTestContext.Create(transcriptionService: transcriptionService);
         VoxFlow.Desktop.Platform.MacFilePicker.PickAudioFileAsyncHandler =
-            static () => Task.FromResult<string?>("/tmp/interview.m4a");
+            static () => Task.FromResult<string?>(FakeAudioPath("interview.m4a"));
 
         var rendered = await context.RenderAsync<Routes>();
         Assert.Equal(AppState.Ready, context.ViewModel.CurrentState);
@@ -93,7 +101,7 @@ public sealed class DesktopUiComponentTests
             "browse files button");
 
         var delegateTranscriptionService = Assert.IsType<DelegateTranscriptionService>(context.TranscriptionService);
-        Assert.Equal("/tmp/interview.m4a", delegateTranscriptionService.LastFilePath);
+        Assert.Equal(FakeAudioPath("interview.m4a"), delegateTranscriptionService.LastFilePath);
         Assert.Equal(AppState.Complete, context.ViewModel.CurrentState);
         Assert.NotNull(context.ViewModel.TranscriptionResult);
         Assert.True(context.ViewModel.TranscriptionResult!.Success);
@@ -135,7 +143,7 @@ public sealed class DesktopUiComponentTests
 
         await using var context = DesktopUiTestContext.Create(transcriptionService: transcriptionService);
         VoxFlow.Desktop.Platform.MacFilePicker.PickAudioFileAsyncHandler =
-            static () => Task.FromResult<string?>("/tmp/demo.m4a");
+            static () => Task.FromResult<string?>(FakeAudioPath("demo.m4a"));
         var rendered = await context.RenderAsync<Routes>();
 
         await rendered.ClickAsync(
@@ -162,11 +170,11 @@ public sealed class DesktopUiComponentTests
         var transcriptionService = new DelegateTranscriptionService((request, _, _) =>
             Task.FromResult(++attempts == 1
                 ? TestTranscriptionFactory.Create(success: false, warnings: ["retry me"])
-                : TestTranscriptionFactory.Create(success: true, path: $"/tmp/{Path.GetFileNameWithoutExtension(request.InputPath)}.txt")));
+                : TestTranscriptionFactory.Create(success: true, path: FakeResultPath($"{Path.GetFileNameWithoutExtension(request.InputPath)}.txt"))));
 
         await using var context = DesktopUiTestContext.Create(transcriptionService: transcriptionService);
         VoxFlow.Desktop.Platform.MacFilePicker.PickAudioFileAsyncHandler =
-            static () => Task.FromResult<string?>("/tmp/demo.wav");
+            static () => Task.FromResult<string?>(FakeAudioPath("demo.wav"));
         var rendered = await context.RenderAsync<Routes>();
 
         await rendered.ClickAsync(
@@ -183,7 +191,7 @@ public sealed class DesktopUiComponentTests
 
         var delegateTranscriptionService = Assert.IsType<DelegateTranscriptionService>(context.TranscriptionService);
         Assert.Equal(2, attempts);
-        Assert.Equal("/tmp/demo.wav", delegateTranscriptionService.LastFilePath);
+        Assert.Equal(FakeAudioPath("demo.wav"), delegateTranscriptionService.LastFilePath);
         Assert.Equal(AppState.Complete, context.ViewModel.CurrentState);
         Assert.NotNull(context.ViewModel.TranscriptionResult);
         Assert.True(context.ViewModel.TranscriptionResult!.Success);
@@ -197,46 +205,33 @@ public sealed class DesktopUiComponentTests
     {
         var repositoryRoot = Path.GetDirectoryName(ViewModelFactory.ResolveRootSettingsPath())
             ?? throw new InvalidOperationException("Could not resolve repository root.");
-        var inputPath = Path.Combine(repositoryRoot, "artifacts", "Input", fileName);
-        Assert.True(File.Exists(inputPath), $"Expected integration input file to exist: {inputPath}");
+        var inputPath = TestFixtureLocator.Resolve(fileName);
+        Assert.True(File.Exists(inputPath), TestFixtureLocator.FormatMissingFixtureReason(inputPath));
 
-        var tempDir = Path.Combine(Path.GetTempPath(), $"voxflow-ui-real-{Path.GetFileNameWithoutExtension(fileName)}-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(tempDir);
+        // TemporaryDirectory.Dispose handles recursive delete on exit, so the test
+        // body no longer needs a try/finally + bare catch for cleanup.
+        using var tempDir = new TemporaryDirectory();
+        var configPath = WriteSingleFileConfig(repositoryRoot, tempDir.Path, inputPath);
+        await using var context = DesktopUiTestContext.CreateWithRealCore(configPath);
 
-        try
-        {
-            var configPath = WriteSingleFileConfig(repositoryRoot, tempDir, inputPath);
-            await using var context = DesktopUiTestContext.CreateWithRealCore(configPath);
+        VoxFlow.Desktop.Platform.MacFilePicker.PickAudioFileAsyncHandler =
+            () => Task.FromResult<string?>(inputPath);
 
-            VoxFlow.Desktop.Platform.MacFilePicker.PickAudioFileAsyncHandler =
-                () => Task.FromResult<string?>(inputPath);
+        var rendered = await context.RenderAsync<Routes>();
+        Assert.Equal(AppState.Ready, context.ViewModel.CurrentState);
 
-            var rendered = await context.RenderAsync<Routes>();
-            Assert.Equal(AppState.Ready, context.ViewModel.CurrentState);
+        await rendered.ClickAsync(
+            element => element.Name == "button" && element.TextContent == "Choose File",
+            "browse files button");
 
-            await rendered.ClickAsync(
-                element => element.Name == "button" && element.TextContent == "Choose File",
-                "browse files button");
+        var resultFilePath = Path.Combine(tempDir.Path, $"{Path.GetFileNameWithoutExtension(fileName)}.txt");
 
-            var resultFilePath = Path.Combine(tempDir, $"{Path.GetFileNameWithoutExtension(fileName)}.txt");
-
-            Assert.Equal(AppState.Complete, context.ViewModel.CurrentState);
-            Assert.NotNull(context.ViewModel.TranscriptionResult);
-            Assert.True(context.ViewModel.TranscriptionResult!.Success);
-            Assert.Equal(resultFilePath, context.ViewModel.TranscriptionResult.ResultFilePath);
-            Assert.True(File.Exists(resultFilePath), $"Expected result file to exist: {resultFilePath}");
-            Assert.Contains(Path.GetFileName(inputPath), rendered.TextContent);
-        }
-        finally
-        {
-            try
-            {
-                Directory.Delete(tempDir, recursive: true);
-            }
-            catch
-            {
-            }
-        }
+        Assert.Equal(AppState.Complete, context.ViewModel.CurrentState);
+        Assert.NotNull(context.ViewModel.TranscriptionResult);
+        Assert.True(context.ViewModel.TranscriptionResult!.Success);
+        Assert.Equal(resultFilePath, context.ViewModel.TranscriptionResult.ResultFilePath);
+        Assert.True(File.Exists(resultFilePath), $"Expected result file to exist: {resultFilePath}");
+        Assert.Contains(Path.GetFileName(inputPath), rendered.TextContent);
     }
 
     [DesktopRealAudioFact]
@@ -244,44 +239,29 @@ public sealed class DesktopUiComponentTests
     {
         var repositoryRoot = Path.GetDirectoryName(ViewModelFactory.ResolveRootSettingsPath())
             ?? throw new InvalidOperationException("Could not resolve repository root.");
-        var inputPath = Path.Combine(repositoryRoot, "artifacts", "Input", "Test 1.m4a");
-        Assert.True(File.Exists(inputPath), $"Expected integration input file to exist: {inputPath}");
+        var inputPath = TestFixtureLocator.Resolve("Test 1.m4a");
+        Assert.True(File.Exists(inputPath), TestFixtureLocator.FormatMissingFixtureReason(inputPath));
 
-        var tempDir = Path.Combine(Path.GetTempPath(), $"voxflow-ui-ready-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(tempDir);
+        using var tempDir = new TemporaryDirectory();
+        var configPath = WriteSingleFileConfig(repositoryRoot, tempDir.Path, inputPath);
+        await using var context = DesktopUiTestContext.CreateWithRealCore(configPath);
 
-        try
-        {
-            var configPath = WriteSingleFileConfig(repositoryRoot, tempDir, inputPath);
-            await using var context = DesktopUiTestContext.CreateWithRealCore(configPath);
+        VoxFlow.Desktop.Platform.MacFilePicker.PickAudioFileAsyncHandler =
+            () => Task.FromResult<string?>(inputPath);
 
-            VoxFlow.Desktop.Platform.MacFilePicker.PickAudioFileAsyncHandler =
-                () => Task.FromResult<string?>(inputPath);
+        var rendered = await context.RenderAsync<ReadyView>();
 
-            var rendered = await context.RenderAsync<ReadyView>();
+        await rendered.ClickAsync(
+            element => element.Name == "button" && element.TextContent == "Choose File",
+            "browse files button");
 
-            await rendered.ClickAsync(
-                element => element.Name == "button" && element.TextContent == "Choose File",
-                "browse files button");
+        var resultFilePath = Path.Combine(tempDir.Path, "Test 1.txt");
 
-            var resultFilePath = Path.Combine(tempDir, "Test 1.txt");
-
-            Assert.Equal(AppState.Complete, context.ViewModel.CurrentState);
-            Assert.NotNull(context.ViewModel.TranscriptionResult);
-            Assert.True(context.ViewModel.TranscriptionResult!.Success);
-            Assert.Equal(resultFilePath, context.ViewModel.TranscriptionResult.ResultFilePath);
-            Assert.True(File.Exists(resultFilePath), $"Expected result file to exist: {resultFilePath}");
-        }
-        finally
-        {
-            try
-            {
-                Directory.Delete(tempDir, recursive: true);
-            }
-            catch
-            {
-            }
-        }
+        Assert.Equal(AppState.Complete, context.ViewModel.CurrentState);
+        Assert.NotNull(context.ViewModel.TranscriptionResult);
+        Assert.True(context.ViewModel.TranscriptionResult!.Success);
+        Assert.Equal(resultFilePath, context.ViewModel.TranscriptionResult.ResultFilePath);
+        Assert.True(File.Exists(resultFilePath), $"Expected result file to exist: {resultFilePath}");
     }
 
     [Fact]
@@ -317,11 +297,11 @@ public sealed class DesktopUiComponentTests
         var transcriptionService = new DelegateTranscriptionService((request, _, _) =>
             Task.FromResult(TestTranscriptionFactory.Create(
                 success: true,
-                path: $"/tmp/{Path.GetFileNameWithoutExtension(request.InputPath)}.txt")));
+                path: FakeResultPath($"{Path.GetFileNameWithoutExtension(request.InputPath)}.txt"))));
 
         await using var context = DesktopUiTestContext.Create(transcriptionService: transcriptionService);
         VoxFlow.Desktop.Platform.MacFilePicker.PickAudioFileAsyncHandler =
-            static () => Task.FromResult<string?>("/tmp/meeting_01.m4a");
+            static () => Task.FromResult<string?>(FakeAudioPath("meeting_01.m4a"));
 
         var rendered = await context.RenderAsync<Routes>();
 
@@ -348,7 +328,7 @@ public sealed class DesktopUiComponentTests
 
         await using var context = DesktopUiTestContext.Create();
         VoxFlow.Desktop.Platform.MacFilePicker.PickAudioFileAsyncHandler =
-            static () => Task.FromResult<string?>("/tmp/interview.wav");
+            static () => Task.FromResult<string?>(FakeAudioPath("interview.wav"));
         var parameters = ParameterView.FromDictionary(new Dictionary<string, object?>
         {
             [nameof(DropZone.Label)] = "Pick audio",
@@ -363,7 +343,7 @@ public sealed class DesktopUiComponentTests
             element => element.Name == "button" && element.TextContent == "Choose File",
             "browse files button");
 
-        Assert.Equal("/tmp/interview.wav", selectedFile);
+        Assert.Equal(FakeAudioPath("interview.wav"), selectedFile);
         Assert.Contains("Drop audio file here", rendered.TextContent);
     }
 
@@ -420,7 +400,7 @@ public sealed class DesktopUiComponentTests
 
         await using var context = DesktopUiTestContext.Create(transcriptionService: transcriptionService);
         VoxFlow.Desktop.Platform.MacFilePicker.PickAudioFileAsyncHandler =
-            static () => Task.FromResult<string?>("/tmp/long-recording.m4a");
+            static () => Task.FromResult<string?>(FakeAudioPath("long-recording.m4a"));
 
         var rendered = await context.RenderAsync<Routes>();
         Assert.Equal(AppState.Ready, context.ViewModel.CurrentState);
@@ -433,15 +413,12 @@ public sealed class DesktopUiComponentTests
                 "browse files button");
         });
 
-        // Wait until the ViewModel enters Running state
-        var timeout = Task.Delay(TimeSpan.FromSeconds(5));
-        while (context.ViewModel.CurrentState != AppState.Running)
-        {
-            if (timeout.IsCompleted) throw new TimeoutException("ViewModel did not enter Running state.");
-            await Task.Delay(10);
-        }
-
-        Assert.Equal(AppState.Running, context.ViewModel.CurrentState);
+        // Wait until the ViewModel enters Running state. WaitForCondition replaces the
+        // ad-hoc polling loop the test had before; the helper polls at 10 ms with a 5 s
+        // cap and surfaces a clear failure if the predicate never holds.
+        var becameRunning = await WaitForCondition.WaitForAsync(
+            () => context.ViewModel.CurrentState == AppState.Running);
+        Assert.True(becameRunning, "ViewModel did not enter Running state within 5 s.");
 
         // Click Cancel
         context.ViewModel.CancelTranscription();
@@ -460,7 +437,7 @@ public sealed class DesktopUiComponentTests
 
         await using var context = DesktopUiTestContext.Create();
         VoxFlow.Desktop.Platform.MacFilePicker.PickAudioFileAsyncHandler =
-            static () => Task.FromResult<string?>("/tmp/keyboard-test.wav");
+            static () => Task.FromResult<string?>(FakeAudioPath("keyboard-test.wav"));
         var parameters = ParameterView.FromDictionary(new Dictionary<string, object?>
         {
             [nameof(DropZone.OnFileSelected)] = EventCallback.Factory.Create<string>(
@@ -475,7 +452,7 @@ public sealed class DesktopUiComponentTests
             "drop zone div",
             "Enter");
 
-        Assert.Equal("/tmp/keyboard-test.wav", selectedFile);
+        Assert.Equal(FakeAudioPath("keyboard-test.wav"), selectedFile);
     }
 
     [Fact]
@@ -485,7 +462,7 @@ public sealed class DesktopUiComponentTests
 
         await using var context = DesktopUiTestContext.Create();
         VoxFlow.Desktop.Platform.MacFilePicker.PickAudioFileAsyncHandler =
-            static () => Task.FromResult<string?>("/tmp/space-key.wav");
+            static () => Task.FromResult<string?>(FakeAudioPath("space-key.wav"));
         var parameters = ParameterView.FromDictionary(new Dictionary<string, object?>
         {
             [nameof(DropZone.OnFileSelected)] = EventCallback.Factory.Create<string>(
@@ -500,7 +477,7 @@ public sealed class DesktopUiComponentTests
             "drop zone div",
             " ");
 
-        Assert.Equal("/tmp/space-key.wav", selectedFile);
+        Assert.Equal(FakeAudioPath("space-key.wav"), selectedFile);
     }
 
     [Fact]
@@ -510,7 +487,7 @@ public sealed class DesktopUiComponentTests
 
         await using var context = DesktopUiTestContext.Create();
         VoxFlow.Desktop.Platform.MacFilePicker.PickAudioFileAsyncHandler =
-            static () => Task.FromResult<string?>("/tmp/should-not-select.wav");
+            static () => Task.FromResult<string?>(FakeAudioPath("should-not-select.wav"));
         var parameters = ParameterView.FromDictionary(new Dictionary<string, object?>
         {
             [nameof(DropZone.OnFileSelected)] = EventCallback.Factory.Create<string>(
@@ -538,7 +515,7 @@ public sealed class DesktopUiComponentTests
             transcriptionResult: new TranscribeFileResult(
                 Success: true,
                 DetectedLanguage: "en",
-                ResultFilePath: "/tmp/output/result.txt",
+                ResultFilePath: Path.Combine(Path.GetTempPath(), "output", "result.txt"),
                 AcceptedSegmentCount: 5,
                 SkippedSegmentCount: 0,
                 Duration: TimeSpan.FromSeconds(10),
@@ -551,7 +528,7 @@ public sealed class DesktopUiComponentTests
             element => element.Name == "button" && element.TextContent.Contains("Open Folder"),
             "open folder button");
 
-        Assert.Equal(["/tmp/output/result.txt"], context.ResultActionService.OpenedResultPaths);
+        Assert.Equal([Path.Combine(Path.GetTempPath(), "output", "result.txt")], context.ResultActionService.OpenedResultPaths);
     }
 
     [Fact]
@@ -606,7 +583,7 @@ public sealed class DesktopUiComponentTests
         AppViewModelStateAccessor.SetState(
             context.ViewModel,
             currentState: AppState.Running,
-            lastFilePath: "/tmp/audio.m4a");
+            lastFilePath: FakeAudioPath("audio.m4a"));
 
         var rendered = await context.RenderAsync<RunningView>();
 
@@ -664,7 +641,7 @@ public sealed class DesktopUiComponentTests
 
         await using var context = DesktopUiTestContext.Create();
         VoxFlow.Desktop.Platform.MacFilePicker.PickAudioFileAsyncHandler =
-            static () => Task.FromResult<string?>("/tmp/should-not-select.wav");
+            static () => Task.FromResult<string?>(FakeAudioPath("should-not-select.wav"));
         var parameters = ParameterView.FromDictionary(new Dictionary<string, object?>
         {
             [nameof(DropZone.IsDisabled)] = true,
@@ -735,7 +712,7 @@ public sealed class DesktopUiComponentTests
         AppViewModelStateAccessor.SetState(
             context.ViewModel,
             currentState: AppState.Running,
-            lastFilePath: "/tmp/audio.m4a");
+            lastFilePath: FakeAudioPath("audio.m4a"));
 
         var rendered = await context.RenderAsync<RunningView>();
 
@@ -872,7 +849,7 @@ public sealed class DesktopUiComponentTests
             transcriptionResult: new TranscribeFileResult(
                 Success: true,
                 DetectedLanguage: "en",
-                ResultFilePath: "/tmp/result.txt",
+                ResultFilePath: FakeResultPath("result.txt"),
                 AcceptedSegmentCount: 5,
                 SkippedSegmentCount: 0,
                 Duration: TimeSpan.FromSeconds(8),
@@ -971,7 +948,7 @@ public sealed class DesktopUiComponentTests
             transcriptionResult: new TranscribeFileResult(
                 Success: true,
                 DetectedLanguage: "en",
-                ResultFilePath: "/tmp/result.txt",
+                ResultFilePath: FakeResultPath("result.txt"),
                 AcceptedSegmentCount: 5,
                 SkippedSegmentCount: 0,
                 Duration: TimeSpan.FromSeconds(8),
@@ -996,7 +973,7 @@ public sealed class DesktopUiComponentTests
             transcriptionResult: new TranscribeFileResult(
                 Success: true,
                 DetectedLanguage: "en",
-                ResultFilePath: "/tmp/result.voxflow.json",
+                ResultFilePath: FakeResultPath("result.voxflow.json"),
                 AcceptedSegmentCount: 2,
                 SkippedSegmentCount: 0,
                 Duration: TimeSpan.FromSeconds(2),
@@ -1025,7 +1002,7 @@ public sealed class DesktopUiComponentTests
             transcriptionResult: new TranscribeFileResult(
                 Success: true,
                 DetectedLanguage: "en",
-                ResultFilePath: "/tmp/result.txt",
+                ResultFilePath: FakeResultPath("result.txt"),
                 AcceptedSegmentCount: 5,
                 SkippedSegmentCount: 0,
                 Duration: TimeSpan.FromSeconds(8),
@@ -1049,7 +1026,7 @@ public sealed class DesktopUiComponentTests
             transcriptionResult: new TranscribeFileResult(
                 Success: true,
                 DetectedLanguage: "en",
-                ResultFilePath: "/tmp/result.txt",
+                ResultFilePath: FakeResultPath("result.txt"),
                 AcceptedSegmentCount: 5,
                 SkippedSegmentCount: 0,
                 Duration: TimeSpan.FromSeconds(8),
@@ -1073,7 +1050,7 @@ public sealed class DesktopUiComponentTests
             transcriptionResult: new TranscribeFileResult(
                 Success: true,
                 DetectedLanguage: "en",
-                ResultFilePath: "/tmp/result.voxflow.json",
+                ResultFilePath: FakeResultPath("result.voxflow.json"),
                 AcceptedSegmentCount: 1,
                 SkippedSegmentCount: 0,
                 Duration: TimeSpan.FromSeconds(1),

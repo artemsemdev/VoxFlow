@@ -36,6 +36,10 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="..\TestSupport\LoudSkip.cs" Link="TestSupport\LoudSkip.cs" />
+    <Compile Include="..\TestSupport\TemporaryDirectory.cs" Link="TestSupport\TemporaryDirectory.cs" />
+    <Compile Include="..\TestSupport\TestProjectPaths.cs" Link="TestSupport\TestProjectPaths.cs" />
+    <Compile Include="..\TestSupport\TestFixtureLocator.cs" Link="TestSupport\TestFixtureLocator.cs" />
+    <Compile Include="..\TestSupport\WaitForCondition.cs" Link="TestSupport\WaitForCondition.cs" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="..\..\src\VoxFlow.Desktop\ViewModels\AppViewModel.cs" Link="ViewModels\AppViewModel.cs" />
