@@ -1,48 +1,29 @@
 using System;
 using System.Diagnostics;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 internal static class TestProcessRunner
 {
-    public static async Task<ProcessRunResult> RunAppAsync(string settingsPath, TimeSpan timeout)
-    {
-        var startInfo = CreateStartInfo(settingsPath);
-
-        using var process = new Process { StartInfo = startInfo };
-        process.Start();
-
-        var standardOutputTask = process.StandardOutput.ReadToEndAsync();
-        var standardErrorTask = process.StandardError.ReadToEndAsync();
-        var waitForExitTask = process.WaitForExitAsync();
-        var completedTask = await Task.WhenAny(waitForExitTask, Task.Delay(timeout)).ConfigureAwait(false);
-
-        if (completedTask != waitForExitTask)
-        {
-            try
-            {
-                process.Kill(entireProcessTree: true);
-            }
-            catch
-            {
-                // The process may already be gone when timeout cleanup runs.
-            }
-
-            throw new TimeoutException($"The application did not finish within {timeout}.");
-        }
-
-        var outputBuilder = new StringBuilder();
-        outputBuilder.Append(await standardOutputTask.ConfigureAwait(false));
-        outputBuilder.Append(await standardErrorTask.ConfigureAwait(false));
-
-        return new ProcessRunResult(process.ExitCode, outputBuilder.ToString());
-    }
+    public static Task<ProcessRunResult> RunAppAsync(
+        string settingsPath,
+        TimeSpan timeout,
+        CancellationToken cancellationToken = default)
+        => RunRawAsync(CreateStartInfo(settingsPath), timeout, cancellationToken);
 
     public static async Task<ProcessRunResult> RunAppUntilOutputAsync(
         string settingsPath,
         TimeSpan timeout,
-        string requiredOutput)
+        string requiredOutput,
+        CancellationToken cancellationToken = default)
     {
+        // Linked CTS: caller cancel OR per-operation timeout share one kill path. A hung
+        // child cannot outlive the test even if the caller forgets to cancel.
+        using var timeoutCts = new CancellationTokenSource(timeout);
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
+        var ct = linkedCts.Token;
+
         var startInfo = CreateStartInfo(settingsPath);
         var outputBuilder = new StringBuilder();
         var requiredOutputSeen = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -78,25 +59,81 @@ internal static class TestProcessRunner
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
 
+        using var registration = ct.Register(() => TryKillProcess(process));
+
         var waitForExitTask = process.WaitForExitAsync();
-        var completedTask = await Task.WhenAny(requiredOutputSeen.Task, waitForExitTask, Task.Delay(timeout))
-            .ConfigureAwait(false);
+        var completedTask = await Task.WhenAny(requiredOutputSeen.Task, waitForExitTask).ConfigureAwait(false);
 
         if (completedTask == requiredOutputSeen.Task)
         {
+            // Required output arrived — kill the child and wait for it to settle so the
+            // test does not leave a zombie behind when it returns.
             TryKillProcess(process);
             await waitForExitTask.ConfigureAwait(false);
             return new ProcessRunResult(process.ExitCode, outputBuilder.ToString());
         }
 
-        if (completedTask == waitForExitTask)
+        if (timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
         {
-            return new ProcessRunResult(process.ExitCode, outputBuilder.ToString());
+            throw new TimeoutException($"The application did not reach the expected output within {timeout}.");
         }
 
-        TryKillProcess(process);
-        await waitForExitTask.ConfigureAwait(false);
-        throw new TimeoutException($"The application did not reach the expected output within {timeout}.");
+        cancellationToken.ThrowIfCancellationRequested();
+
+        return new ProcessRunResult(process.ExitCode, outputBuilder.ToString());
+    }
+
+    /// <summary>
+    /// Run an arbitrary process to completion or kill it on cancellation/timeout. Drains
+    /// stdout and stderr concurrently with the wait so a child that fills its stderr pipe
+    /// buffer (~64 KB on macOS) cannot deadlock at exit.
+    /// </summary>
+    public static async Task<ProcessRunResult> RunRawAsync(
+        ProcessStartInfo startInfo,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(startInfo);
+
+        startInfo.RedirectStandardOutput = true;
+        startInfo.RedirectStandardError = true;
+        startInfo.UseShellExecute = false;
+        startInfo.CreateNoWindow = true;
+
+        using var timeoutCts = new CancellationTokenSource(timeout);
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
+        var ct = linkedCts.Token;
+
+        using var process = new Process { StartInfo = startInfo };
+        process.Start();
+
+        using var registration = ct.Register(() => TryKillProcess(process));
+
+        var stdOutTask = process.StandardOutput.ReadToEndAsync(ct);
+        var stdErrTask = process.StandardError.ReadToEndAsync(ct);
+
+        try
+        {
+            await process.WaitForExitAsync(ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        {
+            await DrainSafeAsync(stdOutTask, stdErrTask).ConfigureAwait(false);
+            throw new TimeoutException($"The application did not finish within {timeout}.");
+        }
+
+        var stdOut = await stdOutTask.ConfigureAwait(false);
+        var stdErr = await stdErrTask.ConfigureAwait(false);
+        var combined = new StringBuilder();
+        combined.Append(stdOut);
+        combined.Append(stdErr);
+        return new ProcessRunResult(process.ExitCode, combined.ToString());
+    }
+
+    private static async Task DrainSafeAsync(Task<string> stdOut, Task<string> stdErr)
+    {
+        try { await stdOut.ConfigureAwait(false); } catch { }
+        try { await stdErr.ConfigureAwait(false); } catch { }
     }
 
     private static ProcessStartInfo CreateStartInfo(string settingsPath)
