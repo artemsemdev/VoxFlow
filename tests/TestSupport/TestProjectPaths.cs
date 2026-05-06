@@ -8,7 +8,9 @@ internal static class TestProjectPaths
 
     public static string RepositoryRoot => RepositoryRootPath.Value;
 
-    public static string AppProjectPath => Path.Combine(RepositoryRoot, "VoxFlow.csproj");
+    // Default app project path used by the legacy TestProcessRunner.RunAppAsync path.
+    // The CLI is the canonical app entry point in this repo.
+    public static string AppProjectPath => Path.Combine(RepositoryRoot, "src", "VoxFlow.Cli", "VoxFlow.Cli.csproj");
 
     private static string FindRepositoryRoot()
     {
@@ -16,9 +18,11 @@ internal static class TestProjectPaths
 
         while (currentDirectory is not null)
         {
-            // Walk upward from the test output directory until the app project is found.
-            var candidateProjectPath = Path.Combine(currentDirectory.FullName, "VoxFlow.csproj");
-            if (File.Exists(candidateProjectPath))
+            // Walk upward from the test output directory until VoxFlow.sln is found.
+            // (The legacy version of this helper looked for VoxFlow.csproj at the root,
+            //  which has not existed since the project moved to a multi-project solution.)
+            var candidateSolutionPath = Path.Combine(currentDirectory.FullName, "VoxFlow.sln");
+            if (File.Exists(candidateSolutionPath))
             {
                 return currentDirectory.FullName;
             }
@@ -26,6 +30,6 @@ internal static class TestProjectPaths
             currentDirectory = currentDirectory.Parent;
         }
 
-        throw new InvalidOperationException("Could not locate the repository root for tests.");
+        throw new InvalidOperationException("Could not locate the repository root for tests (no VoxFlow.sln found above the test output directory).");
     }
 }
