@@ -228,7 +228,10 @@ public sealed class SpeakerEnrichmentServiceTests
         var runtime = new FakePythonRuntime();
         var sidecar = new FakeDiarizationSidecar(async (_, _, ct) =>
         {
-            await Task.Delay(TimeSpan.FromSeconds(30), ct).ConfigureAwait(false);
+            // Block until the linked CTS (driven by options.TimeoutSeconds) cancels us.
+            // No magic upper bound — if cancellation is broken, the suite-level timeout
+            // is the only safety net, which is what we want a regression to surface.
+            await Task.Delay(Timeout.InfiniteTimeSpan, ct).ConfigureAwait(false);
             return new DiarizationResult(1, Array.Empty<DiarizationSpeaker>(), Array.Empty<DiarizationSegment>());
         });
         var mergeService = new ThrowingSpeakerMergeService();
@@ -257,7 +260,10 @@ public sealed class SpeakerEnrichmentServiceTests
         var sidecar = new FakeDiarizationSidecar(async (_, _, ct) =>
         {
             cts.Cancel();
-            await Task.Delay(TimeSpan.FromSeconds(30), ct).ConfigureAwait(false);
+            // After cts.Cancel() the linked token is already cancellation-requested,
+            // so this throws OperationCanceledException synchronously. Timeout.Infinite
+            // documents the intent ("never return on its own — only via ct").
+            await Task.Delay(Timeout.InfiniteTimeSpan, ct).ConfigureAwait(false);
             return new DiarizationResult(1, Array.Empty<DiarizationSpeaker>(), Array.Empty<DiarizationSegment>());
         });
         var mergeService = new ThrowingSpeakerMergeService();
