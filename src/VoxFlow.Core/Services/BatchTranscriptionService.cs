@@ -309,7 +309,13 @@ internal sealed class BatchTranscriptionService : IBatchTranscriptionService
             return null;
         }
 
-        return new Progress<ProgressUpdate>(update =>
+        // Synchronous IProgress<T> adapter — Progress<T> would queue to
+        // SynchronizationContext/ThreadPool and lose FIFO ordering between
+        // reports, plus it would mean an `await TranscribeBatchAsync` could
+        // return before all per-file progress callbacks have committed (which
+        // makes downstream progress-bar rendering and tests racy). Same shape
+        // as SpeakerEnrichmentService.DelegateProgress<T>.
+        return new DelegateProgress<ProgressUpdate>(update =>
         {
             var filePercent = FileTranscribingStartPercent +
                               ((FileTranscribingEndPercent - FileTranscribingStartPercent) *
@@ -324,6 +330,13 @@ internal sealed class BatchTranscriptionService : IBatchTranscriptionService
                 BatchFileTotal = totalFiles
             });
         });
+    }
+
+    private sealed class DelegateProgress<T> : IProgress<T>
+    {
+        private readonly Action<T> _handler;
+        public DelegateProgress(Action<T> handler) => _handler = handler;
+        public void Report(T value) => _handler(value);
     }
 
     private static void ReportBatchFileProgress(

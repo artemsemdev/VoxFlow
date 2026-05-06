@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using VoxFlow.Core.Configuration;
 using VoxFlow.Core.Interfaces;
 using VoxFlow.Core.Models;
@@ -356,15 +357,16 @@ public sealed class BatchTranscriptionServiceTests
         Assert.Equal(0, recordingArtifactWriter.CallCount);
     }
 
-    // Skipped because the test is racy on parallel runners: BatchTranscriptionService
-    // reports progress from multiple worker threads and the test asserts presence of a
-    // specific Transcribing-stage update in a plain List<ProgressUpdate>. Two distinct
-    // failure modes have been observed on CI:
-    //   1. "Collection was modified" — concurrent Add during Assert.Contains enumeration.
-    //   2. The Transcribing-stage update is absent from the captured list when the
-    //      production pipeline races past it before the IProgress callback lands.
-    // Issue #42 owns the proper fix (thread-safe capture + deterministic progress contract).
-    [Fact(Skip = "Flaky on parallel runners — race during Assert.Contains and intermittent missing Transcribing-stage update; tracked by #42.")]
+    // Was [Fact(Skip=...)] in PR #55 — the test was flaky on parallel CI runs in two
+    // ways: (1) the underlying List<ProgressUpdate> was being enumerated by Assert.Contains
+    // while a Progress<T> ThreadPool callback was still calling Add, surfacing as "Collection
+    // was modified"; (2) the Transcribing-stage update sometimes hadn't landed by the time
+    // the assertion ran because Progress<T>.Report is asynchronous. SynchronousProgress<T>
+    // calls the handler on the reporting thread inside the production code, so by the time
+    // `await service.TranscribeBatchAsync(...)` returns every progress.Report has already
+    // committed; ConcurrentBag<T> covers the residual case where progress is reported from
+    // multiple worker threads concurrently. Together they make the test deterministic.
+    [Fact]
     public async Task TranscribeBatchAsync_ReportsNestedProgress_ForCurrentFile()
     {
         using var directory = new TemporaryDirectory();
@@ -406,8 +408,8 @@ public sealed class BatchTranscriptionServiceTests
                     DiscoveryStatus.Ready,
                     null)
             ]);
-        var progressUpdates = new List<ProgressUpdate>();
-        var progress = new Progress<ProgressUpdate>(update => progressUpdates.Add(update));
+        var progressUpdates = new ConcurrentBag<ProgressUpdate>();
+        var progress = new SynchronousProgress<ProgressUpdate>(progressUpdates.Add);
 
         var service = new BatchTranscriptionService(
             new StubBatchConfigurationService(settingsPath),
@@ -436,6 +438,17 @@ public sealed class BatchTranscriptionServiceTests
                       update.Message is not null &&
                       update.Message.Contains("[1/1] demo.m4a", StringComparison.Ordinal) &&
                       update.Message.Contains("Transcribing English", StringComparison.Ordinal));
+    }
+
+    // Synchronous IProgress<T>: Progress<T> dispatches callbacks via SynchronizationContext
+    // or ThreadPool, so progressUpdates.Add can race with Assert.Contains' enumeration on
+    // CI. Capturing on the reporting thread is deterministic and exercises the same
+    // production code path. Same shape as SpeakerEnrichmentServiceTests.SynchronousProgress<T>.
+    private sealed class SynchronousProgress<T> : IProgress<T>
+    {
+        private readonly Action<T> _handler;
+        public SynchronousProgress(Action<T> handler) => _handler = handler;
+        public void Report(T value) => _handler(value);
     }
 
     private sealed class StubBatchConfigurationService(string settingsPath) : IConfigurationService
