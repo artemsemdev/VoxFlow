@@ -1,5 +1,8 @@
 using System.Reflection;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using VoxFlow.Core.Interfaces;
 using VoxFlow.Core.Services;
 using VoxFlow.Core.Services.Diarization;
@@ -14,10 +17,25 @@ public static class ServiceCollectionExtensions
 {
     /// <summary>
     /// Adds the core transcription pipeline services to the supplied service collection.
+    ///
+    /// Logging contract (#46 Phase 1): if the host has called
+    /// <c>services.AddLogging(...)</c> before this method, the host's
+    /// <see cref="ILoggerFactory"/> is reused and Core services receive its
+    /// <see cref="ILogger{T}"/> instances. If logging is not registered,
+    /// the open-generic <see cref="ILogger{T}"/> resolves to
+    /// <see cref="NullLogger{T}"/> — Core services keep working but their
+    /// log lines go nowhere. Phase 2 will roll the same wiring through
+    /// the CLI / MCP / Desktop hosts.
     /// </summary>
     public static IServiceCollection AddVoxFlowCore(this IServiceCollection services)
     {
         ArgumentNullException.ThrowIfNull(services);
+
+        // TryAdd, not Add: if the host has registered AddLogging() with real
+        // providers, that registration wins. This line only fires when nobody
+        // wired logging — the NullLogger fallback keeps tests and minimal hosts
+        // working without forcing them to set up logging up front.
+        services.TryAdd(ServiceDescriptor.Singleton(typeof(ILogger<>), typeof(NullLogger<>)));
 
         services.AddSingleton<IConfigurationService, ConfigurationService>();
         services.AddSingleton<IValidationService, ValidationService>();

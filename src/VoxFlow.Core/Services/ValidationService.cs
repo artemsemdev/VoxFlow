@@ -5,6 +5,8 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using VoxFlow.Core.Configuration;
 using VoxFlow.Core.Interfaces;
 using VoxFlow.Core.Models;
@@ -21,18 +23,21 @@ internal sealed class ValidationService : IValidationService
 {
     private readonly IAudioConversionService _audioConversion;
     private readonly ISpeakerLabelingPreflight _speakerPreflight;
+    private readonly ILogger<ValidationService> _logger;
 
     public ValidationService(IAudioConversionService audioConversion)
-        : this(audioConversion, new NullSpeakerLabelingPreflight())
+        : this(audioConversion, new NullSpeakerLabelingPreflight(), logger: null)
     {
     }
 
     public ValidationService(
         IAudioConversionService audioConversion,
-        ISpeakerLabelingPreflight speakerPreflight)
+        ISpeakerLabelingPreflight speakerPreflight,
+        ILogger<ValidationService>? logger = null)
     {
         _audioConversion = audioConversion;
         _speakerPreflight = speakerPreflight;
+        _logger = logger ?? NullLogger<ValidationService>.Instance;
     }
 
     /// <summary>
@@ -165,6 +170,7 @@ internal sealed class ValidationService : IValidationService
         }
         catch (Exception ex)
         {
+            _logger.LogWarning(ex, "ffmpeg validation failed: {Message}", ex.Message);
             return new ValidationCheck("ffmpeg", ValidationCheckStatus.Failed, ex.Message);
         }
     }
