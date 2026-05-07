@@ -17,6 +17,15 @@ public sealed class McpOptions
     public List<string> AllowedOutputRoots { get; set; } = new();
     public int MaxBatchFiles { get; set; } = 100;
     public bool RequireAbsolutePaths { get; set; } = true;
+
+    /// <summary>
+    /// Grace period (in seconds) the host waits for in-flight tool invocations
+    /// to complete on SIGINT / SIGTERM before forcefully terminating. Mapped to
+    /// <see cref="Microsoft.Extensions.Hosting.HostOptions.ShutdownTimeout"/>
+    /// in <c>Program.cs</c>. Default 5 s — matches the .NET host default.
+    /// </summary>
+    public int ShutdownGracePeriodSeconds { get; set; } = 5;
+
     public McpResourceOptions Resources { get; set; } = new();
     public McpPromptOptions Prompts { get; set; } = new();
     public McpLoggingOptions Logging { get; set; } = new();
