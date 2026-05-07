@@ -2,6 +2,8 @@ using System;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using VoxFlow.Core.Configuration;
 using VoxFlow.Core.Interfaces;
 using VoxFlow.Core.Models;
@@ -15,8 +17,14 @@ namespace VoxFlow.Core.Services;
 /// </summary>
 internal sealed class ModelService : IModelService, IDisposable
 {
+    private readonly ILogger<ModelService> _logger;
     private WhisperFactory? _cachedFactory;
     private string? _cachedModelPath;
+
+    public ModelService(ILogger<ModelService>? logger = null)
+    {
+        _logger = logger ?? NullLogger<ModelService>.Instance;
+    }
 
     /// <summary>
     /// Returns a cached factory if available, or creates a new one from the configured model.
@@ -65,12 +73,14 @@ internal sealed class ModelService : IModelService, IDisposable
             catch (Exception ex)
             {
                 // Treat any load failure (corrupt file, version mismatch, native load
-                // error) as "needs re-download". Log to stderr so the operator can tell
-                // a corrupt-model recovery from a missing-model first-run; before #46
-                // ships ILogger<T> at the Core composition root, Console.Error is the
-                // only structured sink available without breaking the IModelService API.
-                Console.Error.WriteLine(
-                    $"ModelService.InspectModel: {options.ModelFilePath} failed to load — marking for re-download. {ex.GetType().Name}: {ex.Message}");
+                // error) as "needs re-download". Logged via ILogger<ModelService> so
+                // the operator can tell a corrupt-model recovery from a missing-model
+                // first-run. Falls back to NullLogger when the host hasn't wired
+                // logging — see ServiceCollectionExtensions logging contract.
+                _logger.LogError(
+                    ex,
+                    "Whisper model at {ModelPath} failed to load; marking for re-download.",
+                    options.ModelFilePath);
                 needsDownload = true;
             }
         }
