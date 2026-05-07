@@ -57,6 +57,19 @@ If you cannot run a relevant validation step, say so clearly in the pull request
 - **Every `async void` event handler must wrap its body in a top-level `try`/`catch`** that logs via `DesktopDiagnostics.LogException` (or the equivalent host-specific logger) and surfaces a user-visible error. An exception that escapes an `async void` propagates to the synchronization context and crashes the app — the framework has no Task to observe.
 - **No `.GetAwaiter().GetResult()`, `.Result`, or `.Wait()` in `src/`.** These patterns deadlock under UI synchronization contexts and tie up thread-pool workers. If a sync API needs the result of async work, refactor to expose a sync core that both the async and sync paths call (`DesktopConfigurationService.LoadCore` is the reference example), or use the async-lazy `Lazy<Task<T>>` pattern (`PyannoteSidecarClient.ResponseSchema`).
 
+### Exception handling rules
+
+- **Every `catch` block in `src/` must do one of three things:**
+  1. **Rethrow** (after wrapping or logging) — preserve the inner exception via `throw new ... (..., ex)` so the original stack trace is recoverable.
+  2. **Log** the failure — use the host-specific logger (`DesktopDiagnostics.LogException` in Desktop, `Console.Error.WriteLine` in Core/CLI/MCP until #46 wires `ILogger<T>` at the composition root). The log line should name the operation that failed and surface `ex.GetType().Name` + `ex.Message`.
+  3. **Carry a one-line justification comment** explaining why the exception is intentionally suppressed (e.g. `// Process may have exited between HasExited check and Kill; swallow.`). Comments must justify silence, not just describe what's caught.
+- **No bare `catch { }` blocks** with no body, no comment, and no rethrow. The strict acceptance grep is:
+  ```bash
+  grep -rEn "catch\s*\([^)]*\)\s*\{\s*\}" src/ --include="*.cs"
+  grep -rEn "^\s*catch\s*\{" src/ --include="*.cs"
+  ```
+  Both should return no C# matches. Bare `catch` (no exception type) should narrow to a specific expected exception type whenever possible.
+
 ## Pull Request Expectations
 
 Each pull request should include:

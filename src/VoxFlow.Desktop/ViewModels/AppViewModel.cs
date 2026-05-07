@@ -236,6 +236,9 @@ public class AppViewModel : INotifyPropertyChanged
             if (TranscriptionResult.Success)
             {
                 try { await Task.Delay(1500, cts.Token); }
+                // Cancellation during the post-success settle delay: return to Ready
+                // without surfacing as failure. Outer catch handles cancel during the
+                // actual transcription.
                 catch (OperationCanceledException) { GoToReady(); return; }
             }
             CurrentState = TranscriptionResult.Success ? AppState.Complete : AppState.Failed;
