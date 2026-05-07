@@ -1,6 +1,8 @@
 namespace VoxFlow.Core.Services;
 
 using System.Diagnostics;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using VoxFlow.Core.Configuration;
 using VoxFlow.Core.Interfaces;
 using VoxFlow.Core.Models;
@@ -19,6 +21,7 @@ internal sealed class TranscriptionService : ITranscriptionService
     private readonly IOutputWriter _outputWriter;
     private readonly ISpeakerEnrichmentService _speakerEnrichment;
     private readonly IVoxflowTranscriptArtifactWriter _artifactWriter;
+    private readonly ILogger<TranscriptionService> _logger;
 
     public TranscriptionService(
         IConfigurationService configService,
@@ -29,7 +32,8 @@ internal sealed class TranscriptionService : ITranscriptionService
         ILanguageSelectionService languageSelection,
         IOutputWriter outputWriter,
         ISpeakerEnrichmentService speakerEnrichment,
-        IVoxflowTranscriptArtifactWriter artifactWriter)
+        IVoxflowTranscriptArtifactWriter artifactWriter,
+        ILogger<TranscriptionService>? logger = null)
     {
         _configService = configService;
         _validationService = validationService;
@@ -40,6 +44,7 @@ internal sealed class TranscriptionService : ITranscriptionService
         _outputWriter = outputWriter;
         _speakerEnrichment = speakerEnrichment;
         _artifactWriter = artifactWriter;
+        _logger = logger ?? NullLogger<TranscriptionService>.Instance;
     }
 
     public async Task<TranscribeFileResult> TranscribeFileAsync(
@@ -136,6 +141,10 @@ internal sealed class TranscriptionService : ITranscriptionService
             }
             catch (Exception ex)
             {
+                _logger.LogError(
+                    ex,
+                    "Speaker enrichment failed for {WavPath}; falling back to plain transcript.",
+                    wavPath);
                 var warning = $"speaker-labeling: internal error: {ex.Message}";
                 enrichmentWarnings = new[] { warning };
                 warnings.Add(warning);

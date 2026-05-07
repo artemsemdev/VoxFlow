@@ -5,6 +5,8 @@ using System.Globalization;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using VoxFlow.Core.Configuration;
 using VoxFlow.Core.Interfaces;
 
@@ -15,6 +17,13 @@ namespace VoxFlow.Core.Services;
 /// </summary>
 internal sealed class AudioConversionService : IAudioConversionService
 {
+    private readonly ILogger<AudioConversionService> _logger;
+
+    public AudioConversionService(ILogger<AudioConversionService>? logger = null)
+    {
+        _logger = logger ?? NullLogger<AudioConversionService>.Instance;
+    }
+
     /// <summary>
     /// Converts a specific input file into WAV format at the specified output path.
     /// </summary>
@@ -65,6 +74,11 @@ internal sealed class AudioConversionService : IAudioConversionService
 
         if (result.ExitCode != 0)
         {
+            _logger.LogError(
+                "ffmpeg WAV conversion failed for {InputPath} with exit code {ExitCode}: {StandardError}",
+                inputPath,
+                result.ExitCode,
+                result.StandardError);
             throw new InvalidOperationException(
                 $"ffmpeg conversion failed with exit code {result.ExitCode}: {result.StandardError}".Trim());
         }

@@ -1,6 +1,8 @@
 namespace VoxFlow.Core.Services;
 
 using System.Diagnostics;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using VoxFlow.Core.Configuration;
 using VoxFlow.Core.Interfaces;
 using VoxFlow.Core.Models;
@@ -23,7 +25,11 @@ internal sealed class BatchTranscriptionService : IBatchTranscriptionService
     private readonly IBatchSummaryWriter _summaryWriter;
     private readonly ISpeakerEnrichmentService _speakerEnrichment;
     private readonly IVoxflowTranscriptArtifactWriter _artifactWriter;
+    private readonly ILogger<BatchTranscriptionService> _logger;
 
+    // ILogger<T> is optional (NullLogger fallback) so existing tests that
+    // construct the service directly do not need to thread a logger through.
+    // DI-resolved instances pick up the host's ILogger<T> via ServiceCollectionExtensions.
     public BatchTranscriptionService(
         IConfigurationService configService,
         IValidationService validationService,
@@ -35,7 +41,8 @@ internal sealed class BatchTranscriptionService : IBatchTranscriptionService
         IOutputWriter outputWriter,
         IBatchSummaryWriter summaryWriter,
         ISpeakerEnrichmentService speakerEnrichment,
-        IVoxflowTranscriptArtifactWriter artifactWriter)
+        IVoxflowTranscriptArtifactWriter artifactWriter,
+        ILogger<BatchTranscriptionService>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(configService);
         ArgumentNullException.ThrowIfNull(validationService);
@@ -60,6 +67,7 @@ internal sealed class BatchTranscriptionService : IBatchTranscriptionService
         _summaryWriter = summaryWriter;
         _speakerEnrichment = speakerEnrichment;
         _artifactWriter = artifactWriter;
+        _logger = logger ?? NullLogger<BatchTranscriptionService>.Instance;
     }
 
     public async Task<BatchTranscribeResult> TranscribeBatchAsync(
@@ -232,6 +240,11 @@ internal sealed class BatchTranscriptionService : IBatchTranscriptionService
             catch (Exception ex)
             {
                 fileStopwatch.Stop();
+                _logger.LogError(
+                    ex,
+                    "Batch transcription failed for {InputPath} after {ElapsedMs} ms.",
+                    file.InputPath,
+                    (long)fileStopwatch.Elapsed.TotalMilliseconds);
                 results.Add(new BatchFileResult(
                     file.InputPath, file.OutputPath, "Failed",
                     ex.Message, fileStopwatch.Elapsed, null));
