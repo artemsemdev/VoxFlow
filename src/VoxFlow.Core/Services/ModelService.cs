@@ -62,8 +62,15 @@ internal sealed class ModelService : IModelService, IDisposable
                 using var factory = WhisperFactory.FromPath(options.ModelFilePath);
                 isLoadable = true;
             }
-            catch
+            catch (Exception ex)
             {
+                // Treat any load failure (corrupt file, version mismatch, native load
+                // error) as "needs re-download". Log to stderr so the operator can tell
+                // a corrupt-model recovery from a missing-model first-run; before #46
+                // ships ILogger<T> at the Core composition root, Console.Error is the
+                // only structured sink available without breaking the IModelService API.
+                Console.Error.WriteLine(
+                    $"ModelService.InspectModel: {options.ModelFilePath} failed to load — marking for re-download. {ex.GetType().Name}: {ex.Message}");
                 needsDownload = true;
             }
         }

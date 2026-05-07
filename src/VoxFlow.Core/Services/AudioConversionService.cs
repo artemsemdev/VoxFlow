@@ -140,6 +140,7 @@ internal sealed class AudioConversionService : IAudioConversionService
             }
             catch (InvalidOperationException)
             {
+                // Process may have exited between HasExited check and Kill; swallow.
             }
         });
 
