@@ -2,6 +2,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 using ModelContextProtocol;
 using VoxFlow.Core.DependencyInjection;
 using VoxFlow.McpServer.Configuration;
@@ -16,31 +17,40 @@ Console.SetOut(Console.Error);
 
 var builder = Host.CreateApplicationBuilder(args);
 
-// Load MCP-specific configuration.
+// Single source of truth for McpOptions. The Configure<McpOptions> below makes
+// the same data available to anything that resolves IOptions<McpOptions> from
+// DI; the local instance below is only used for the AddMcpServer lambda
+// (which has no IServiceProvider hook) and for the host shutdown timeout.
 var mcpSection = builder.Configuration.GetSection("mcp");
+var mcpOptions = mcpSection.Get<McpOptions>() ?? new McpOptions();
 builder.Services.Configure<McpOptions>(mcpSection);
+
+// Map the configured grace period onto the .NET host's shutdown timeout so
+// hosted services (including the MCP transport) get a chance to drain
+// in-flight work before the process exits.
+builder.Services.Configure<HostOptions>(host =>
+    host.ShutdownTimeout = TimeSpan.FromSeconds(Math.Max(0, mcpOptions.ShutdownGracePeriodSeconds)));
 
 // Register Core services via DI extension.
 builder.Services.AddVoxFlowCore();
 
-// Register MCP-specific path policy.
+// Register MCP-specific path policy. Resolved via IOptions<McpOptions> so it
+// stays in sync with the single Configure<McpOptions> registration above.
 builder.Services.AddSingleton<IPathPolicy>(sp =>
 {
-    var mcpOptions = new McpOptions();
-    mcpSection.Bind(mcpOptions);
+    var opts = sp.GetRequiredService<IOptions<McpOptions>>().Value;
     return new PathPolicy(
-        mcpOptions.AllowedInputRoots,
-        mcpOptions.AllowedOutputRoots,
-        mcpOptions.RequireAbsolutePaths);
+        opts.AllowedInputRoots,
+        opts.AllowedOutputRoots,
+        opts.RequireAbsolutePaths);
 });
 
-// Configure MCP server with stdio transport.
+// Configure MCP server with stdio transport. AddMcpServer's options callback
+// has no IServiceProvider parameter, so it reads the local mcpOptions
+// captured via closure — the only consumer of the local instance.
 builder.Services
     .AddMcpServer(options =>
     {
-        var mcpOptions = new McpOptions();
-        mcpSection.Bind(mcpOptions);
-
         options.ServerInfo = new()
         {
             Name = mcpOptions.ServerName,
@@ -52,4 +62,13 @@ builder.Services
     .WithPromptsFromAssembly(typeof(WhisperMcpPrompts).Assembly);
 
 var app = builder.Build();
+
+// Surface the shutdown handoff so MCP clients (Claude Desktop, Cursor, etc.)
+// see a trace instead of an abrupt close. Goes to stderr because stdout is
+// reserved for the MCP protocol stream.
+var lifetime = app.Services.GetRequiredService<IHostApplicationLifetime>();
+lifetime.ApplicationStopping.Register(() =>
+    Console.Error.WriteLine(
+        $"[mcp] shutting down — waiting up to {mcpOptions.ShutdownGracePeriodSeconds}s for in-flight tool invocations to drain."));
+
 await app.RunAsync();
