@@ -1,0 +1,36 @@
+<Project>
+  <!--
+    Project-wide build settings shared across every src/ and tests/ csproj.
+    Sibling Directory.Packages.props (#44) owns NuGet versions; this file
+    owns warnings, code-style enforcement, and analyzer level.
+  -->
+  <PropertyGroup>
+    <!--
+      Treat all compiler and analyzer warnings as errors. New warnings can
+      no longer accumulate silently — the build fails until the regression
+      is fixed or explicitly opted out via NoWarn (with a reason + follow-up
+      issue link, see CONTRIBUTING.md "Warnings and analyzer rules").
+    -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+
+    <!--
+      Run the IDE / Roslyn code-style analyzers as part of `dotnet build`,
+      not only inside Visual Studio / Rider. Combined with the default
+      .NET SDK analyzer pack (Microsoft.CodeAnalysis.NetAnalyzers ships
+      with the .NET 9 SDK), this gives the same set of rules to the CI
+      build that contributors see in their editor.
+    -->
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+
+    <!--
+      "latest-default" is the standard Microsoft analyzer set for the
+      current SDK level — the rules .NET ships enabled by default. It
+      catches actual bugs (CA2016 forward-cancellation-token, CA2007
+      ConfigureAwait, etc.) without lighting up the perf-obsessed
+      "recommended" rules (CA1848 LoggerMessage delegates, CA1859
+      concrete-list returns) that would force a rewrite of every log
+      site and IReadOnlyList<T> signature.
+    -->
+    <AnalysisLevel>latest-default</AnalysisLevel>
+  </PropertyGroup>
+</Project>
