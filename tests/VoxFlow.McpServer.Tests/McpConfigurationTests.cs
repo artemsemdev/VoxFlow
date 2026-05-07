@@ -18,6 +18,7 @@ public sealed class McpConfigurationTests
         Assert.Empty(options.AllowedOutputRoots);
         Assert.Equal(100, options.MaxBatchFiles);
         Assert.True(options.RequireAbsolutePaths);
+        Assert.Equal(5, options.ShutdownGracePeriodSeconds);
     }
 
     [Fact]
