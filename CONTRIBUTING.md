@@ -57,6 +57,16 @@ If you cannot run a relevant validation step, say so clearly in the pull request
 - **Every `async void` event handler must wrap its body in a top-level `try`/`catch`** that logs via `DesktopDiagnostics.LogException` (or the equivalent host-specific logger) and surfaces a user-visible error. An exception that escapes an `async void` propagates to the synchronization context and crashes the app — the framework has no Task to observe.
 - **No `.GetAwaiter().GetResult()`, `.Result`, or `.Wait()` in `src/`.** These patterns deadlock under UI synchronization contexts and tie up thread-pool workers. If a sync API needs the result of async work, refactor to expose a sync core that both the async and sync paths call (`DesktopConfigurationService.LoadCore` is the reference example), or use the async-lazy `Lazy<Task<T>>` pattern (`PyannoteSidecarClient.ResponseSchema`).
 
+### Package management rules
+
+- **`Directory.Packages.props` at the repo root is the single source of truth for NuGet package versions.** Every `<PackageReference>` across `src/` and `tests/` is versionless; the version lives only in `Directory.Packages.props`.
+- **To upgrade a package, edit `Directory.Packages.props` only.** Do not add `Version="..."` back to any `.csproj`. The acceptance grep is:
+  ```bash
+  grep -rEn 'PackageReference[^>]*Version=' src/ tests/ --include='*.csproj'   # 0 matches expected
+  ```
+- **To add a new package**: add a `<PackageVersion Include="X" Version="Y" />` line to `Directory.Packages.props`, then add a versionless `<PackageReference Include="X" />` to the consuming `.csproj`.
+- **`global.json` pins the .NET SDK** to 9.0.x with `rollForward: latestFeature`. New contributors get reproducible restores without setting `DOTNET_ROOT` or pinning shells. To bump the SDK, edit `global.json` and verify CI's `actions/setup-dotnet` line still matches.
+
 ### Exception handling rules
 
 - **Every `catch` block in `src/` must do one of three things:**
