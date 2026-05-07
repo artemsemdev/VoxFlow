@@ -57,6 +57,18 @@ If you cannot run a relevant validation step, say so clearly in the pull request
 - **Every `async void` event handler must wrap its body in a top-level `try`/`catch`** that logs via `DesktopDiagnostics.LogException` (or the equivalent host-specific logger) and surfaces a user-visible error. An exception that escapes an `async void` propagates to the synchronization context and crashes the app — the framework has no Task to observe.
 - **No `.GetAwaiter().GetResult()`, `.Result`, or `.Wait()` in `src/`.** These patterns deadlock under UI synchronization contexts and tie up thread-pool workers. If a sync API needs the result of async work, refactor to expose a sync core that both the async and sync paths call (`DesktopConfigurationService.LoadCore` is the reference example), or use the async-lazy `Lazy<Task<T>>` pattern (`PyannoteSidecarClient.ResponseSchema`).
 
+### Warnings and analyzer rules
+
+- **`Directory.Build.props` at the repo root sets `TreatWarningsAsErrors=true`** — every compiler or analyzer warning fails the build. New warnings can no longer accumulate silently.
+- **Analyzer level is `latest-default`** (the .NET-default rule set). It catches actual bugs (forward-cancellation-token, ConfigureAwait, etc.) without lighting up the perf-obsessed "recommended" rules that would force a rewrite of every log site and `IReadOnlyList<T>` signature.
+- **`EnforceCodeStyleInBuild=true`** runs the IDE / Roslyn code-style analyzers as part of `dotnet build`, so CI sees the same set as your editor.
+- **`.editorconfig`** at the repo root holds the per-rule severity overrides. Tighten by adding a line like `dotnet_diagnostic.CAxxxx.severity = error` once the codebase is already clean against the new severity. Loosen by adding a `<NoWarn>` to the specific `.csproj` **with a reason comment**; if the suppression is temporary, add a follow-up issue link.
+- **Acceptance check** before opening a PR:
+  ```bash
+  dotnet build VoxFlow.sln --no-incremental
+  ```
+  Must end with `0 Warning(s) / 0 Error(s)`.
+
 ### Package management rules
 
 - **`Directory.Packages.props` at the repo root is the single source of truth for NuGet package versions.** Every `<PackageReference>` across `src/` and `tests/` is versionless; the version lives only in `Directory.Packages.props`.
