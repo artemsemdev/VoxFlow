@@ -245,6 +245,7 @@ internal sealed class DesktopCliTranscriptionService : ITranscriptionService
         }
         catch
         {
+            // Process may have exited between HasExited check and Kill; swallow.
         }
     }
 
@@ -259,6 +260,9 @@ internal sealed class DesktopCliTranscriptionService : ITranscriptionService
         }
         catch
         {
+            // Best-effort cleanup of a disposable merged-config snapshot; a stray temp
+            // file is preferable to surfacing an unrelated cleanup error from the
+            // CLI bridge happy path.
         }
     }
 }
