@@ -49,9 +49,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Maui.Controls" Version="$(MauiVersion)" />
-    <PackageReference Include="Microsoft.Maui.Controls.Compatibility" Version="$(MauiVersion)" />
-    <PackageReference Include="Microsoft.AspNetCore.Components.WebView.Maui" Version="$(MauiVersion)" />
+    <PackageReference Include="Microsoft.Maui.Controls" />
+    <PackageReference Include="Microsoft.Maui.Controls.Compatibility" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebView.Maui" />
   </ItemGroup>
 
   <ItemGroup>
@@ -59,12 +59,12 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Whisper.net" Version="1.9.0" ExcludeAssets="all" PrivateAssets="all" GeneratePathProperty="true" />
+    <PackageReference Include="Whisper.net" ExcludeAssets="all" PrivateAssets="all" GeneratePathProperty="true" />
     <!-- Restore the runtime packages but wire the native references manually.
          Whisper.net.Runtime 1.9.0 ships arm64-only maccatalyst archives, so
          Desktop uses the generic net9 Whisper.net assembly plus macOS dylibs. -->
-    <PackageReference Include="Whisper.net.Runtime" Version="1.9.0" ExcludeAssets="all" PrivateAssets="all" GeneratePathProperty="true" />
-    <PackageReference Include="Whisper.net.Runtime.Metal" Version="1.9.0" ExcludeAssets="all" PrivateAssets="all" GeneratePathProperty="true" />
+    <PackageReference Include="Whisper.net.Runtime" ExcludeAssets="all" PrivateAssets="all" GeneratePathProperty="true" />
+    <PackageReference Include="Whisper.net.Runtime.Metal" ExcludeAssets="all" PrivateAssets="all" GeneratePathProperty="true" />
   </ItemGroup>
 
   <ItemGroup>
