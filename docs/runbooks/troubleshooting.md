@@ -2,6 +2,8 @@
 
 Common issues and their resolutions when working with VoxFlow.
 
+> **Looking for a specific error message?** See the [error catalog](./error-catalog.md) — every user-facing exception and structured error in `src/` is listed there with root cause, remediation, and a link to the throwing line.
+
 ## CLI Issues
 
 ### The app starts in batch mode when I expected single-file mode
