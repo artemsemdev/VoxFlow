@@ -5,6 +5,7 @@ This document has been reorganized into focused guides under `docs/`. Start with
 | Guide | Location | What it covers |
 |---|---|---|
 | **Developer Setup** | [docs/developer/setup.md](docs/developer/setup.md) | Prerequisites, bootstrap, configuration, build, run, and test |
+| **Desktop Developer Setup** | [docs/developer/desktop-setup.md](docs/developer/desktop-setup.md) | macOS / Xcode / MAUI workload, local signing, first-run errors, Desktop test suites |
 | **macOS Packaging** | [docs/deployment/macos-packaging.md](docs/deployment/macos-packaging.md) | Building and packaging VoxFlow Desktop for macOS |
 | **Smoke Tests** | [docs/runbooks/smoke-tests.md](docs/runbooks/smoke-tests.md) | Per-host verification routines |
 | **Troubleshooting** | [docs/runbooks/troubleshooting.md](docs/runbooks/troubleshooting.md) | Common issues and resolutions |
