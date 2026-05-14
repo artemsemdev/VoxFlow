@@ -92,6 +92,7 @@ The shared pipeline remains configuration loading, startup validation, ffmpeg-ba
 | [Architecture Decisions](docs/adr/README.md) | ADR index and decision log |
 | [Architecture Overview](ARCHITECTURE.md) | High-level architecture summary |
 | [Deployment](docs/deployment/macos-packaging.md) | macOS packaging and distribution |
+| [MCP server security model](docs/deployment/mcp-server-security.md) | Threat model, `PathPolicy` semantics, per-option reference, deployment gaps |
 | [Runbooks](docs/runbooks/) | Smoke tests, troubleshooting, Desktop UI automation |
 | [Error catalog](docs/runbooks/error-catalog.md) | Every user-facing error with root cause, remediation, and source-line link |
 | [PRD](docs/product/PRD.md) | Product requirements document |
