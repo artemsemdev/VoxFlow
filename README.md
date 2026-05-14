@@ -93,6 +93,7 @@ The shared pipeline remains configuration loading, startup validation, ffmpeg-ba
 | [Architecture Overview](ARCHITECTURE.md) | High-level architecture summary |
 | [Deployment](docs/deployment/macos-packaging.md) | macOS packaging and distribution |
 | [Runbooks](docs/runbooks/) | Smoke tests, troubleshooting, Desktop UI automation |
+| [Error catalog](docs/runbooks/error-catalog.md) | Every user-facing error with root cause, remediation, and source-line link |
 | [PRD](docs/product/PRD.md) | Product requirements document |
 | [Contributing](CONTRIBUTING.md) | Contribution workflow, quality bar, and review expectations |
 | [Code of Conduct](CODE_OF_CONDUCT.md) | Community behavior expectations and enforcement model |
