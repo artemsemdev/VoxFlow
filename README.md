@@ -88,6 +88,7 @@ The shared pipeline remains configuration loading, startup validation, ffmpeg-ba
 | Document | Purpose |
 |---|---|
 | [Developer Setup](docs/developer/setup.md) | Prerequisites, build, run, test, and configuration |
+| [Desktop developer setup](docs/developer/desktop-setup.md) | macOS / Xcode / MAUI workload, local signing, first-run errors, Desktop test suites |
 | [Architecture](docs/architecture/) | C4 views, component details, runtime sequences, quality attributes |
 | [Architecture Decisions](docs/adr/README.md) | ADR index and decision log |
 | [Architecture Overview](ARCHITECTURE.md) | High-level architecture summary |
