@@ -25,6 +25,27 @@ Thanks for contributing. This repository contains a local-first .NET 9 transcrip
 4. Update documentation when commands, configuration, architecture, or UX expectations change.
 5. Run the relevant validation commands before opening a pull request.
 
+## Change Size and Pull Request Scope
+
+Work through small pull requests. A good PR should be easy to review, easy to test, and focused on one coherent slice of work.
+
+Good PR examples:
+
+- Add transcription job model
+- Add ffmpeg service abstraction
+- Add basic file import screen
+- Add export to TXT
+- Add CI pipeline
+- Add architecture overview
+
+Avoid "implemented everything" PRs. Do not mix architecture, UI, tests, refactoring, and documentation into one large change unless the coupling is unavoidable.
+
+Size guidance:
+
+- Good: 100-400 lines changed
+- Acceptable: up to 800 lines changed when the change is mostly mechanical
+- Bad: a huge PR mixing unrelated feature work, refactoring, UI, tests, and docs
+
 ## Local Validation
 
 From the repository root:
@@ -94,7 +115,34 @@ If you cannot run a relevant validation step, say so clearly in the pull request
 
 ## Pull Request Expectations
 
-Each pull request should include:
+Use this pull request template:
+
+```markdown
+## Summary
+
+What was changed?
+
+## Why
+
+Why is this change needed?
+
+## Testing
+
+How was it tested?
+
+## Screenshots
+
+Add screenshots or GIFs if UI changed.
+
+## Checklist
+
+- [ ] Tests added or updated
+- [ ] Documentation updated if needed
+- [ ] CI passes
+- [ ] No secrets or local-only files committed
+```
+
+Each pull request should also include:
 
 - a concise description of the problem and the change
 - links to related issues or rationale if the change stands alone
@@ -103,6 +151,53 @@ Each pull request should include:
 - notes about configuration, migration, or breaking changes when applicable
 
 PRs that mix refactors, feature work, and unrelated cleanup are harder to review and may be sent back for narrowing.
+
+## Commit Messages
+
+Use Conventional Commits so history stays readable and changelogs/releases can be automated later.
+
+Format:
+
+```text
+<type>[optional scope]: <description>
+```
+
+Examples:
+
+```text
+feat: add audio file import
+fix: handle missing ffmpeg binary
+docs: add architecture overview
+test: add transcription job unit tests
+refactor: extract whisper service interface
+ci: add GitHub Actions build pipeline
+chore: update dependencies
+```
+
+Recommended types:
+
+- `feat` - new feature
+- `fix` - bug fix
+- `docs` - documentation only
+- `refactor` - code change without behavior change
+- `test` - tests
+- `ci` - CI pipeline changes
+- `build` - build system or dependencies
+- `chore` - maintenance
+- `perf` - performance improvement
+- `style` - formatting only
+
+For breaking changes, add `!` after the type/scope or include a `BREAKING CHANGE:` footer:
+
+```text
+feat!: change transcript export API
+```
+
+```text
+feat: change transcript export API
+
+BREAKING CHANGE: The export service now requires an explicit output format.
+```
 
 ## Reporting Bugs and Requesting Features
 
