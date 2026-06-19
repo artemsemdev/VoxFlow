@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using VoxFlow.Core.Configuration;
 using VoxFlow.Core.Interfaces;
 using VoxFlow.Core.Models;
@@ -13,12 +15,14 @@ public sealed class SpeakerEnrichmentService : ISpeakerEnrichmentService
     private readonly IDiarizationSidecar _sidecar;
     private readonly ISpeakerMergeService _mergeService;
     private readonly IManagedVenvBootstrapper _bootstrapper;
+    private readonly ILogger<SpeakerEnrichmentService> _logger;
 
     public SpeakerEnrichmentService(
         IPythonRuntime runtime,
         IDiarizationSidecar sidecar,
         ISpeakerMergeService mergeService,
-        IManagedVenvBootstrapper bootstrapper)
+        IManagedVenvBootstrapper bootstrapper,
+        ILogger<SpeakerEnrichmentService>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(runtime);
         ArgumentNullException.ThrowIfNull(sidecar);
@@ -28,6 +32,7 @@ public sealed class SpeakerEnrichmentService : ISpeakerEnrichmentService
         _sidecar = sidecar;
         _mergeService = mergeService;
         _bootstrapper = bootstrapper;
+        _logger = logger ?? NullLogger<SpeakerEnrichmentService>.Instance;
     }
 
     public async Task<SpeakerEnrichmentResult> EnrichAsync(
@@ -52,6 +57,9 @@ public sealed class SpeakerEnrichmentService : ISpeakerEnrichmentService
         var status = await _runtime.GetStatusAsync(cancellationToken).ConfigureAwait(false);
         if (!status.IsReady && status.CanBootstrap)
         {
+            _logger.LogInformation(
+                "Bootstrapping speaker-labeling runtime for mode {RuntimeMode}.",
+                options.RuntimeMode);
             await _bootstrapper.BootstrapAsync(progress: null, cancellationToken).ConfigureAwait(false);
             runtimeBootstrapped = true;
             status = await _runtime.GetStatusAsync(cancellationToken).ConfigureAwait(false);
@@ -60,6 +68,7 @@ public sealed class SpeakerEnrichmentService : ISpeakerEnrichmentService
         if (!status.IsReady)
         {
             var warning = $"speaker-labeling: runtime not ready: {status.Error}";
+            _logger.LogWarning("Speaker-labeling runtime is not ready: {Error}", status.Error);
             return new SpeakerEnrichmentResult(
                 Document: null,
                 Warnings: new[] { warning },
@@ -111,6 +120,10 @@ public sealed class SpeakerEnrichmentService : ISpeakerEnrichmentService
         }
         catch (DiarizationSidecarException ex)
         {
+            _logger.LogWarning(
+                ex,
+                "Speaker-labeling sidecar failed with reason {Reason}.",
+                ex.Reason);
             return new SpeakerEnrichmentResult(
                 Document: null,
                 Warnings: new[] { FormatSidecarWarning(ex.Reason, ex.Message) },
@@ -118,6 +131,9 @@ public sealed class SpeakerEnrichmentService : ISpeakerEnrichmentService
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && timeoutCts.IsCancellationRequested)
         {
+            _logger.LogWarning(
+                "Speaker-labeling timed out after {TimeoutSeconds}s.",
+                options.TimeoutSeconds);
             return new SpeakerEnrichmentResult(
                 Document: null,
                 Warnings: new[] { $"speaker-labeling: timed out after {options.TimeoutSeconds}s" },
@@ -128,6 +144,11 @@ public sealed class SpeakerEnrichmentService : ISpeakerEnrichmentService
         var warnings = document.Speakers.Count == 0
             ? new[] { "speaker-labeling: diarization returned zero speakers" }
             : Array.Empty<string>();
+        if (warnings.Length > 0)
+        {
+            _logger.LogWarning("Speaker-labeling diarization returned zero speakers.");
+        }
+
         return new SpeakerEnrichmentResult(document, warnings, runtimeBootstrapped);
     }
 

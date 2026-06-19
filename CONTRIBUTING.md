@@ -69,6 +69,7 @@ If you cannot run a relevant validation step, say so clearly in the pull request
 - Follow the existing naming, structure, and formatting conventions in the surrounding code.
 - Prefer explicit, testable behavior over implicit or hidden side effects.
 - Keep logging and diagnostics useful, but avoid leaking sensitive local file contents or user data.
+- New production code in `src/` must use `ILogger<T>` for diagnostics and operational logging. Do not add direct `Console.*` logging; CLI/user-facing protocol output should stay behind host output helpers.
 - When changing product behavior, update the relevant docs in `README.md`, `SETUP.md`, `docs/product/`, or `docs/architecture/`.
 - Add comments only where the code would otherwise be hard to understand.
 
@@ -104,7 +105,7 @@ If you cannot run a relevant validation step, say so clearly in the pull request
 
 - **Every `catch` block in `src/` must do one of three things:**
   1. **Rethrow** (after wrapping or logging) — preserve the inner exception via `throw new ... (..., ex)` so the original stack trace is recoverable.
-  2. **Log** the failure — use the host-specific logger (`DesktopDiagnostics.LogException` in Desktop, `Console.Error.WriteLine` in Core/CLI/MCP until #46 wires `ILogger<T>` at the composition root). The log line should name the operation that failed and surface `ex.GetType().Name` + `ex.Message`.
+  2. **Log** the failure — use the host-specific `ILogger<T>` or the established Desktop diagnostics helper for UI event-handler boundaries. The log line should name the operation that failed and surface `ex.GetType().Name` + `ex.Message`.
   3. **Carry a one-line justification comment** explaining why the exception is intentionally suppressed (e.g. `// Process may have exited between HasExited check and Kill; swallow.`). Comments must justify silence, not just describe what's caught.
 - **No bare `catch { }` blocks** with no body, no comment, and no rethrow. The strict acceptance grep is:
   ```bash

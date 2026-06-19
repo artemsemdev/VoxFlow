@@ -24,8 +24,7 @@ public static class ServiceCollectionExtensions
     /// <see cref="ILogger{T}"/> instances. If logging is not registered,
     /// the open-generic <see cref="ILogger{T}"/> resolves to
     /// <see cref="NullLogger{T}"/> — Core services keep working but their
-    /// log lines go nowhere. Phase 2 will roll the same wiring through
-    /// the CLI / MCP / Desktop hosts.
+    /// log lines go nowhere.
     /// </summary>
     public static IServiceCollection AddVoxFlowCore(this IServiceCollection services)
     {
@@ -58,7 +57,8 @@ public static class ServiceCollectionExtensions
                 sp.GetRequiredService<IVenvPaths>(),
                 sp.GetRequiredService<IStandaloneRuntimePaths>(),
                 sp.GetRequiredService<ISpeakerMergeService>(),
-                ResolveSidecarScriptPath()));
+                ResolveSidecarScriptPath(),
+                sp.GetService<ILoggerFactory>()));
         services.AddSingleton<ISpeakerLabelingPreflight>(sp =>
             new CompositionSpeakerLabelingPreflight(
                 sp.GetRequiredService<IProcessLauncher>(),

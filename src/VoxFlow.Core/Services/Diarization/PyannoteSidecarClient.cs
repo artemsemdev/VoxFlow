@@ -7,6 +7,8 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using NJsonSchema;
 using VoxFlow.Core.Interfaces;
 using VoxFlow.Core.Models;
@@ -53,12 +55,14 @@ public sealed class PyannoteSidecarClient : IDiarizationSidecar
     private readonly IProcessLauncher _launcher;
     private readonly string _scriptPath;
     private readonly TimeSpan _timeout;
+    private readonly ILogger<PyannoteSidecarClient> _logger;
 
     public PyannoteSidecarClient(
         IPythonRuntime runtime,
         IProcessLauncher launcher,
         string scriptPath,
-        TimeSpan timeout)
+        TimeSpan timeout,
+        ILogger<PyannoteSidecarClient>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(runtime);
         ArgumentNullException.ThrowIfNull(launcher);
@@ -67,6 +71,7 @@ public sealed class PyannoteSidecarClient : IDiarizationSidecar
         _launcher = launcher;
         _scriptPath = scriptPath;
         _timeout = timeout;
+        _logger = logger ?? NullLogger<PyannoteSidecarClient>.Instance;
     }
 
     public async Task<DiarizationResult> DiarizeAsync(
@@ -79,6 +84,7 @@ public sealed class PyannoteSidecarClient : IDiarizationSidecar
         var status = await _runtime.GetStatusAsync(cancellationToken).ConfigureAwait(false);
         if (!status.IsReady)
         {
+            _logger.LogWarning("Python runtime is not ready: {Error}", status.Error);
             throw new DiarizationSidecarException(
                 SidecarFailureReason.RuntimeNotReady,
                 $"Python runtime is not ready: {status.Error}");
@@ -110,6 +116,9 @@ public sealed class PyannoteSidecarClient : IDiarizationSidecar
         {
             if (timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
             {
+                _logger.LogWarning(
+                    "Diarization sidecar timed out after {TimeoutSeconds}s.",
+                    _timeout.TotalSeconds);
                 throw new DiarizationSidecarException(
                     SidecarFailureReason.Timeout,
                     $"voxflow_diarize.py did not return within {_timeout.TotalSeconds:0.##}s");
@@ -119,6 +128,10 @@ public sealed class PyannoteSidecarClient : IDiarizationSidecar
 
         if (process.ExitCode != 0 && string.IsNullOrWhiteSpace(process.StdOut))
         {
+            _logger.LogWarning(
+                "Diarization sidecar exited with code {ExitCode}. stderr: {StdErr}",
+                process.ExitCode,
+                process.StdErr);
             throw new DiarizationSidecarException(
                 SidecarFailureReason.ProcessCrashed,
                 $"voxflow_diarize.py exited with code {process.ExitCode}. stderr: {process.StdErr}");
@@ -131,6 +144,7 @@ public sealed class PyannoteSidecarClient : IDiarizationSidecar
         }
         catch (JsonException ex)
         {
+            _logger.LogWarning(ex, "Diarization sidecar wrote non-JSON stdout.");
             throw new DiarizationSidecarException(
                 SidecarFailureReason.MalformedJson,
                 $"voxflow_diarize.py wrote non-JSON to stdout: {ex.Message}",
@@ -149,6 +163,7 @@ public sealed class PyannoteSidecarClient : IDiarizationSidecar
                 var message = root.TryGetProperty("error", out var errorElement)
                     ? errorElement.GetString() ?? "unknown error"
                     : "unknown error";
+                _logger.LogWarning("Diarization sidecar returned an error envelope: {Message}", message);
                 throw new DiarizationSidecarException(
                     SidecarFailureReason.ErrorResponseReturned,
                     $"voxflow_diarize.py returned error envelope: {message}");
@@ -159,6 +174,9 @@ public sealed class PyannoteSidecarClient : IDiarizationSidecar
             if (validationErrors.Count > 0)
             {
                 var joined = string.Join("; ", validationErrors.Select(e => e.ToString()));
+                _logger.LogWarning(
+                    "Diarization sidecar response failed schema validation: {ValidationErrors}",
+                    joined);
                 throw new DiarizationSidecarException(
                     SidecarFailureReason.SchemaViolation,
                     $"voxflow_diarize.py response failed schema validation: {joined}");

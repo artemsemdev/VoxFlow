@@ -7,26 +7,26 @@ namespace VoxFlow.Cli;
 /// </summary>
 internal static class ConsoleValidationReporter
 {
-    private static readonly bool UseAnsiColors = !Console.IsOutputRedirected;
+    private static readonly bool UseAnsiColors = !CliOutput.IsOutputRedirected;
 
     /// <summary>
     /// Prints the validation report and a final outcome summary.
     /// </summary>
     public static void Write(ValidationResult result, bool printDetailedReport)
     {
-        Console.WriteLine(Colorize("=== Startup Validation ===", "96"));
+        CliOutput.WriteLine(Colorize("=== Startup Validation ===", "96"));
 
         if (printDetailedReport)
         {
             foreach (var check in result.Checks)
             {
                 var statusLabel = $"[{MapStatus(check.Status)}]";
-                Console.WriteLine($"{ColorizeStatus(statusLabel, check.Status)} {check.Name}: {check.Details}");
+                CliOutput.WriteLine($"{ColorizeStatus(statusLabel, check.Status)} {check.Name}: {check.Details}");
             }
         }
 
         var outcomeLabel = ColorizeOutcome(result.Outcome);
-        Console.WriteLine(
+        CliOutput.WriteLine(
             $"Startup validation outcome: {outcomeLabel} " +
             $"(passed: {result.Checks.Count(c => c.Status == ValidationCheckStatus.Passed)}, " +
             $"warnings: {result.Checks.Count(c => c.Status == ValidationCheckStatus.Warning)}, " +

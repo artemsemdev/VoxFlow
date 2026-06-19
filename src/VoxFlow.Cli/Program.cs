@@ -1,6 +1,8 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using VoxFlow.Core.DependencyInjection;
 using VoxFlow.Core.Interfaces;
+using VoxFlow.Core.Logging;
 using VoxFlow.Core.Models;
 
 namespace VoxFlow.Cli;
@@ -9,26 +11,9 @@ internal static class Program
 {
     public static async Task<int> Main(string[] args)
     {
-        CliArguments cliArgs;
-        try
-        {
-            cliArgs = CliArguments.Parse(args);
-        }
-        catch (ArgumentException ex)
-        {
-            Console.Error.WriteLine(ex.Message);
-            // Distinct exit code so scripts can tell "user typed a bad flag" (2) apart
-            // from "startup validation failed" (1).
-            return 2;
-        }
-
-        if (cliArgs.ShowHelp)
-        {
-            Console.WriteLine(CliArguments.HelpText);
-            return 0;
-        }
-
         var services = new ServiceCollection();
+        services.AddLogging(builder =>
+            builder.AddProvider(new TextWriterLoggerProvider(CliOutput.Error)));
         services.AddVoxFlowCore();
         // Fail fast on registration mistakes because this host is the composition root for the CLI pipeline.
         using var provider = services.BuildServiceProvider(new ServiceProviderOptions
@@ -36,6 +21,28 @@ internal static class Program
             ValidateOnBuild = true,
             ValidateScopes = true
         });
+        var logger = provider
+            .GetRequiredService<ILoggerFactory>()
+            .CreateLogger("VoxFlow.Cli");
+
+        CliArguments cliArgs;
+        try
+        {
+            cliArgs = CliArguments.Parse(args);
+        }
+        catch (ArgumentException ex)
+        {
+            logger.LogError("{Message}", ex.Message);
+            // Distinct exit code so scripts can tell "user typed a bad flag" (2) apart
+            // from "startup validation failed" (1).
+            return 2;
+        }
+
+        if (cliArgs.ShowHelp)
+        {
+            CliOutput.WriteLine(CliArguments.HelpText);
+            return 0;
+        }
 
         using var cts = new CancellationTokenSource();
 
@@ -44,7 +51,7 @@ internal static class Program
         {
             e.Cancel = true;
             cts.Cancel();
-            Console.Error.WriteLine("Cancellation requested. Stopping...");
+            logger.LogWarning("Cancellation requested. Stopping...");
         };
 
         try
@@ -62,42 +69,43 @@ internal static class Program
 
                 if (!validation.CanStart)
                 {
-                    Console.Error.WriteLine("Startup validation failed. Transcription will not start.");
+                    logger.LogError("Startup validation failed. Transcription will not start.");
                     return 1;
                 }
             }
             else
             {
-                Console.WriteLine("Startup validation is disabled by configuration.");
+                logger.LogInformation("Startup validation is disabled by configuration.");
             }
 
             // Keep mode selection in the entry point so the Core services stay focused on one workflow each.
             if (options.IsBatchMode)
             {
-                return await RunBatchAsync(provider, options, cliArgs.EnableSpeakers, cts.Token);
+                return await RunBatchAsync(provider, logger, options, cliArgs.EnableSpeakers, cts.Token);
             }
 
-            return await RunSingleFileAsync(provider, options, cliArgs.EnableSpeakers, cts.Token);
+            return await RunSingleFileAsync(provider, logger, options, cliArgs.EnableSpeakers, cts.Token);
         }
         catch (OperationCanceledException)
         {
-            Console.Error.WriteLine("Processing canceled.");
+            logger.LogWarning("Processing canceled.");
             return 1;
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Processing failed: {ex.Message}");
+            logger.LogError(ex, "Processing failed: {Message}", ex.Message);
             return 1;
         }
     }
 
     private static async Task<int> RunSingleFileAsync(
         ServiceProvider provider,
+        ILogger logger,
         VoxFlow.Core.Configuration.TranscriptionOptions options,
         bool? enableSpeakersOverride,
         CancellationToken cancellationToken)
     {
-        Console.WriteLine("Starting transcription...");
+        logger.LogInformation("Starting transcription...");
 
         var transcriptionService = provider.GetRequiredService<ITranscriptionService>();
         using var progress = new CliProgressHandler(options.ConsoleProgress);
@@ -109,22 +117,26 @@ internal static class Program
 
         if (!result.Success)
         {
-            Console.Error.WriteLine("Transcription failed.");
+            logger.LogError("Transcription failed.");
             return 1;
         }
 
-        Console.WriteLine($"Done. Language: {result.DetectedLanguage}, Segments: {result.AcceptedSegmentCount}");
-        Console.WriteLine($"Result written to: {result.ResultFilePath}");
+        logger.LogInformation(
+            "Done. Language: {DetectedLanguage}, Segments: {AcceptedSegmentCount}",
+            result.DetectedLanguage,
+            result.AcceptedSegmentCount);
+        logger.LogInformation("Result written to: {ResultFilePath}", result.ResultFilePath);
         return 0;
     }
 
     private static async Task<int> RunBatchAsync(
         ServiceProvider provider,
+        ILogger logger,
         VoxFlow.Core.Configuration.TranscriptionOptions options,
         bool? enableSpeakersOverride,
         CancellationToken cancellationToken)
     {
-        Console.WriteLine("Starting batch processing...");
+        logger.LogInformation("Starting batch processing...");
 
         var batchService = provider.GetRequiredService<IBatchTranscriptionService>();
         using var progress = new CliProgressHandler(options.ConsoleProgress);
@@ -138,11 +150,15 @@ internal static class Program
             EnableSpeakers: enableSpeakersOverride);
         var result = await batchService.TranscribeBatchAsync(request, progress, cancellationToken);
 
-        Console.WriteLine($"Batch complete: {result.Succeeded} succeeded, {result.Failed} failed, {result.Skipped} skipped.");
+        logger.LogInformation(
+            "Batch complete: {Succeeded} succeeded, {Failed} failed, {Skipped} skipped.",
+            result.Succeeded,
+            result.Failed,
+            result.Skipped);
 
         if (!string.IsNullOrEmpty(result.SummaryFilePath))
         {
-            Console.WriteLine($"Summary written to: {result.SummaryFilePath}");
+            logger.LogInformation("Summary written to: {SummaryFilePath}", result.SummaryFilePath);
         }
 
         // Preserve a conventional non-zero exit code when any file in the batch fails.
