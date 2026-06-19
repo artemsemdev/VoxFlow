@@ -2,17 +2,19 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using ModelContextProtocol;
 using VoxFlow.Core.DependencyInjection;
+using VoxFlow.Core.Logging;
 using VoxFlow.McpServer.Configuration;
 using VoxFlow.McpServer.Prompts;
 using VoxFlow.McpServer.Security;
 using VoxFlow.McpServer.Tools;
 
 // CRITICAL: In stdio MCP mode, stdout is reserved for protocol frames.
-// Redirect all Console.Out writes to stderr so existing services that use
-// Console.WriteLine do not corrupt the MCP protocol stream.
+// Redirect incidental Console.Out writes to stderr so they cannot corrupt the
+// MCP protocol stream.
 Console.SetOut(Console.Error);
 
 var builder = Host.CreateApplicationBuilder(args);
@@ -24,6 +26,8 @@ var builder = Host.CreateApplicationBuilder(args);
 var mcpSection = builder.Configuration.GetSection("mcp");
 var mcpOptions = mcpSection.Get<McpOptions>() ?? new McpOptions();
 builder.Services.Configure<McpOptions>(mcpSection);
+builder.Logging.ClearProviders();
+builder.Logging.AddProvider(new TextWriterLoggerProvider(Console.Error));
 
 // Map the configured grace period onto the .NET host's shutdown timeout so
 // hosted services (including the MCP transport) get a chance to drain
@@ -62,13 +66,17 @@ builder.Services
     .WithPromptsFromAssembly(typeof(WhisperMcpPrompts).Assembly);
 
 var app = builder.Build();
+var logger = app.Services
+    .GetRequiredService<ILoggerFactory>()
+    .CreateLogger("VoxFlow.McpServer");
 
 // Surface the shutdown handoff so MCP clients (Claude Desktop, Cursor, etc.)
 // see a trace instead of an abrupt close. Goes to stderr because stdout is
 // reserved for the MCP protocol stream.
 var lifetime = app.Services.GetRequiredService<IHostApplicationLifetime>();
 lifetime.ApplicationStopping.Register(() =>
-    Console.Error.WriteLine(
-        $"[mcp] shutting down — waiting up to {mcpOptions.ShutdownGracePeriodSeconds}s for in-flight tool invocations to drain."));
+    logger.LogInformation(
+        "[mcp] shutting down - waiting up to {ShutdownGracePeriodSeconds}s for in-flight tool invocations to drain.",
+        mcpOptions.ShutdownGracePeriodSeconds));
 
 await app.RunAsync();

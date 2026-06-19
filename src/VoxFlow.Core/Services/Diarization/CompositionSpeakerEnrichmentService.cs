@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using VoxFlow.Core.Configuration;
 using VoxFlow.Core.Interfaces;
 using VoxFlow.Core.Models;
@@ -32,7 +33,8 @@ public sealed class CompositionSpeakerEnrichmentService : ISpeakerEnrichmentServ
         IVenvPaths venvPaths,
         IStandaloneRuntimePaths standalonePaths,
         ISpeakerMergeService mergeService,
-        string sidecarScriptPath)
+        string sidecarScriptPath,
+        ILoggerFactory? loggerFactory = null)
     {
         ArgumentNullException.ThrowIfNull(launcher);
         ArgumentNullException.ThrowIfNull(venvPaths);
@@ -48,8 +50,14 @@ public sealed class CompositionSpeakerEnrichmentService : ISpeakerEnrichmentServ
                 runtime,
                 launcher,
                 sidecarScriptPath,
-                TimeSpan.FromSeconds(options.TimeoutSeconds));
-            return new SpeakerEnrichmentService(runtime, sidecar, mergeService, bootstrapper);
+                TimeSpan.FromSeconds(options.TimeoutSeconds),
+                loggerFactory?.CreateLogger<PyannoteSidecarClient>());
+            return new SpeakerEnrichmentService(
+                runtime,
+                sidecar,
+                mergeService,
+                bootstrapper,
+                loggerFactory?.CreateLogger<SpeakerEnrichmentService>());
         };
     }
 

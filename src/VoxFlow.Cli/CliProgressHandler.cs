@@ -102,7 +102,7 @@ internal sealed class CliProgressHandler : IProgress<ProgressUpdate>, IDisposabl
                 Message = "done"
             };
             RenderLine(finalized, isTerminal: false);
-            Console.WriteLine();
+            CliOutput.WriteLine();
             _lastRenderTick = 0;
         }
 
@@ -152,16 +152,16 @@ internal sealed class CliProgressHandler : IProgress<ProgressUpdate>, IDisposabl
             output.Append(Colorize($"  {subStatus}", "90"));
         }
 
-        var padded = output.ToString().PadRight(Console.IsOutputRedirected ? 0 : Console.WindowWidth - 1);
+        var padded = output.ToString().PadRight(CliOutput.IsOutputRedirected ? 0 : CliOutput.WindowWidth - 1);
 
         if (isTerminal)
         {
-            Console.Write($"\r{padded}");
-            Console.WriteLine();
+            CliOutput.Write($"\r{padded}");
+            CliOutput.WriteLine();
         }
         else
         {
-            Console.Write($"\r{padded}");
+            CliOutput.Write($"\r{padded}");
         }
     }
 
@@ -301,7 +301,7 @@ internal sealed class CliProgressHandler : IProgress<ProgressUpdate>, IDisposabl
             value.BatchFileIndex,
             value.BatchFileTotal));
 
-        Console.Error.WriteLine($"{StructuredProgressPrefix}{payload}");
+        CliOutput.WriteErrorLine($"{StructuredProgressPrefix}{payload}");
     }
 
     public void Dispose()

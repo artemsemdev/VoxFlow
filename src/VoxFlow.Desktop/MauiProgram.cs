@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using VoxFlow.Core.DependencyInjection;
 using VoxFlow.Core.Interfaces;
 using VoxFlow.Desktop.Configuration;
@@ -19,6 +20,7 @@ public static class MauiProgram
             });
 
         builder.Services.AddMauiBlazorWebView();
+        builder.Logging.AddProvider(new DesktopDiagnosticsLoggerProvider());
         builder.Services.AddVoxFlowCore();
         builder.Services.AddSingleton<DesktopConfigurationService>();
         builder.Services.AddSingleton<IConfigurationService>(sp => sp.GetRequiredService<DesktopConfigurationService>());
