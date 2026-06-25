@@ -13,4 +13,4 @@ Follow the pull request scope, PR template, and Conventional Commit rules in
 - Use Conventional Commits for commit messages.
 
 All commits must use the repository owner's configured Git identity. Do not
-commit as Codex, an AI assistant, or a bot account.
+commit under any non-owner identity.
