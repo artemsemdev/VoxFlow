@@ -100,6 +100,7 @@ If you cannot run a relevant validation step, say so clearly in the pull request
   ```
 - **To add a new package**: add a `<PackageVersion Include="X" Version="Y" />` line to `Directory.Packages.props`, then add a versionless `<PackageReference Include="X" />` to the consuming `.csproj`.
 - **`global.json` pins the .NET SDK** to 9.0.x with `rollForward: latestFeature`. New contributors get reproducible restores without setting `DOTNET_ROOT` or pinning shells. To bump the SDK, edit `global.json` and verify CI's `actions/setup-dotnet` line still matches.
+- For audit cadence, dependency update lanes, and package PR validation, follow the [dependency update runbook](docs/runbooks/dependency-updates.md).
 
 ### Exception handling rules
 
