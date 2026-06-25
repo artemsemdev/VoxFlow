@@ -207,8 +207,8 @@
       <BundledCliFiles
         Include="$(MSBuildProjectDirectory)/../VoxFlow.Cli/bin/$(Configuration)/net9.0/ggml-metal.metal"
         Condition="Exists('$(MSBuildProjectDirectory)/../VoxFlow.Cli/bin/$(Configuration)/net9.0/ggml-metal.metal')" />
-      <BundledCliFiles Include="$(MSBuildProjectDirectory)/../VoxFlow.Cli/bin/$(Configuration)/net9.0/runtimes/macos-x64/**/*" />
-      <BundledCliFiles Include="$(MSBuildProjectDirectory)/../VoxFlow.Cli/bin/$(Configuration)/net9.0/runtimes/macos-arm64/**/*" />
+      <BundledCliMacosX64RuntimeFiles Include="$(MSBuildProjectDirectory)/../VoxFlow.Cli/bin/$(Configuration)/net9.0/runtimes/macos-x64/**/*" />
+      <BundledCliMacosArm64RuntimeFiles Include="$(MSBuildProjectDirectory)/../VoxFlow.Cli/bin/$(Configuration)/net9.0/runtimes/macos-arm64/**/*" />
       <BundledCliSidecarFiles Include="$(MSBuildProjectDirectory)/../VoxFlow.Cli/bin/$(Configuration)/net9.0/python/**/*" />
     </ItemGroup>
 
@@ -216,6 +216,18 @@
     <Copy
       SourceFiles="@(BundledCliFiles)"
       DestinationFiles="@(BundledCliFiles->'$(MSBuildProjectDirectory)/$(_AppBundlePath)/Contents/MonoBundle/cli/%(RecursiveDir)%(Filename)%(Extension)')"
+      SkipUnchangedFiles="true" />
+
+    <MakeDir Directories="$(MSBuildProjectDirectory)/$(_AppBundlePath)/Contents/MonoBundle/cli/runtimes/macos-x64" />
+    <Copy
+      SourceFiles="@(BundledCliMacosX64RuntimeFiles)"
+      DestinationFiles="@(BundledCliMacosX64RuntimeFiles->'$(MSBuildProjectDirectory)/$(_AppBundlePath)/Contents/MonoBundle/cli/runtimes/macos-x64/%(RecursiveDir)%(Filename)%(Extension)')"
+      SkipUnchangedFiles="true" />
+
+    <MakeDir Directories="$(MSBuildProjectDirectory)/$(_AppBundlePath)/Contents/MonoBundle/cli/runtimes/macos-arm64" />
+    <Copy
+      SourceFiles="@(BundledCliMacosArm64RuntimeFiles)"
+      DestinationFiles="@(BundledCliMacosArm64RuntimeFiles->'$(MSBuildProjectDirectory)/$(_AppBundlePath)/Contents/MonoBundle/cli/runtimes/macos-arm64/%(RecursiveDir)%(Filename)%(Extension)')"
       SkipUnchangedFiles="true" />
 
     <MakeDir Directories="$(MSBuildProjectDirectory)/$(_AppBundlePath)/Contents/MonoBundle/cli/python" />

@@ -9,6 +9,7 @@ namespace VoxFlow.Desktop.Services;
 internal static partial class DesktopCliSupport
 {
     private const string StructuredProgressPrefix = "VOXFLOW_PROGRESS ";
+    private const int IllegalInstructionExitCode = 132;
 
     public static bool ShouldUseCliBridge()
         => OperatingSystem.IsMacCatalyst()
@@ -109,6 +110,9 @@ internal static partial class DesktopCliSupport
     }
 
     public static string ExtractFailureMessage(string output)
+        => ExtractFailureMessage(output, exitCode: null);
+
+    public static string ExtractFailureMessage(string output, int? exitCode)
     {
         var lines = output
             .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
@@ -143,6 +147,18 @@ internal static partial class DesktopCliSupport
         if (!string.IsNullOrWhiteSpace(startupFailed))
         {
             return startupFailed;
+        }
+
+        if (exitCode == IllegalInstructionExitCode)
+        {
+            return "CLI transcription failed with exit code 132 (illegal instruction). "
+                + "The Whisper.net macOS x64 runtime requires AVX/AVX2/FMA/F16C CPU instructions. "
+                + "On Apple Silicon, Rosetta does not provide AVX for x64 processes; run the arm64 Mac Catalyst build instead.";
+        }
+
+        if (exitCode.HasValue)
+        {
+            return $"CLI transcription failed with exit code {exitCode.Value} and no diagnostic output.";
         }
 
         return lines.LastOrDefault(line => !string.IsNullOrWhiteSpace(line))

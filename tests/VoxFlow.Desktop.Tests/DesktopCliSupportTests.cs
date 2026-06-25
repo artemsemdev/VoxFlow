@@ -32,6 +32,25 @@ public sealed class DesktopCliSupportTests
     }
 
     [Fact]
+    public void ExtractFailureMessage_Exit132WithoutOutput_ReturnsIllegalInstructionGuidance()
+    {
+        var message = DesktopCliSupport.ExtractFailureMessage(string.Empty, 132);
+
+        Assert.Contains("illegal instruction", message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("AVX", message);
+        Assert.Contains("arm64 Mac Catalyst", message);
+    }
+
+    [Fact]
+    public void ExtractFailureMessage_ExitCodeWithoutOutput_ReturnsExitCode()
+    {
+        var message = DesktopCliSupport.ExtractFailureMessage(string.Empty, 9);
+
+        Assert.Contains("exit code 9", message);
+        Assert.Contains("no diagnostic output", message);
+    }
+
+    [Fact]
     public void TryParseProgressUpdate_ParsesStructuredProgressEnvelope()
     {
         var line =

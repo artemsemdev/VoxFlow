@@ -37,6 +37,25 @@ public sealed class DesktopCliBundleTests
             $"Pinned Python requirements file is missing from app bundle. Expected at: {expectedRequirements}.");
     }
 
+    [SkippableFact]
+    public void MonoBundleCli_PreservesWhisperRuntimeLayout()
+    {
+        var cliBundleDir = ResolveBuiltCliBundleDir();
+        LoudSkip.If(_output, cliBundleDir is null, "Mac Catalyst Desktop app bundle has not been built yet.");
+
+        var expectedX64Runtime = Path.Combine(cliBundleDir, "runtimes", "macos-x64", "libwhisper.dylib");
+        var expectedArm64Runtime = Path.Combine(cliBundleDir, "runtimes", "macos-arm64", "libwhisper.dylib");
+
+        Assert.True(
+            File.Exists(expectedX64Runtime),
+            $"Whisper x64 runtime is missing from the CLI bridge bundle. Expected at: {expectedX64Runtime}. "
+                + "Whisper.net probes native libraries under runtimes/<rid>/ by default.");
+        Assert.True(
+            File.Exists(expectedArm64Runtime),
+            $"Whisper arm64 runtime is missing from the CLI bridge bundle. Expected at: {expectedArm64Runtime}. "
+                + "Whisper.net probes native libraries under runtimes/<rid>/ by default.");
+    }
+
     private static string? ResolveBuiltCliBundleDir()
     {
         var repositoryRoot = TryFindRepositoryRoot();
