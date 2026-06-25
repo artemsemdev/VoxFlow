@@ -32,12 +32,14 @@ public sealed class McpOptions
 }
 
 /// <summary>
-/// Controls whether MCP resources are exposed to the client.
+/// Controls whether the read-only configuration-inspection tool
+/// (<c>get_effective_config</c>) is registered. When <c>false</c>, the tool is
+/// not exposed to the client. Enforced in
+/// <see cref="McpServerConfigurator.ApplyCapabilities"/>.
 /// </summary>
 public sealed class McpResourceOptions
 {
     public bool Enabled { get; set; } = true;
-    public bool ExposeLastRun { get; set; } = true;
 }
 
 /// <summary>
