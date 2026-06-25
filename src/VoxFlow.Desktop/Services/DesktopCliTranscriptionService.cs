@@ -105,7 +105,7 @@ internal sealed class DesktopCliTranscriptionService : ITranscriptionService
                     0,
                     0,
                     stopwatch.Elapsed,
-                    [DesktopCliSupport.ExtractFailureMessage(combinedOutput)],
+                    [DesktopCliSupport.ExtractFailureMessage(combinedOutput, process.ExitCode)],
                     null);
             }
 
