@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 
 namespace VoxFlow.McpServer.Security;
 
@@ -11,6 +12,19 @@ namespace VoxFlow.McpServer.Security;
 /// </summary>
 internal sealed class PathPolicy : IPathPolicy
 {
+    /// <summary>
+    /// How paths are compared against allowed roots. Linux filesystems are
+    /// case-sensitive, so <c>/Home</c> and <c>/home</c> are genuinely different
+    /// locations and a case-insensitive compare would let an attacker satisfy a
+    /// root by changing case. Windows and the default macOS volume are
+    /// case-insensitive, so we match their behavior there. This is intentional
+    /// per-OS behavior — see PathPolicyTests.ValidateInputPath_CaseSensitivity_MatchesHostFileSystem.
+    /// </summary>
+    internal static readonly StringComparison PathComparison =
+        RuntimeInformation.IsOSPlatform(OSPlatform.Linux)
+            ? StringComparison.Ordinal
+            : StringComparison.OrdinalIgnoreCase;
+
     private readonly IReadOnlyList<string> allowedInputRoots;
     private readonly IReadOnlyList<string> allowedOutputRoots;
     private readonly bool requireAbsolutePaths;
@@ -91,18 +105,19 @@ internal sealed class PathPolicy : IPathPolicy
             throw new ArgumentException("Path must not be empty.");
         }
 
+        // Reject traversal / null-byte injection up front, before any normalization.
+        // Doing this first means a null byte is reported as an explicit policy
+        // violation instead of leaking through as a generic IO ArgumentException
+        // from Path.GetFullPath.
+        if (ContainsDangerousSegments(path))
+        {
+            throw new UnauthorizedAccessException(
+                $"Path contains traversal or injection sequences: {SanitizePath(path)}");
+        }
+
         if (requireAbsolutePaths && !Path.IsPathRooted(path))
         {
             throw new ArgumentException($"Path must be absolute: {SanitizePath(path)}");
-        }
-
-        var normalized = Path.GetFullPath(path);
-
-        // Reject path traversal attempts.
-        if (normalized != path && ContainsTraversalSegments(path))
-        {
-            throw new UnauthorizedAccessException(
-                $"Path contains traversal sequences: {SanitizePath(path)}");
         }
     }
 
@@ -112,12 +127,12 @@ internal sealed class PathPolicy : IPathPolicy
         return roots.Any(root =>
         {
             var normalizedRoot = TrimTrailingDirectorySeparator(root);
-            return normalizedPath.Equals(normalizedRoot, StringComparison.OrdinalIgnoreCase)
-                   || normalizedPath.StartsWith(root, StringComparison.OrdinalIgnoreCase);
+            return normalizedPath.Equals(normalizedRoot, PathComparison)
+                   || normalizedPath.StartsWith(root, PathComparison);
         });
     }
 
-    private static bool ContainsTraversalSegments(string path)
+    private static bool ContainsDangerousSegments(string path)
     {
         return path.Contains("..") ||
                path.Contains("~") ||
