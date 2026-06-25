@@ -1,4 +1,5 @@
 #nullable enable
+using System.IO;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -8,9 +9,7 @@ using ModelContextProtocol;
 using VoxFlow.Core.DependencyInjection;
 using VoxFlow.Core.Logging;
 using VoxFlow.McpServer.Configuration;
-using VoxFlow.McpServer.Prompts;
 using VoxFlow.McpServer.Security;
-using VoxFlow.McpServer.Tools;
 
 // CRITICAL: In stdio MCP mode, stdout is reserved for protocol frames.
 // Redirect incidental Console.Out writes to stderr so they cannot corrupt the
@@ -21,13 +20,67 @@ var builder = Host.CreateApplicationBuilder(args);
 
 // Single source of truth for McpOptions. The Configure<McpOptions> below makes
 // the same data available to anything that resolves IOptions<McpOptions> from
-// DI; the local instance below is only used for the AddMcpServer lambda
-// (which has no IServiceProvider hook) and for the host shutdown timeout.
+// DI; the local instance below is also used for the AddMcpServer lambda (which
+// has no IServiceProvider hook), startup validation, and logging setup.
 var mcpSection = builder.Configuration.GetSection("mcp");
 var mcpOptions = mcpSection.Get<McpOptions>() ?? new McpOptions();
+
+// Fail fast on unsupported or inconsistent configuration BEFORE doing any work.
+// An option that looks supported but is silently ignored (e.g. transport=http
+// quietly using stdio) is a security hazard, so reject it with an actionable
+// message instead of dropping it.
+try
+{
+    McpStartupValidator.Validate(mcpOptions);
+}
+catch (McpConfigurationException ex)
+{
+    Console.Error.WriteLine($"[mcp] configuration error: {ex.Message}");
+    return 1;
+}
+
+// Honor the master switch. An MCP client may launch the server process while it
+// is disabled in config; exit cleanly rather than silently serving anyway.
+if (!mcpOptions.Enabled)
+{
+    Console.Error.WriteLine("[mcp] disabled via mcp.enabled=false; exiting without starting the server.");
+    return 0;
+}
+
 builder.Services.Configure<McpOptions>(mcpSection);
+
+// Logging providers honor the logging.* options. stdout is reserved for the MCP
+// protocol stream, so logs only ever go to stderr and/or a file — never stdout.
+// minimumLevel was validated above, so the parse here always succeeds.
+var minimumLevel = McpStartupValidator.TryParseLogLevel(mcpOptions.Logging.MinimumLevel, out var parsedLevel)
+    ? parsedLevel
+    : LogLevel.Information;
 builder.Logging.ClearProviders();
-builder.Logging.AddProvider(new TextWriterLoggerProvider(Console.Error));
+if (mcpOptions.Logging.WriteToStdErr)
+{
+    builder.Logging.AddProvider(new TextWriterLoggerProvider(Console.Error, minimumLevel));
+}
+
+if (mcpOptions.Logging.WriteToFile)
+{
+    // logFilePath is a trusted operator setting and is intentionally NOT gated
+    // by PathPolicy (see docs/deployment/mcp-server-security.md). Validation
+    // already guaranteed it is non-empty; a failure to open it is a startup
+    // error, not something to silently swallow.
+    StreamWriter fileWriter;
+    try
+    {
+        fileWriter = new StreamWriter(mcpOptions.Logging.LogFilePath!, append: true) { AutoFlush = true };
+    }
+    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+    {
+        Console.Error.WriteLine(
+            $"[mcp] configuration error: cannot open mcp.logging.logFilePath '{mcpOptions.Logging.LogFilePath}': {ex.Message}");
+        return 1;
+    }
+
+    builder.Logging.AddProvider(new TextWriterLoggerProvider(fileWriter, minimumLevel));
+}
 
 // Map the configured grace period onto the .NET host's shutdown timeout so
 // hosted services (including the MCP transport) get a chance to drain
@@ -49,10 +102,11 @@ builder.Services.AddSingleton<IPathPolicy>(sp =>
         opts.RequireAbsolutePaths);
 });
 
-// Configure MCP server with stdio transport. AddMcpServer's options callback
-// has no IServiceProvider parameter, so it reads the local mcpOptions
-// captured via closure — the only consumer of the local instance.
-builder.Services
+// Configure MCP server. Transport is validated above, so stdio here can never be
+// a silent fallback for an unsupported value. Tools and prompts are registered
+// explicitly per the capability toggles (not by blanket assembly scanning) so a
+// disabled toggle genuinely keeps the capability out of the server.
+var mcpBuilder = builder.Services
     .AddMcpServer(options =>
     {
         options.ServerInfo = new()
@@ -61,9 +115,8 @@ builder.Services
             Version = mcpOptions.ServerVersion
         };
     })
-    .WithStdioServerTransport()
-    .WithToolsFromAssembly(typeof(WhisperMcpTools).Assembly)
-    .WithPromptsFromAssembly(typeof(WhisperMcpPrompts).Assembly);
+    .WithStdioServerTransport();
+McpServerConfigurator.ApplyCapabilities(mcpBuilder, mcpOptions);
 
 var app = builder.Build();
 var logger = app.Services
@@ -89,6 +142,13 @@ foreach (var diagnostic in PathPolicyDiagnostics.Describe(
     }
 }
 
+// Surface the effective capability contract so operators can confirm what the
+// running server actually exposes.
+logger.LogInformation(
+    "[mcp] effective config: transport=stdio, prompts={Prompts}, resources={Resources}.",
+    mcpOptions.Prompts.Enabled ? "enabled" : "disabled",
+    mcpOptions.Resources.Enabled ? "enabled" : "disabled");
+
 // Surface the shutdown handoff so MCP clients (Claude Desktop, Cursor, etc.)
 // see a trace instead of an abrupt close. Goes to stderr because stdout is
 // reserved for the MCP protocol stream.
@@ -99,3 +159,4 @@ lifetime.ApplicationStopping.Register(() =>
         mcpOptions.ShutdownGracePeriodSeconds));
 
 await app.RunAsync();
+return 0;
