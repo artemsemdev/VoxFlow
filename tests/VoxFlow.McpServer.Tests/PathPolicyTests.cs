@@ -139,6 +139,81 @@ public sealed class PathPolicyTests
     }
 
     [Fact]
+    public void ValidateInputPath_RejectsNullByteInjection_AsUnauthorized()
+    {
+        var policy = CreatePolicy(inputRoots: new[] { "/allowed/input" });
+
+        // A null byte is a classic path-truncation injection; it must be rejected
+        // explicitly as a policy violation, not leak through as a generic IO error.
+        Assert.Throws<UnauthorizedAccessException>(() =>
+            policy.ValidateInputPath("/allowed/input/clip\0.m4a"));
+    }
+
+    [Fact]
+    public void ValidateOutputPath_RejectsNullByteInjection_AsUnauthorized()
+    {
+        var policy = CreatePolicy(outputRoots: new[] { "/allowed/output" });
+
+        Assert.Throws<UnauthorizedAccessException>(() =>
+            policy.ValidateOutputPath("/allowed/output/result\0.txt"));
+    }
+
+    [Theory]
+    [InlineData("/tmp/audio", "/tmp/audio-other/clip.m4a")]
+    [InlineData("/tmp/audio", "/tmp/audioevil")]
+    public void ValidateInputPath_RejectsRootPrefixAttack(string root, string attacker)
+    {
+        var policy = CreatePolicy(inputRoots: new[] { root });
+
+        // `/tmp/audio-other` shares a string prefix with `/tmp/audio` but is NOT
+        // under it; the trailing-separator normalization must keep them distinct.
+        Assert.Throws<UnauthorizedAccessException>(() =>
+            policy.ValidateInputPath(attacker));
+    }
+
+    [Fact]
+    public void ValidateInputPath_AcceptsSiblingSuffixUnderSameRoot()
+    {
+        // Guard the prefix fix against false positives: a real child whose name
+        // starts with the root's last segment must still be accepted.
+        var policy = CreatePolicy(inputRoots: new[] { "/tmp/audio" });
+        policy.ValidateInputPath("/tmp/audio/audio-2.m4a");
+    }
+
+    [Fact]
+    public void ValidateOutputPath_RejectsParentTraversalEscapingRoot()
+    {
+        var policy = CreatePolicy(outputRoots: new[] { "/allowed/output" });
+
+        Assert.Throws<UnauthorizedAccessException>(() =>
+            policy.ValidateOutputPath("/allowed/output/../../etc/evil.txt"));
+    }
+
+    [Fact]
+    public void ValidateInputPath_CaseSensitivity_MatchesHostFileSystem()
+    {
+        var tempDir = TrimSeparator(Path.GetTempPath());
+        var policy = CreatePolicy(inputRoots: new[] { tempDir });
+        var differentCase = Path.Combine(tempDir.ToUpperInvariant(), "clip.m4a");
+
+        if (OperatingSystem.IsLinux())
+        {
+            // Linux filesystems are case-sensitive: a differently-cased path is a
+            // different location and must not satisfy the allowed root.
+            Assert.Throws<UnauthorizedAccessException>(() =>
+                policy.ValidateInputPath(differentCase));
+        }
+        else
+        {
+            // Windows and the default macOS volume are case-insensitive.
+            policy.ValidateInputPath(differentCase);
+        }
+    }
+
+    private static string TrimSeparator(string path) =>
+        path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+    [Fact]
     public void SanitizePath_ReturnsFileNameOnly()
     {
         var sanitized = PathPolicy.SanitizePath("/some/secret/path/file.txt");
