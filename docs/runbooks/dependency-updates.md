@@ -94,6 +94,14 @@ Use this checklist in dependency PR descriptions:
 
 ## Follow-Up Governance
 
-Dependency automation is not implemented yet. Track any future dependency bot,
-scheduled package audit, or automated pull-request workflow as a separate issue
-so it can be reviewed independently from this runbook.
+Automation has been **evaluated and decided** in
+[ADR-026](../adr/026-dependency-audit-automation.md): adopt a **scheduled,
+read-only package audit** (weekly `dotnet list --vulnerable` / `--outdated`
+reported to a rolling tracking issue) and **defer** automated update-PR bots
+(Dependabot/Renovate) while the team is small. Remediation stays manual and
+follows the lanes above.
+
+The audit workflow is documented in ADR-026 but **not yet enabled** — see its
+"Enabling checklist" (create the `dependencies` / `security` labels, then add
+`.github/workflows/dependency-audit.yml`). Automated update PRs remain a separate
+future decision to revisit as team capacity grows.
