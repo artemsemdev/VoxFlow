@@ -2,6 +2,8 @@
 
 > C4 Level 1 — How VoxFlow fits into its environment.
 
+Implementation snapshot: 2026-06-25.
+
 ## Context Diagram
 
 ```mermaid
@@ -100,7 +102,8 @@ The Desktop host can spawn `VoxFlow.Cli` on Intel Mac Catalyst, but that bridge 
 | Whisper model | Local `.bin` file | `ModelService` / `WhisperFactory` | GGML binary | Reused across runs when valid |
 | Raw segments | Whisper inference | `TranscriptionFilter` | In-memory segment data | Includes timestamps and probabilities |
 | Filtered segments | `TranscriptionFilter` | `OutputWriter` | In-memory accepted segments | Only accepted transcript content is written |
-| Transcript | `OutputWriter` | Local `.txt` file | UTF-8 text | `{start}->{end}: {text}` |
+| Transcript | `OutputWriter` | Local transcript file | UTF-8 text, subtitle, JSON, or Markdown | `resultFormat` supports `txt`, `srt`, `vtt`, `json`, and `md`; `txt` preserves `{start}->{end}: {text}` |
+| Speaker transcript artifact | `VoxflowTranscriptArtifactWriter` | Local `{resultPath}.voxflow.json` file | JSON | Written only when speaker labeling produces a `TranscriptDocument` |
 | Batch summary | `BatchSummaryWriter` | Local `.txt` file | UTF-8 text | Per-file batch report |
 
 ## Data Flow Summary (MCP Server)

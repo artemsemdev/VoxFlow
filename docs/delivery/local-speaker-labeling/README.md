@@ -144,7 +144,7 @@ Desktop override: Ready-screen toggle. Persists back to `appsettings.json` on ch
 
 **Development (local developer runs, not CI):**
 
-- Python 3.10+ available locally for the `Category=RequiresPython` trait-filtered integration tests. No CI job is added; the integration suite runs on the developer machine before each PR.
+- Python 3.10+ available locally for the `Category=RequiresPython` trait-filtered integration tests. Default CI excludes this integration suite; run it on a developer machine before relevant PRs.
 - `Xunit.SkippableFact` NuGet package (added to `VoxFlow.Core.Tests` in P0.5) — enables dynamic skip for tests that depend on sidecar availability. Without this package, xUnit has no idiomatic runtime skip mechanism.
 
 **Nothing is added to Core nuget dependencies** — the Python side is invoked as a child process via `System.Diagnostics.Process`. No new managed dependencies enter VoxFlow.Core.

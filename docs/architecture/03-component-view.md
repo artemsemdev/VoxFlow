@@ -2,6 +2,8 @@
 
 > C4 Level 3 — Detailed component responsibilities, interfaces, and data types.
 
+Implementation snapshot: 2026-06-25.
+
 ## Component Diagram
 
 ```mermaid
@@ -459,13 +461,16 @@ Prompts are registered via `[McpServerPromptType]` and `.WithPromptsFromAssembly
 - `RequireAbsolutePaths` — passed to `PathPolicy` constructor
 - `AllowBatch` — checked by `WhisperMcpTools.TranscribeBatchAsync()` before batch execution
 - `MaxBatchFiles` — passed to `BatchTranscribeRequest` as the file count cap
+- `ShutdownGracePeriodSeconds` - mapped to `HostOptions.ShutdownTimeout` and included in the shutdown log message
 
 **Configuration-only (not enforced at runtime):**
+- `Enabled` - defined in `McpOptions` but does not disable the host
+- `Transport` - defined in `McpOptions`, but `Program.cs` always configures stdio transport
 - `Resources.Enabled` / `Resources.ExposeLastRun` — defined in `McpResourceOptions` but not consumed by any runtime code
 - `Prompts.Enabled` — defined in `McpPromptOptions` but not consumed by any runtime code
 - `Logging.MinimumLevel` / `Logging.WriteToStdErr` / `Logging.WriteToFile` / `Logging.LogFilePath` — defined in `McpLoggingOptions` but not consumed by any runtime code
 
-These unenforced options exist as configuration placeholders for future enablement.
+These unenforced options are known implementation debt. They should either become executable runtime controls or be removed/validated as unsupported so operators do not mistake them for active security or transport settings.
 
 ---
 

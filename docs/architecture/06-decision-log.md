@@ -83,6 +83,8 @@
 **Trade-offs accepted:**
 - The plain text format carries less metadata than JSON (no per-segment probability, no language tag). If downstream tools need richer output, a structured format can be added as an additional output mode without breaking the existing contract.
 
+**Implementation note (2026-06-25):** The default TXT contract is still backward-compatible, but the output surface has expanded. `resultFormat` now supports `txt`, `srt`, `vtt`, `json`, and `md`, and speaker-labeling runs can also write a versioned `{resultPath}.voxflow.json` artifact. ADR-002 should be read as preserving the original file-based TXT contract, not as limiting VoxFlow to one output format.
+
 ---
 
 ## ADR-003

@@ -2,6 +2,8 @@
 
 > Honest assessment of what the architecture depends on, where it is exposed, and what remains unresolved.
 
+Implementation snapshot: 2026-06-25.
+
 ## Assumptions
 
 These are conditions the architecture depends on that are not enforced by the system itself.
@@ -104,9 +106,9 @@ The Desktop host targets `net9.0-maccatalyst` exclusively. The architecture assu
 
 **Impact:** MCP client compatibility issues; need to update the MCP server implementation.
 
-**Current state:** Uses `ModelContextProtocol` NuGet v1.1.0. Exposes 7 tools and 4 prompts. No first-class MCP resources. `McpOptions` has unenforced configuration toggles for future capabilities.
+**Current state:** Uses `ModelContextProtocol` NuGet v1.1.0. Exposes 7 tools and 4 prompts. No first-class MCP resources. `McpOptions` is partially enforced: server identity, path roots, absolute-path policy, batch limits, and shutdown timeout are active, while `enabled`, unsupported `transport` values, prompt/resource toggles, and the `logging` subsection are not fully enforced yet.
 
-**Mitigation options:** The MCP server is a thin host. Protocol updates affect only the MCP project, not Core or other hosts.
+**Mitigation options:** The MCP server is a thin host. Protocol updates affect only the MCP project, not Core or other hosts. Treat the unenforced options as implementation debt until they are either wired, validated as unsupported, or removed from user-facing config.
 
 ### R6. Full audio buffer in memory
 
@@ -132,11 +134,19 @@ The MCP server is stdio-only (ADR-017). HTTP transport would enable remote MCP c
 
 **Current decision:** Deferred until a concrete use case requires remote MCP access.
 
-### Q3. Should structured output formats (JSON, SRT) be supported?
+### Q3. Are the current structured output formats sufficient?
 
-Transcript output is plain text only (`{start}->{end}: {text}` per line, ADR-002). Structured formats would enable richer downstream processing but add output format management.
+Transcript output is no longer plain-text-only. `resultFormat` supports:
 
-**Current decision:** Deferred. Plain text serves current consumers.
+- `txt` - legacy `{start}->{end}: {text}` output
+- `srt` - SubRip subtitles
+- `vtt` - WebVTT subtitles
+- `json` - structured transcript metadata and segments
+- `md` - human-readable Markdown
+
+When speaker labeling is enabled and succeeds, VoxFlow also writes a versioned `{resultPath}.voxflow.json` artifact containing the full `TranscriptDocument`.
+
+**Current decision:** Implemented for the known consumers. Future output formats, schema revisions, or richer export contracts should be additive unless there is a documented breaking-change reason.
 
 ### Q4. What is the model download strategy for Desktop distribution?
 

@@ -2,6 +2,8 @@
 
 > An honest assessment of the current design — what works well, what was deliberately kept simple, and where the architecture would evolve under different requirements.
 
+Implementation snapshot: 2026-06-25.
+
 ## Executive Summary
 
 VoxFlow is a multi-host .NET 9 system for fully local audio transcription. The architecture consists of a shared core library (`VoxFlow.Core`) consumed by three host applications: a CLI for command-line workflows, an MCP server for AI client integration, and a macOS Blazor Hybrid desktop app for visual transcription workflows. All hosts share the same core pipeline and service contracts via dependency injection, while the Desktop host can swap in a local CLI bridge on Intel Mac Catalyst without forking the transcription logic.
@@ -76,18 +78,36 @@ The system now uses dependency injection with `Microsoft.Extensions.DependencyIn
 
 **What changed:** The previous architecture used static services and no DI container. With the addition of the Desktop host (the third host), the evolution from static to DI-based services was triggered — exactly as predicted in the architecture review's evolution table.
 
-### No logging framework (CLI and MCP)
+### Simple host logging without an external logging stack
 
-The CLI and MCP hosts write directly to `Console.Error` and `Console.Out`. There is no ILogger, no structured logging, no log levels. This works because:
-- The application runs interactively in a terminal — console output is the primary feedback channel
-- There is no need for log aggregation, alerting, or machine-parseable log output
-- The startup validation report and batch summary already provide structured diagnostic output
+The CLI and MCP hosts now use `Microsoft.Extensions.Logging` with the repository's `TextWriterLoggerProvider`, so operational messages flow through `ILogger` while still writing to terminal-friendly streams:
 
-The Desktop host adds `DesktopDiagnostics` for crash logging to `~/Library/Application Support/VoxFlow/logs/desktop.log`, but this is a minimal unhandled-exception capture, not a full logging framework.
+- CLI logs to stderr through `CliOutput.Error`; user-facing protocol/output helpers still own normal command output.
+- MCP clears the default logging providers and writes diagnostics to stderr. It also redirects incidental `Console.Out` writes to stderr so stdout remains reserved for MCP JSON-RPC frames.
+- Desktop keeps `DesktopDiagnostics` for crash logging to `~/Library/Application Support/VoxFlow/logs/desktop.log` and uses host-specific diagnostics at UI event-handler boundaries.
 
-### MCP configuration toggles are placeholders
+The project still does not have a full structured logging stack with sinks, enrichment, or log aggregation. That remains appropriate for a local-first tool, but new production code should use `ILogger<T>` or the established Desktop diagnostics boundary instead of direct `Console.*` logging.
 
-`McpOptions` defines `Resources.Enabled`, `Resources.ExposeLastRun`, `Prompts.Enabled`, and `Logging.*` properties, but none of these are consumed by runtime code. They exist as configuration scaffolding for future enablement. This is acceptable because the MCP server is already functional with its current tool and prompt set, and adding runtime enforcement for these toggles is a straightforward change when needed.
+### MCP configuration is partially enforced
+
+`McpOptions` is an active configuration object, but not every property is currently a runtime control.
+
+Actively enforced settings include:
+
+- `ServerName` / `ServerVersion` - applied to MCP server info at host startup.
+- `AllowedInputRoots` / `AllowedOutputRoots` / `RequireAbsolutePaths` - passed into `PathPolicy`.
+- `AllowBatch` / `MaxBatchFiles` - checked by MCP batch transcription.
+- `ShutdownGracePeriodSeconds` - mapped to `HostOptions.ShutdownTimeout` and logged on shutdown.
+
+Known gaps remain:
+
+- `Enabled` is defined but does not disable the host.
+- `Transport` is defined but the host always configures stdio transport.
+- `Resources.Enabled` / `Resources.ExposeLastRun` do not control first-class MCP resources; the "resource" surface is currently a regular configuration-inspection tool.
+- `Prompts.Enabled` does not disable prompt registration.
+- `Logging.MinimumLevel`, `Logging.WriteToStdErr`, `Logging.WriteToFile`, and `Logging.LogFilePath` are defined but not consumed by the host.
+
+These gaps are implementation debt, not intended security controls. Issue #71 tracks enforcing unsupported options or removing settings that imply behavior the host does not provide.
 
 ### No async pipeline / middleware pattern
 
@@ -108,7 +128,7 @@ These are not weaknesses — they are design boundaries that would shift under d
 | HTTP/SSE MCP transport | Stdio-only | Add HTTP transport option; requires auth, CORS, port management |
 | Parallel batch processing | Sequential loop | Producer-consumer pipeline; ffmpeg conversion overlapped with inference |
 | Multiple transcription backends | Whisper.net hardcoded | Backend interface; factory-based selection |
-| Structured output formats | Plain text only | Output format strategy; JSON/CSV writers alongside plain text |
+| Output formats | TXT, SRT, VTT, JSON, and Markdown are implemented through `resultFormat` | Add new formats such as CSV only if a concrete consumer requires them |
 | Watch mode / continuous processing | Run-once exit | File system watcher; process lifecycle management |
 | Plugin system for filters | Hardcoded filter stages | Filter chain with configurable stage ordering |
 | Linux/Windows desktop support | macOS only | Platform-specific MAUI targets; may require UI adjustments |

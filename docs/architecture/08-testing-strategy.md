@@ -2,15 +2,18 @@
 
 > How VoxFlow is tested across all hosts, including test infrastructure, coverage layers, and automation approach.
 
+Implementation snapshot: 2026-06-25.
+
 ## Test Pyramid
 
-| Layer | Projects | Approximate Count | Execution Speed |
-|-------|----------|-------------------|-----------------|
-| Unit / fast | VoxFlow.Core.Tests, VoxFlow.McpServer.Tests, Desktop config/CLI-support tests | ~104 tests | Seconds |
-| Component / medium | VoxFlow.Desktop.Tests (Blazor component rendering) | ~70 tests | Seconds |
-| End-to-end / slow | VoxFlow.Cli.Tests, VoxFlow.Desktop.UiTests | ~11 tests | Minutes |
+| Layer | Projects | Default Automation | Execution Speed |
+|-------|----------|--------------------|-----------------|
+| Unit / fast | VoxFlow.Core.Tests, VoxFlow.McpServer.Tests, CLI argument/progress tests, Desktop config/CLI-support tests | GitHub Actions + local | Seconds |
+| Component / medium | VoxFlow.Desktop.Tests (headless Blazor component rendering and ViewModel tests) | GitHub Actions macOS job + local | Seconds to minutes |
+| End-to-end / slow | VoxFlow.Cli.Tests, VoxFlow.Desktop.UiTests | CLI tests in GitHub Actions; real Desktop UI automation local/manual | Minutes |
+| Environment-gated | RequiresPython speaker-labeling tests, Desktop real-audio tests | Local/manual unless explicitly enabled | Minutes to longer |
 
-Total: ~176 test methods across 25 test classes in 5 test projects.
+The repository currently has five test projects and about 500 xUnit test declarations. The exact runtime case count varies because `[Theory]` data rows expand at execution time.
 
 ## Test Projects
 
@@ -28,9 +31,11 @@ Total: ~176 test methods across 25 test classes in 5 test projects.
 |---------|--------|-------|
 | Test framework | xUnit 2.9.2 | Exclusively; no MSTest or NUnit |
 | Test SDK | Microsoft.NET.Test.Sdk 17.12.0 | Standard .NET test host |
+| Conditional skips | Xunit.SkippableFact 1.4.13 | Used for environment-gated Python, bundle, and real-audio tests |
 | Mocking | Custom stubs and fakes | No Moq, NSubstitute, or similar libraries |
 | Blazor component testing | Custom `TestRenderer` | Similar to bUnit but hand-rolled; extends `Microsoft.AspNetCore.Components.RenderTree.Renderer` |
 | Desktop UI automation | AppleScript via macOS Accessibility | Custom bridge; no Appium or XCTest |
+| CI | GitHub Actions | `.github/workflows/ci.yml` runs standard validation; `.github/workflows/codeql.yml` runs CodeQL |
 
 ## Test Double Strategy
 
@@ -131,10 +136,24 @@ Tests that require external dependencies or special environments are gated by cu
 
 | Attribute | Environment Variable | When Used |
 |-----------|---------------------|-----------|
+| `[Trait("Category", "RequiresPython")]` | Python/pyannote runtime and model access | Speaker-labeling sidecar integration tests; excluded from default CI with `--filter "Category!=RequiresPython"` |
 | `[DesktopUiFact]` | `VOXFLOW_RUN_DESKTOP_UI_TESTS=1` | Real macOS UI automation (requires `.app` bundle, Accessibility permission) |
 | `[DesktopRealAudioFact]` / `[DesktopRealAudioTheory]` | `VOXFLOW_RUN_DESKTOP_REAL_AUDIO_TESTS=1` | Tests requiring model and audio fixtures in `models/` and `artifacts/Input/` |
 
 Tests without these attributes run with no external dependencies — all fixtures are generated in-process.
+
+## CI and Automation
+
+The standard CI workflow is `.github/workflows/ci.yml`. It runs on pushes to `main`/`master` and on pull requests.
+
+| Job | Runner | What it validates |
+|-----|--------|-------------------|
+| `core-hosts` (`Core, CLI, MCP`) | `ubuntu-latest` | Restores and builds Core, CLI, and MCP projects; runs Core tests with `Category!=RequiresPython`, plus CLI and MCP test projects; enforces an expected skipped-test count of 0 |
+| `desktop` (`Desktop`) | `macos-latest` | Installs the MAUI Mac Catalyst workload; restores CLI, Desktop, and Desktop tests; builds Desktop for `net9.0-maccatalyst`; runs the headless Desktop test suite; enforces the current expected skipped-test count of 2 for bundle-dependent tests |
+
+The real Desktop UI automation suite (`tests/VoxFlow.Desktop.UiTests`) is intentionally excluded from default CI. It requires a real macOS app bundle plus Accessibility permissions, so it remains a local/manual validation path through `./scripts/run-desktop-ui-tests.sh`.
+
+CodeQL is configured separately in `.github/workflows/codeql.yml`. It runs on push, pull request, and weekly schedule. Current CodeQL analysis builds Core, CLI, and MCP on Ubuntu; Desktop CodeQL coverage is not part of the workflow yet and is tracked separately.
 
 ## What Each Test Layer Catches
 
@@ -151,4 +170,4 @@ Tests without these attributes run with no external dependencies — all fixture
 - **No mocking framework** — explicit stubs are more verbose but more readable and debuggable. Acceptable given the codebase size.
 - **Custom Blazor renderer** — avoids a bUnit dependency. Acceptable because the component testing needs are narrow (state-driven view switching, not complex interaction patterns).
 - **AppleScript UI automation** — platform-specific and fragile compared to XCTest, but works without Xcode project setup and tests the real app bundle. Acceptable for a macOS-only Desktop host.
-- **No CI pipeline** — all tests run locally. The test suite is designed to be fast enough for pre-commit validation (unit + component tests in seconds; UI automation in minutes).
+- **Default CI excludes expensive local-first scenarios** - the normal pull-request workflow covers Core, CLI, MCP, and headless Desktop validation, but not pyannote-backed integration tests, real Desktop UI automation, long-form audio, or release packaging smoke checks. Those remain explicit local/manual validation paths until a separate full-validation workflow exists.
