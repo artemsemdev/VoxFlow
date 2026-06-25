@@ -454,18 +454,18 @@ Prompts are registered via `[McpServerPromptType]` and `.WithPromptsFromAssembly
 **Responsibility:** MCP-specific configuration loaded from the `mcp` section of `appsettings.json`.
 
 **Actively enforced settings:**
+- `Enabled` — master switch; `Program.cs` exits cleanly without starting the server when `false`
+- `Transport` — validated by `McpStartupValidator`; only `stdio` is accepted, any other value fails fast (no silent fallback to stdio)
 - `ServerName` / `ServerVersion` — set on the MCP server info during host startup
 - `AllowedInputRoots` / `AllowedOutputRoots` — passed to `PathPolicy` constructor
 - `RequireAbsolutePaths` — passed to `PathPolicy` constructor
 - `AllowBatch` — checked by `WhisperMcpTools.TranscribeBatchAsync()` before batch execution
 - `MaxBatchFiles` — passed to `BatchTranscribeRequest` as the file count cap
+- `Resources.Enabled` — gates registration of the `get_effective_config` inspection tool in `McpServerConfigurator.ApplyCapabilities()`
+- `Prompts.Enabled` — gates registration of `WhisperMcpPrompts` in `McpServerConfigurator.ApplyCapabilities()`
+- `Logging.MinimumLevel` / `Logging.WriteToStdErr` / `Logging.WriteToFile` / `Logging.LogFilePath` — applied to the host logging providers in `Program.cs`; `MinimumLevel` is validated and `WriteToFile` requires a non-empty `LogFilePath`
 
-**Configuration-only (not enforced at runtime):**
-- `Resources.Enabled` / `Resources.ExposeLastRun` — defined in `McpResourceOptions` but not consumed by any runtime code
-- `Prompts.Enabled` — defined in `McpPromptOptions` but not consumed by any runtime code
-- `Logging.MinimumLevel` / `Logging.WriteToStdErr` / `Logging.WriteToFile` / `Logging.LogFilePath` — defined in `McpLoggingOptions` but not consumed by any runtime code
-
-These unenforced options exist as configuration placeholders for future enablement.
+`Resources.ExposeLastRun` was removed (#71): it was never consumed and there is no MCP-resource implementation behind it. Every remaining `McpOptions` property is now either enforced or validated at startup — none are silent placeholders.
 
 ---
 
