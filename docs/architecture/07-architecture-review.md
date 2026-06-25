@@ -85,9 +85,15 @@ The CLI and MCP hosts write directly to `Console.Error` and `Console.Out`. There
 
 The Desktop host adds `DesktopDiagnostics` for crash logging to `~/Library/Application Support/VoxFlow/logs/desktop.log`, but this is a minimal unhandled-exception capture, not a full logging framework.
 
-### MCP configuration toggles are placeholders
+### MCP configuration toggles are enforced (resolved, #71)
 
-`McpOptions` defines `Resources.Enabled`, `Resources.ExposeLastRun`, `Prompts.Enabled`, and `Logging.*` properties, but none of these are consumed by runtime code. They exist as configuration scaffolding for future enablement. This is acceptable because the MCP server is already functional with its current tool and prompt set, and adding runtime enforcement for these toggles is a straightforward change when needed.
+Previously `McpOptions` defined `Resources.Enabled`, `Resources.ExposeLastRun`, `Prompts.Enabled`, and `Logging.*` properties that no runtime code consumed — configuration that looked supported but was silently ignored. This was resolved in #71:
+
+- `Transport` is validated (`McpStartupValidator`) — only `stdio` is accepted; any other value fails fast instead of silently using stdio.
+- `Enabled` is honored — the server exits cleanly when `false`.
+- `Prompts.Enabled` and `Resources.Enabled` gate capability registration in `McpServerConfigurator.ApplyCapabilities()`, so disabled capabilities are genuinely not exposed.
+- `Logging.MinimumLevel` / `WriteToStdErr` / `WriteToFile` / `LogFilePath` are applied to the host logging providers, with validation.
+- `Resources.ExposeLastRun` was removed — it had no implementation and implied an unsupported MCP-resource capability.
 
 ### No async pipeline / middleware pattern
 

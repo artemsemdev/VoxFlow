@@ -8,8 +8,8 @@ Bound to [`McpOptions`](Configuration/McpOptions.cs) at startup. See `Program.cs
 
 | Option | Type | Default | Recommended | Notes |
 |---|---|---|---|---|
-| `enabled` | `bool` | `true` | `true` for any deployed server | Master switch. When `false` the server still starts but tools may refuse. Today there is no shutdown path tied to this; it is a config gate the host can branch on. |
-| `transport` | `string` | `"stdio"` | `"stdio"` | The only supported transport. Reserved for future HTTP/socket transports. |
+| `enabled` | `bool` | `true` | `true` for any deployed server | Master switch. When `false`, the server logs `disabled via mcp.enabled=false` to stderr and exits cleanly without starting — it does not serve. |
+| `transport` | `string` | `"stdio"` | `"stdio"` | The only supported transport. **Validated at startup**: any other value (e.g. `http`) fails fast with an actionable error rather than silently falling back to stdio. |
 | `serverName` | `string` | `"voxflow"` | Brand-specific (`"voxflow-prod"`, `"voxflow-staging"`) | Advertised to MCP clients via the `serverInfo` handshake. Clients display this. |
 | `serverVersion` | `string` | `"1.0.0"` | Pinned to your release | Advertised to MCP clients. Bump on every published change so clients can detect rollouts. |
 | `allowBatch` | `bool` | `true` | `false` if you want to disable `transcribe_batch` | Gates the batch-transcription tool. If `false`, only single-file transcription is exposed. |
@@ -21,31 +21,32 @@ Bound to [`McpOptions`](Configuration/McpOptions.cs) at startup. See `Program.cs
 
 ## `resources` subsection
 
-Reserved for future "MCP resources" capability — the server can expose read-only resources (last-run summaries, configuration) to clients without going through a tool call.
+Gates the read-only configuration-inspection tool `get_effective_config`, which returns the resolved VoxFlow configuration to the client.
 
 | Option | Type | Default | Notes |
 |---|---|---|---|
-| `resources.enabled` | `bool` | `true` | Master switch for the resources feature. |
-| `resources.exposeLastRun` | `bool` | `true` | If `true`, exposes the most recent transcription's metadata as an MCP resource. |
+| `resources.enabled` | `bool` | `true` | When `true`, the `get_effective_config` tool is registered. Set `false` to keep the server from disclosing the effective configuration; the core transcription tools are unaffected. Enforced in `McpServerConfigurator.ApplyCapabilities()`. |
+
+> `resources.exposeLastRun` was **removed** in #71. It was never implemented (no MCP-resource backed it) and implied an unsupported capability. Remove it from any config you copied from an older version — unknown keys bind to nothing.
 
 ## `prompts` subsection
 
-Same shape — gates predefined MCP prompts.
+Gates the predefined MCP prompts (`WhisperMcpPrompts`).
 
 | Option | Type | Default | Notes |
 |---|---|---|---|
-| `prompts.enabled` | `bool` | `true` | Master switch for the prompts feature. |
+| `prompts.enabled` | `bool` | `true` | When `true`, the guided prompts are registered. When `false`, no prompts are exposed to the client. Enforced in `McpServerConfigurator.ApplyCapabilities()`. |
 
 ## `logging` subsection
 
-Server-side logging. **Not** filtered through `PathPolicy` — `logFilePath` writes wherever you point it.
+Server-side logging, applied to the host logging providers at startup. Logs go to stderr and/or a file — **never stdout** (reserved for the MCP protocol stream). `logFilePath` is **not** filtered through `PathPolicy` — it writes wherever you point it.
 
 | Option | Type | Default | Notes |
 |---|---|---|---|
-| `logging.minimumLevel` | `string` | `"Information"` | Standard `ILogger` levels: `Trace`, `Debug`, `Information`, `Warning`, `Error`, `Critical`, `None`. |
-| `logging.writeToStdErr` | `bool` | `true` | Writes logs to **stderr** (stdout is reserved for the MCP protocol stream). Keep `true` for `stdio` transport. |
-| `logging.writeToFile` | `bool` | `false` | When `true`, also writes to `logFilePath`. |
-| `logging.logFilePath` | `string` | `""` | File-sink target. Treat as a trusted operator setting — `PathPolicy` does **not** validate this path. |
+| `logging.minimumLevel` | `string` | `"Information"` | Standard `ILogger` levels: `Trace`, `Debug`, `Information`, `Warning`, `Error`, `Critical`, `None`. **Validated at startup** — an unknown level fails fast. |
+| `logging.writeToStdErr` | `bool` | `true` | When `true`, logs are written to **stderr**. Keep `true` for `stdio` transport. With both this and `writeToFile` `false`, the server runs without any log sink. |
+| `logging.writeToFile` | `bool` | `false` | When `true`, logs are appended to `logFilePath`. Requires a non-empty `logFilePath` — otherwise startup fails fast. |
+| `logging.logFilePath` | `string` | `""` | File-sink target (opened append). Treat as a trusted operator setting — `PathPolicy` does **not** validate this path. Required when `writeToFile` is `true`. |
 
 ## Minimal safe config
 
