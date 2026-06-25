@@ -70,6 +70,25 @@ var logger = app.Services
     .GetRequiredService<ILoggerFactory>()
     .CreateLogger("VoxFlow.McpServer");
 
+// Make the effective filesystem boundary obvious at startup. Empty allow-lists
+// mean the server can touch any path the user can — operators must see that
+// loudly (on stderr; stdout is the MCP protocol stream) rather than discover it
+// the hard way. See docs/deployment/mcp-server-security.md.
+foreach (var diagnostic in PathPolicyDiagnostics.Describe(
+             mcpOptions.AllowedInputRoots,
+             mcpOptions.AllowedOutputRoots,
+             mcpOptions.RequireAbsolutePaths))
+{
+    if (diagnostic.Level == PathPolicyDiagnosticLevel.Warning)
+    {
+        logger.LogWarning("{PathPolicyDiagnostic}", diagnostic.Message);
+    }
+    else
+    {
+        logger.LogInformation("{PathPolicyDiagnostic}", diagnostic.Message);
+    }
+}
+
 // Surface the shutdown handoff so MCP clients (Claude Desktop, Cursor, etc.)
 // see a trace instead of an abrupt close. Goes to stderr because stdout is
 // reserved for the MCP protocol stream.
