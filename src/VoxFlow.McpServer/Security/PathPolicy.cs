@@ -123,7 +123,11 @@ internal sealed class PathPolicy : IPathPolicy
 
     private static bool IsUnderAnyRoot(string path, IReadOnlyList<string> roots)
     {
-        var normalizedPath = TrimTrailingDirectorySeparator(Path.GetFullPath(path));
+        // Resolve symlinks before the root check so a link inside an allowed root
+        // that points outside it cannot satisfy the prefix test. Roots were
+        // canonicalized the same way in NormalizeRoots, so both sides compare in
+        // their real-path form.
+        var normalizedPath = TrimTrailingDirectorySeparator(ResolveRealPath(path));
         return roots.Any(root =>
         {
             var normalizedRoot = TrimTrailingDirectorySeparator(root);
@@ -145,13 +149,121 @@ internal sealed class PathPolicy : IPathPolicy
             .Where(r => !string.IsNullOrWhiteSpace(r))
             .Select(r =>
             {
-                var normalized = Path.GetFullPath(r);
+                // Canonicalize the root (resolving symlinks) so a configured root
+                // that is itself a symlink still matches files reached through it.
+                var normalized = ResolveRealPath(r);
                 // Force a trailing separator so `/allowed-audio-2` does not satisfy a root of `/allowed-audio`.
                 return normalized.EndsWith(Path.DirectorySeparatorChar)
                     ? normalized
                     : normalized + Path.DirectorySeparatorChar;
             })
             .ToArray();
+    }
+
+    /// <summary>
+    /// Canonicalizes a path by resolving symbolic links on the longest existing
+    /// prefix and re-appending any trailing components that do not exist yet
+    /// (realpath -m semantics). This is what closes the symlink-escape gap: a
+    /// symlink inside an allowed root that points outside it resolves to its real
+    /// location before the root check. Resolution failures (e.g. symlink cycles)
+    /// degrade safely to the non-resolved full path, which is still checked.
+    /// </summary>
+    internal static string ResolveRealPath(string path)
+    {
+        var full = Path.GetFullPath(path);
+
+        // Walk up to the nearest existing ancestor, collecting the trailing
+        // components that do not exist on disk (e.g. an output file not yet
+        // written, or a path under a broken symlink).
+        var existing = full;
+        var trailing = new List<string>();
+        while (!Path.Exists(existing))
+        {
+            var parent = Path.GetDirectoryName(existing);
+            if (string.IsNullOrEmpty(parent) || parent == existing)
+            {
+                // Nothing along the path exists; there is nothing to resolve.
+                return full;
+            }
+
+            trailing.Add(Path.GetFileName(existing));
+            existing = parent;
+        }
+
+        string resolvedExisting;
+        try
+        {
+            resolvedExisting = ResolveExisting(existing);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // e.g. a symlink cycle. Fail safe by not resolving; the unresolved
+            // path is still subjected to the allowed-root check.
+            return full;
+        }
+
+        if (trailing.Count == 0)
+        {
+            return resolvedExisting;
+        }
+
+        trailing.Reverse();
+        var combined = new string[trailing.Count + 1];
+        combined[0] = resolvedExisting;
+        trailing.CopyTo(combined, 1);
+        return Path.GetFullPath(Path.Combine(combined));
+    }
+
+    /// <summary>
+    /// Resolves every symbolic link in an existing path component by component,
+    /// so intermediate directory symlinks are followed, not just the leaf. When a
+    /// component is a link, its (already chain-resolved) target is canonicalized
+    /// recursively — that is what keeps an absolute target from re-introducing an
+    /// unresolved ancestor symlink (e.g. macOS <c>/var</c> -> <c>/private/var</c>).
+    /// </summary>
+    private static string ResolveExisting(string existingPath, int depth = 0)
+    {
+        // Bound recursion so a pathological symlink graph degrades to a thrown
+        // IOException (caught and failed-safe by ResolveRealPath) instead of a
+        // stack overflow.
+        if (depth > 40)
+        {
+            throw new IOException("Too many levels of symbolic links.");
+        }
+
+        var pathRoot = Path.GetPathRoot(existingPath);
+        var current = string.IsNullOrEmpty(pathRoot)
+            ? Path.DirectorySeparatorChar.ToString()
+            : pathRoot;
+        var remainder = existingPath.Substring(current.Length);
+
+        foreach (var component in remainder.Split(
+                     new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar },
+                     StringSplitOptions.RemoveEmptyEntries))
+        {
+            current = Path.Combine(current, component);
+            FileSystemInfo info = Directory.Exists(current)
+                ? new DirectoryInfo(current)
+                : new FileInfo(current);
+
+            // Use the raw LinkTarget (one hop, may be relative) rather than
+            // ResolveLinkTarget(returnFinalTarget: true): the latter THROWS on a
+            // dangling link, whereas reading the raw target lets us resolve the
+            // link by its declared destination even when the target is missing.
+            // Recursion below follows multi-hop chains and resolves any ancestor
+            // symlinks in the target (e.g. macOS /var -> /private/var).
+            var linkTarget = info.LinkTarget;
+            if (linkTarget is not null)
+            {
+                var linkDirectory = Path.GetDirectoryName(current) ?? current;
+                var absoluteTarget = Path.IsPathRooted(linkTarget)
+                    ? linkTarget
+                    : Path.Combine(linkDirectory, linkTarget);
+                current = ResolveExisting(Path.GetFullPath(absoluteTarget), depth + 1);
+            }
+        }
+
+        return current;
     }
 
     private static string TrimTrailingDirectorySeparator(string path)
