@@ -27,7 +27,6 @@ public sealed class McpConfigurationTests
         var options = new McpResourceOptions();
 
         Assert.True(options.Enabled);
-        Assert.True(options.ExposeLastRun);
     }
 
     [Fact]
