@@ -13,6 +13,18 @@ namespace VoxFlow.Core.Services.Diarization;
 /// </summary>
 public static class SpeakerLabelingDiagnostics
 {
+    /// <summary>
+    /// Builds the diagnostic (summary + remediation) for a specific code, so other
+    /// surfaces (e.g. the doctor health check) reuse the same wording.
+    /// </summary>
+    public static SpeakerLabelingDiagnostic ForCode(
+        SpeakerLabelingDiagnosticCode code,
+        string? technicalDetail = null)
+    {
+        var (summary, remediation) = Describe(code);
+        return new SpeakerLabelingDiagnostic(code, SpeakerLabelingDiagnosticSeverity.Error, summary, remediation, technicalDetail);
+    }
+
     public static SpeakerLabelingDiagnostic FromSidecar(SidecarFailureReason reason, string? message)
     {
         var code = reason switch
