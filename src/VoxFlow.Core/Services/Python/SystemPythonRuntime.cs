@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using VoxFlow.Core.Interfaces;
+using VoxFlow.Core.Models;
 
 namespace VoxFlow.Core.Services.Python;
 
@@ -46,20 +47,25 @@ public sealed class SystemPythonRuntime : IPythonRuntime
         }
         catch (Exception ex)
         {
-            return PythonRuntimeStatus.NotReady($"python3 not found in PATH: {ex.Message}");
+            return PythonRuntimeStatus.NotReady(
+                $"python3 not found in PATH: {ex.Message}",
+                SpeakerLabelingDiagnosticCode.PythonNotFound);
         }
 
         var combined = string.IsNullOrWhiteSpace(result.StdOut) ? result.StdErr : result.StdOut;
         var versionString = PythonVersionParser.Parse(combined);
         if (versionString is null)
         {
-            return PythonRuntimeStatus.NotReady($"Could not parse Python version from '{combined.Trim()}'.");
+            return PythonRuntimeStatus.NotReady(
+                $"Could not parse Python version from '{combined.Trim()}'.",
+                SpeakerLabelingDiagnosticCode.PythonVersionUnsupported);
         }
 
         if (!Version.TryParse(versionString, out var parsed) || parsed < MinimumVersion)
         {
             return PythonRuntimeStatus.NotReady(
-                $"Python {versionString} is below the required minimum of {MinimumVersion}.");
+                $"Python {versionString} is below the required minimum of {MinimumVersion}.",
+                SpeakerLabelingDiagnosticCode.PythonVersionUnsupported);
         }
 
         return PythonRuntimeStatus.Ready(InterpreterFileName, versionString);
