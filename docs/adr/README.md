@@ -52,5 +52,6 @@ Each record includes:
 | [024](024-local-speaker-labeling-pipeline.md) | Local speaker labeling pipeline for English transcription | Accepted |
 | [025](025-gemma-4-intelligence-layer.md) | Gemma 4 as an optional local intelligence layer | Accepted |
 | [026](026-dependency-audit-automation.md) | Scheduled dependency audit with manual remediation | Accepted |
+| [027](027-custom-native-diarization-library.md) | Do not build a custom native diarization library yet | Accepted |
 
 For the full record text of ADR-001 through ADR-023, see the [decision log](../architecture/06-decision-log.md). ADR-024 and later may live as standalone files in this directory.
