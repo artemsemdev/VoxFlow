@@ -67,6 +67,14 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IVoxflowTranscriptArtifactWriter, VoxflowTranscriptArtifactWriter>();
         services.AddSingleton<ITranscriptionService, TranscriptionService>();
         services.AddSingleton<IBatchTranscriptionService, BatchTranscriptionService>();
+        services.AddSingleton<IRuntimeStampStore>(_ => new RuntimeStampStore(DefaultRuntimeStampPath.FilePath));
+        services.AddSingleton<ISpeakerLabelingDoctor>(sp =>
+            new SpeakerLabelingDoctor(
+                sp.GetRequiredService<IConfigurationService>(),
+                sp.GetRequiredService<ISpeakerLabelingPreflight>(),
+                sp.GetRequiredService<IRuntimeStampStore>(),
+                sp.GetRequiredService<IVenvPaths>().RequirementsFilePath,
+                ResolveSidecarScriptPath()));
         return services;
     }
 
