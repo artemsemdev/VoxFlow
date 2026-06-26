@@ -24,13 +24,12 @@ internal static class Program
             return 2;
         }
 
-        if (route.Verb is CliVerb.Doctor or CliVerb.Setup)
+        if (route.Verb is CliVerb.Setup)
         {
-            // Recognized commands whose behavior ships with the speaker-labeling
-            // setup work; the dispatch surface exists so they can plug in later.
+            // Recognized command whose behavior ships with the speaker-labeling
+            // setup work; the dispatch surface exists so it can plug in later.
             CliOutput.WriteLine(
-                $"voxflow {route.Verb.ToString().ToLowerInvariant()} is not available yet — " +
-                "it ships with the speaker-labeling setup work.");
+                "voxflow setup is not available yet — it ships with the speaker-labeling setup work.");
             return 2;
         }
 
@@ -47,6 +46,14 @@ internal static class Program
         var logger = provider
             .GetRequiredService<ILoggerFactory>()
             .CreateLogger("VoxFlow.Cli");
+
+        if (route.Verb is CliVerb.Doctor)
+        {
+            using var doctorCts = new CancellationTokenSource();
+            Console.CancelKeyPress += (_, e) => { e.Cancel = true; doctorCts.Cancel(); };
+            var doctor = provider.GetRequiredService<VoxFlow.Core.Services.Diarization.ISpeakerLabelingDoctor>();
+            return await DoctorCommand.RunAsync(doctor, route.Args, doctorCts.Token);
+        }
 
         CliArguments cliArgs;
         try
