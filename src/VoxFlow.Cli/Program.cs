@@ -11,6 +11,29 @@ internal static class Program
 {
     public static async Task<int> Main(string[] args)
     {
+        // Route to a verb first. No args or a leading flag means the default verb
+        // (transcribe), so `voxflow --speakers` keeps working unchanged.
+        CliRoute route;
+        try
+        {
+            route = CliRouter.Route(args);
+        }
+        catch (ArgumentException ex)
+        {
+            CliOutput.WriteErrorLine(ex.Message);
+            return 2;
+        }
+
+        if (route.Verb is CliVerb.Doctor or CliVerb.Setup)
+        {
+            // Recognized commands whose behavior ships with the speaker-labeling
+            // setup work; the dispatch surface exists so they can plug in later.
+            CliOutput.WriteLine(
+                $"voxflow {route.Verb.ToString().ToLowerInvariant()} is not available yet — " +
+                "it ships with the speaker-labeling setup work.");
+            return 2;
+        }
+
         var services = new ServiceCollection();
         services.AddLogging(builder =>
             builder.AddProvider(new TextWriterLoggerProvider(CliOutput.Error)));
@@ -28,7 +51,7 @@ internal static class Program
         CliArguments cliArgs;
         try
         {
-            cliArgs = CliArguments.Parse(args);
+            cliArgs = CliArguments.Parse(route.Args);
         }
         catch (ArgumentException ex)
         {

@@ -5,9 +5,14 @@ namespace VoxFlow.Cli;
 internal sealed record CliArguments(bool? EnableSpeakers, bool ShowHelp)
 {
     public const string HelpText = """
-        Usage: voxflow [options]
+        Usage: voxflow [command] [options]
 
-        Options:
+        Commands:
+          transcribe   Transcribe audio (the default when no command is given).
+          doctor       Check speaker-labeling readiness. [coming soon]
+          setup        Install or repair the speaker-labeling runtime. [coming soon]
+
+        transcribe options:
           --speakers[=true|false]   Enable (or disable) speaker labeling for this
                                     run. Overrides transcription.speakerLabeling.enabled
                                     in appsettings.json.
