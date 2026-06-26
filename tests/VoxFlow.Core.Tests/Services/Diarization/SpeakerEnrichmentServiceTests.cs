@@ -165,9 +165,40 @@ public sealed class SpeakerEnrichmentServiceTests
         Assert.Null(result.Document);
         Assert.False(result.RuntimeBootstrapped);
         Assert.Single(result.Warnings);
-        Assert.StartsWith("speaker-labeling: runtime not ready:", result.Warnings[0]);
-        Assert.Contains("python3 not found on PATH", result.Warnings[0]);
+        // No structured code on the status -> generic runtime-not-ready, with a
+        // clean summary + remediation instead of the raw interpreter error.
+        Assert.StartsWith("speaker-labeling: runtime-not-ready:", result.Warnings[0]);
+        Assert.Contains("retry", result.Warnings[0]);
+        Assert.DoesNotContain("python3 not found on PATH", result.Warnings[0]);
         Assert.Equal(0, sidecar.CallCount);
+    }
+
+    [Fact]
+    public async Task EnrichAsync_Enabled_RuntimeNotReady_WithDiagnosticCode_UsesThatCode()
+    {
+        var runtime = new FakePythonRuntime
+        {
+            NextStatus = PythonRuntimeStatus.NotReady(
+                "python3 not found in PATH",
+                SpeakerLabelingDiagnosticCode.PythonNotFound)
+        };
+        var service = new SpeakerEnrichmentService(
+            runtime,
+            FakeDiarizationSidecar.ThrowsIfCalled(),
+            new ThrowingSpeakerMergeService(),
+            new ThrowingBootstrapper());
+
+        var result = await service.EnrichAsync(
+            wavPath: "/tmp/audio.wav",
+            segments: EmptySegments,
+            metadata: Metadata,
+            options: EnabledOptions(),
+            progress: null,
+            cancellationToken: CancellationToken.None);
+
+        Assert.Null(result.Document);
+        Assert.StartsWith("speaker-labeling: python-not-found:", result.Warnings[0]);
+        Assert.Contains("Install Python", result.Warnings[0]);
     }
 
     [Fact]
@@ -193,7 +224,8 @@ public sealed class SpeakerEnrichmentServiceTests
 
         Assert.Null(result.Document);
         Assert.Single(result.Warnings);
-        Assert.Equal("speaker-labeling: error-response-returned: pyannote: CUDA OOM", result.Warnings[0]);
+        Assert.StartsWith("speaker-labeling: error-response-returned:", result.Warnings[0]);
+        Assert.Contains("reported an error", result.Warnings[0]);
     }
 
     [Fact]
@@ -219,7 +251,8 @@ public sealed class SpeakerEnrichmentServiceTests
 
         Assert.Null(result.Document);
         Assert.Single(result.Warnings);
-        Assert.Equal("speaker-labeling: process-crashed: exit code -6", result.Warnings[0]);
+        Assert.StartsWith("speaker-labeling: process-crashed:", result.Warnings[0]);
+        Assert.Contains("stopped unexpectedly", result.Warnings[0]);
     }
 
     [Fact]
@@ -249,7 +282,8 @@ public sealed class SpeakerEnrichmentServiceTests
 
         Assert.Null(result.Document);
         Assert.Single(result.Warnings);
-        Assert.Equal("speaker-labeling: timed out after 1s", result.Warnings[0]);
+        Assert.StartsWith("speaker-labeling: timeout:", result.Warnings[0]);
+        Assert.Contains("1s", result.Warnings[0]);
     }
 
     [Fact]
