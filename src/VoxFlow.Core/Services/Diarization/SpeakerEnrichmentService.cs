@@ -67,11 +67,11 @@ public sealed class SpeakerEnrichmentService : ISpeakerEnrichmentService
 
         if (!status.IsReady)
         {
-            var warning = $"speaker-labeling: runtime not ready: {status.Error}";
-            _logger.LogWarning("Speaker-labeling runtime is not ready: {Error}", status.Error);
+            var diagnostic = SpeakerLabelingDiagnostics.FromRuntimeStatus(status);
+            LogDiagnostic(diagnostic);
             return new SpeakerEnrichmentResult(
                 Document: null,
-                Warnings: new[] { warning },
+                Warnings: new[] { diagnostic.ToWarningString() },
                 RuntimeBootstrapped: runtimeBootstrapped);
         }
 
@@ -120,23 +120,20 @@ public sealed class SpeakerEnrichmentService : ISpeakerEnrichmentService
         }
         catch (DiarizationSidecarException ex)
         {
-            _logger.LogWarning(
-                ex,
-                "Speaker-labeling sidecar failed with reason {Reason}.",
-                ex.Reason);
+            var diagnostic = SpeakerLabelingDiagnostics.FromSidecar(ex.Reason, ex.Message);
+            _logger.LogWarning(ex, "Speaker-labeling sidecar failed with reason {Reason}.", ex.Reason);
             return new SpeakerEnrichmentResult(
                 Document: null,
-                Warnings: new[] { FormatSidecarWarning(ex.Reason, ex.Message) },
+                Warnings: new[] { diagnostic.ToWarningString() },
                 RuntimeBootstrapped: runtimeBootstrapped);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && timeoutCts.IsCancellationRequested)
         {
-            _logger.LogWarning(
-                "Speaker-labeling timed out after {TimeoutSeconds}s.",
-                options.TimeoutSeconds);
+            var diagnostic = SpeakerLabelingDiagnostics.Timeout(options.TimeoutSeconds);
+            LogDiagnostic(diagnostic);
             return new SpeakerEnrichmentResult(
                 Document: null,
-                Warnings: new[] { $"speaker-labeling: timed out after {options.TimeoutSeconds}s" },
+                Warnings: new[] { diagnostic.ToWarningString() },
                 RuntimeBootstrapped: runtimeBootstrapped);
         }
 
@@ -152,19 +149,16 @@ public sealed class SpeakerEnrichmentService : ISpeakerEnrichmentService
         return new SpeakerEnrichmentResult(document, warnings, runtimeBootstrapped);
     }
 
-    private static string FormatSidecarWarning(SidecarFailureReason reason, string message)
-        => $"speaker-labeling: {ReasonToKebab(reason)}: {message}";
-
-    private static string ReasonToKebab(SidecarFailureReason reason) => reason switch
+    private void LogDiagnostic(SpeakerLabelingDiagnostic diagnostic)
     {
-        SidecarFailureReason.RuntimeNotReady => "runtime-not-ready",
-        SidecarFailureReason.ProcessCrashed => "process-crashed",
-        SidecarFailureReason.Timeout => "timeout",
-        SidecarFailureReason.MalformedJson => "malformed-json",
-        SidecarFailureReason.SchemaViolation => "schema-violation",
-        SidecarFailureReason.ErrorResponseReturned => "error-response-returned",
-        _ => "unknown"
-    };
+        // The user-facing summary/remediation reach callers via the warning; the
+        // raw technical detail stays in the log for diagnosability.
+        _logger.LogWarning(
+            "Speaker-labeling diagnostic {Code}: {Summary} (detail: {TechnicalDetail})",
+            diagnostic.CodeString,
+            diagnostic.Summary,
+            diagnostic.TechnicalDetail ?? "(none)");
+    }
 
     private sealed class DelegateProgress<T> : IProgress<T>
     {
