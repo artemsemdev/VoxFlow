@@ -102,4 +102,14 @@ public sealed class CliArgumentsTests
         Assert.Contains("--no-speakers", help);
         Assert.Contains("--help", help);
     }
+
+    [Fact]
+    public void HelpText_ListsEveryVerb()
+    {
+        var help = CliArguments.HelpText;
+
+        Assert.Contains("transcribe", help);
+        Assert.Contains("doctor", help);
+        Assert.Contains("setup", help);
+    }
 }
