@@ -334,3 +334,20 @@ When speaker labeling cannot run, VoxFlow surfaces a **stable diagnostic code** 
 | `unknown-speaker-labeling-failure` | Unrecognized failure | Check logs; report with technical detail |
 
 The `torch-import-failed` / `pyannote-import-failed` codes are part of the contract and will be produced by the forthcoming `doctor speakers` health check. Plain transcription always continues regardless of which code is raised.
+
+---
+
+## Appendix — runtime stamp
+
+VoxFlow records the last known-good managed runtime in a small **stamp** file so setup/preflight can tell ready / stale / repair-needed apart without re-probing everything each run. It is a fast hint, not the source of truth for live checks.
+
+- **Location:** `~/Library/Application Support/VoxFlow/speaker-labeling-runtime.json` (a sibling of `python-runtime/`, so removing one does not remove the other). Defined by [`DefaultRuntimeStampPath`](../../src/VoxFlow.Core/Services/Python/DefaultRuntimeStampPath.cs).
+- **Contents (schema v1):** runtime id, Python executable + version, requirements hash, sidecar hash, model id, model-cache state, and a `validatedAt` timestamp. See [`SpeakerLabelingRuntimeStamp`](../../src/VoxFlow.Core/Models/SpeakerLabelingRuntimeStamp.cs). It **never** stores a Hugging Face token (or any secret), audio paths, or transcript content.
+- **State mapping** ([`RuntimeStampEvaluator`](../../src/VoxFlow.Core/Services/Python/RuntimeStampEvaluator.cs)): missing → setup-needed; corrupt or unknown schema → repair-needed; requirements/sidecar hash mismatch → stale; otherwise ready.
+- **Reset during troubleshooting:** delete the file. It is safe to remove — the next setup re-creates it after validation:
+
+  ```bash
+  rm "$HOME/Library/Application Support/VoxFlow/speaker-labeling-runtime.json"
+  ```
+
+The stamp is written by the speaker-labeling setup flow (after validation succeeds) and read by the `doctor speakers` health check; those host surfaces are tracked in their own issues.
