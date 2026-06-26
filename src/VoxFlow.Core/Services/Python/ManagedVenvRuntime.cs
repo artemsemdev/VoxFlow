@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using VoxFlow.Core.Interfaces;
+using VoxFlow.Core.Models;
 
 namespace VoxFlow.Core.Services.Python;
 
@@ -31,7 +32,8 @@ public sealed class ManagedVenvRuntime : IPythonRuntime
         }
 
         return Task.FromResult(PythonRuntimeStatus.NotReadyBootstrapable(
-            $"Managed venv not yet created at '{_paths.Root}'. Call CreateVenvAsync to bootstrap."));
+            $"Managed venv not yet created at '{_paths.Root}'. Call CreateVenvAsync to bootstrap.",
+            SpeakerLabelingDiagnosticCode.VenvMissing));
     }
 
     public ProcessStartInfo CreateStartInfo(string scriptPath, IEnumerable<string> arguments)

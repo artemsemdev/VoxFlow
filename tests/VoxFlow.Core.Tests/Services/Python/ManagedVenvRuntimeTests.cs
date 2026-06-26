@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using VoxFlow.Core.Models;
 using VoxFlow.Core.Services.Python;
 using Xunit;
 
@@ -23,6 +24,7 @@ public sealed class ManagedVenvRuntimeTests
         Assert.False(status.IsReady);
         Assert.NotNull(status.Error);
         Assert.Contains("CreateVenv", status.Error, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(SpeakerLabelingDiagnosticCode.VenvMissing, status.DiagnosticCode);
         Assert.Empty(launcher.Invocations);
     }
 

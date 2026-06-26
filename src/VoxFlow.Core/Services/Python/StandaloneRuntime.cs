@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using VoxFlow.Core.Interfaces;
+using VoxFlow.Core.Models;
 
 namespace VoxFlow.Core.Services.Python;
 
@@ -29,13 +30,15 @@ public sealed class StandaloneRuntime : IPythonRuntime
         if (!Directory.Exists(_paths.TreeRoot))
         {
             return PythonRuntimeStatus.NotReady(
-                $"Standalone Python tree not found at '{_paths.TreeRoot}'.");
+                $"Standalone Python tree not found at '{_paths.TreeRoot}'.",
+                SpeakerLabelingDiagnosticCode.PythonNotFound);
         }
 
         if (!File.Exists(_paths.InterpreterPath))
         {
             return PythonRuntimeStatus.NotReady(
-                $"Standalone Python interpreter not found at '{_paths.InterpreterPath}'.");
+                $"Standalone Python interpreter not found at '{_paths.InterpreterPath}'.",
+                SpeakerLabelingDiagnosticCode.PythonNotFound);
         }
 
         var versionProbe = new ProcessStartInfo
@@ -60,7 +63,8 @@ public sealed class StandaloneRuntime : IPythonRuntime
         catch (Exception ex)
         {
             return PythonRuntimeStatus.NotReady(
-                $"Standalone Python interpreter at '{_paths.InterpreterPath}' could not be executed: {ex.Message}");
+                $"Standalone Python interpreter at '{_paths.InterpreterPath}' could not be executed: {ex.Message}",
+                SpeakerLabelingDiagnosticCode.PythonNotFound);
         }
 
         var combined = string.IsNullOrWhiteSpace(result.StdOut) ? result.StdErr : result.StdOut;
@@ -68,13 +72,15 @@ public sealed class StandaloneRuntime : IPythonRuntime
         if (versionString is null)
         {
             return PythonRuntimeStatus.NotReady(
-                $"Could not parse Python version from '{combined.Trim()}'.");
+                $"Could not parse Python version from '{combined.Trim()}'.",
+                SpeakerLabelingDiagnosticCode.PythonVersionUnsupported);
         }
 
         if (!Version.TryParse(versionString, out var parsed) || parsed < MinimumVersion)
         {
             return PythonRuntimeStatus.NotReady(
-                $"Python {versionString} is below the required minimum of {MinimumVersion}.");
+                $"Python {versionString} is below the required minimum of {MinimumVersion}.",
+                SpeakerLabelingDiagnosticCode.PythonVersionUnsupported);
         }
 
         return PythonRuntimeStatus.Ready(_paths.InterpreterPath, versionString);
