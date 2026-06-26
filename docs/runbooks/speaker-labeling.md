@@ -309,3 +309,28 @@ The feature is intentionally narrow for Phase 1/2/3. See ADR-024 "Not in initial
 ## 14. Changelog
 
 - **2026-04-19** — Runbook introduced as part of Phase 3 (P3.3). Covers ManagedVenv + SystemPython modes, the four HF failure diagnostics surfaced by `voxflow_diarize.py`, the `VOXFLOW_RUN_REQUIRES_PYTHON_TESTS` opt-in, and the CLI/MCP/Desktop enablement paths shipped in P3.1 / P3.2 / P2.2. `Standalone` mode is documented as deferred pending the `python-build-standalone` spike outcome.
+
+---
+
+## Appendix — speaker-labeling diagnostic codes
+
+When speaker labeling cannot run, VoxFlow surfaces a **stable diagnostic code** instead of a raw Python/pyannote error. Codes appear in `EnrichmentWarnings` as `speaker-labeling: <code>: <summary> <next action>`; the raw technical detail goes to the logs. The codes are defined in [`SpeakerLabelingDiagnosticCode`](../../src/VoxFlow.Core/Models/SpeakerLabelingDiagnosticCode.cs) and produced by [`SpeakerLabelingDiagnostics`](../../src/VoxFlow.Core/Services/Diarization/SpeakerLabelingDiagnostics.cs).
+
+| Code | Meaning | Typical next action |
+|---|---|---|
+| `python-not-found` | No supported Python runtime resolved | Install Python 3.10+, or use `ManagedVenv` mode |
+| `python-version-unsupported` | Python is older than 3.10 | Install Python 3.10 or newer |
+| `venv-missing` | Managed runtime not installed yet | Run the managed setup (§3) |
+| `venv-bootstrap-failed` | Managed runtime install failed | Check disk/network, retry setup; see logs |
+| `hf-token-missing` | Hugging Face token required and absent | Set `HUGGING_FACE_HUB_TOKEN` (§9) |
+| `model-license-required` | Model license not accepted | Accept the license on Hugging Face (§9) |
+| `model-not-cached` | Model not in local cache | Run setup with a valid token to download it |
+| `runtime-not-ready` | Runtime not ready at diarization start (unclassified) | Set up the runtime, then retry |
+| `process-crashed` | Sidecar stopped unexpectedly | Re-run; if it persists, see §10 |
+| `timeout` | Diarization exceeded the timeout | Raise `timeoutSeconds` or use shorter audio (§11) |
+| `malformed-json` | Sidecar emitted unreadable output | Reinstall the runtime; check for stdout corruption (§10) |
+| `schema-violation` | Sidecar output failed schema validation | Match VoxFlow + runtime versions; report if it persists |
+| `error-response-returned` | Sidecar returned an error envelope | See logs (often token/license — §9) |
+| `unknown-speaker-labeling-failure` | Unrecognized failure | Check logs; report with technical detail |
+
+The `torch-import-failed` / `pyannote-import-failed` codes are part of the contract and will be produced by the forthcoming `doctor speakers` health check. Plain transcription always continues regardless of which code is raised.
