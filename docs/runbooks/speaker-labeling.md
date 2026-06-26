@@ -350,4 +350,37 @@ VoxFlow records the last known-good managed runtime in a small **stamp** file so
   rm "$HOME/Library/Application Support/VoxFlow/speaker-labeling-runtime.json"
   ```
 
-The stamp is written by the speaker-labeling setup flow (after validation succeeds) and read by the `doctor speakers` health check; those host surfaces are tracked in their own issues.
+The stamp is written by the speaker-labeling setup flow (after validation succeeds) and read by the `doctor speakers` health check; the setup host surface is tracked in its own issue.
+
+---
+
+## Appendix — `voxflow doctor speakers`
+
+A health check that tells you whether speaker labeling is ready and, if not, the single next action — without you having to read logs or understand pyannote internals.
+
+```bash
+voxflow doctor speakers          # human-readable report
+voxflow doctor speakers --json   # machine-readable (for the Desktop surface)
+```
+
+Exit code: **0** ready, **1** not ready (setup/repair needed), **2** usage error.
+
+Each line is `OK` / `FAIL` / `SKIP`:
+
+```text
+Speaker labeling: not ready
+
+OK     configuration: loaded
+OK     runtime mode: ManagedVenv
+OK     python runtime: managed at …/VoxFlow/python-runtime/bin/python3
+FAIL   runtime stamp: no runtime record — not set up
+SKIP   hugging face token: not set — needed to download the model if it is not cached
+OK     model cache: pyannote/speaker-diarization-3.1 is cached
+SKIP   dependency imports: torch / pyannote import not checked here (requires running the runtime)
+SKIP   sidecar smoke test: not run here (requires running the runtime)
+
+Next action:
+  Run setup to install the speaker-labeling runtime.
+```
+
+What it checks today: configuration loads, runtime mode, Python runtime readiness (preflight), the managed runtime stamp (§ Appendix — runtime stamp), the Hugging Face token, and the model cache. The **dependency-import** and **sidecar smoke** checks are reported as `SKIP` because they require running the interpreter; they are produced by the smoke-test work. The check never loads the diarization model itself.
