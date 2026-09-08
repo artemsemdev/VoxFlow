@@ -37,7 +37,7 @@ final class Recorder<Element: Sendable>: Sendable {
     }
 }
 
-@Suite("DictationController")
+@Suite("DictationController", .timeLimit(.minutes(1)))
 struct DictationControllerTests {
     final class Harness {
         let mic = FakeMicrophone()
@@ -184,6 +184,34 @@ struct DictationControllerTests {
         #expect(clipboard.items == ["so far"])
     }
 
+    @Test("elapsed tracks time since the dictation started while listening/processing, nil otherwise")
+    func elapsedTime() async throws {
+        let h = await Harness()
+        #expect(await h.controller.elapsed == nil)
+        await h.controller.fnDown()
+        _ = await h.next()
+        await h.mic.waitUntilCapturing()
+        await h.clock.waitForSleepers(1)
+        await h.clock.advance(by: 0.25)
+        _ = await h.next()                                  // listening
+        #expect(await h.controller.elapsed == 0.25)
+        await h.clock.advance(by: 2)
+        #expect(await h.controller.elapsed == 2.25)
+        await h.controller.fnUp()
+        guard case .processing = await h.next() else { Issue.record("expected processing"); return }
+        #expect(await h.controller.elapsed == 0)
+    }
+
+    @Test("currentAndChanges yields the current state before any subsequent change (M3)")
+    func currentAndChangesYieldsCurrentFirst() async throws {
+        let h = await Harness()
+        await h.controller.fnDown()
+        var iterator = await h.controller.currentAndChanges().makeAsyncIterator()
+        #expect(await iterator.next() == .armed(Pending(downAt: 0, fnIsDown: true, resolvedMode: nil)))
+        await h.controller.fnUp()
+        #expect(await iterator.next() == .tapped(Pending(downAt: 0, fnIsDown: false, resolvedMode: nil)))
+    }
+
     @Test("a torn-down capture's late result is never inserted or saved into a newer one, even mid-processing")
     func staleCaptureIgnored() async throws {
         let hold = Gate()
@@ -229,8 +257,11 @@ struct DictationControllerTests {
         // The current dictation still completes normally...
         #expect(await states.next() == .inserted(appName: "Mail", words: 2, limitReached: false))
         // ...and exactly once: the discarded capture's late result never reached insertion or history,
-        // even though it shares the same text/shape and arrived while `.processing` was live.
-        await Task.yield()
+        // even though it shares the same text/shape and arrived while `.processing` was live. Wait for
+        // both parked `transcribe()` calls to have actually returned (not a single `Task.yield()`,
+        // which doesn't guarantee the stale capture's continuation was even scheduled) before asserting —
+        // otherwise the assertion could pass vacuously even with the `captureID` guard removed.
+        await transcriber.waitForReturns(2)
         #expect(inserter.insertedTexts.count == 1)
         await saved.waitUntilCount(1)
         #expect(saved.items.count == 1)

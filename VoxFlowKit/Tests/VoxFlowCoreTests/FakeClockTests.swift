@@ -3,7 +3,7 @@ import Testing
 import VoxFlowCore
 import VoxFlowTestSupport
 
-@Suite("FakeClock")
+@Suite("FakeClock", .timeLimit(.minutes(1)))
 struct FakeClockTests {
     @Test("advance resumes sleepers whose deadline passed, in deadline order")
     func advance() async throws {

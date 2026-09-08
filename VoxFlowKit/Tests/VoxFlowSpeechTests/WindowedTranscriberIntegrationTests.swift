@@ -6,7 +6,7 @@ import VoxFlowDictation
 @testable import VoxFlowSpeech
 
 @Suite("WindowedTranscriber over WhisperCppEngine (RequiresModel)", .enabled(if: InstalledModel.url != nil,
-       "No Whisper model in ~/Library/Application Support/VoxFlow/Models"))
+       "No Whisper model in ~/Library/Application Support/VoxFlow/Models"), .timeLimit(.minutes(1)))
 struct WindowedTranscriberIntegrationTests {
     @Test("attention-10s.wav in 100 ms chunks yields the same words as one batch")
     func windowsMatchBatch() async throws {

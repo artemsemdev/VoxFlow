@@ -30,9 +30,19 @@ public actor RetentionRunner {
         }
     }
 
-    public func stop() { task?.cancel(); task = nil }
+    /// Stops the run loop and resumes every pending `waitForPass` waiter (even one whose count will
+    /// now never be reached) so a `stop()` racing a `waitForPass` returns instead of hanging forever;
+    /// callers should treat `waitForPass` returning after `stop()` as "no more passes are coming",
+    /// not as proof the requested count was actually reached.
+    public func stop() {
+        task?.cancel(); task = nil
+        let pending = waiters
+        waiters.removeAll()
+        pending.forEach { $0.1.resume() }
+    }
 
-    /// Suspends until at least `count` purge passes have run (tests).
+    /// Suspends until at least `count` purge passes have run — or `stop()` is called first, in which
+    /// case this returns early without the count having been reached (see `stop()`).
     public func waitForPass(_ count: Int) async {
         if passes >= count { return }
         await withCheckedContinuation { waiters.append((count, $0)) }

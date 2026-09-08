@@ -5,7 +5,7 @@ import VoxFlowCore
 import VoxFlowTestSupport
 @testable import VoxFlowStorage
 
-@Suite("Retention")
+@Suite("Retention", .timeLimit(.minutes(1)))
 struct RetentionTests {
     @Test("policy cutoff is now minus days; 0 days means keep forever")
     func policy() {

@@ -4,7 +4,8 @@ import VoxFlowCore
 @testable import VoxFlowAudio
 
 @Suite("MicrophoneSource (RequiresMicrophone)",
-       .enabled(if: ProcessInfo.processInfo.environment["VOXFLOW_MIC_TESTS"] == "1", "Set VOXFLOW_MIC_TESTS=1 to capture from the default input"))
+       .enabled(if: ProcessInfo.processInfo.environment["VOXFLOW_MIC_TESTS"] == "1", "Set VOXFLOW_MIC_TESTS=1 to capture from the default input"),
+       .timeLimit(.minutes(1)))
 struct MicrophoneSourceIntegrationTests {
     @Test("delivers 100 ms chunks at 16 kHz and stops when the consumer cancels")
     func captures() async throws {

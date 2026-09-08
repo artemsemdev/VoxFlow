@@ -4,7 +4,7 @@ import VoxFlowCore
 import VoxFlowTestSupport
 @testable import VoxFlowDictation
 
-@Suite("WindowedTranscriber")
+@Suite("WindowedTranscriber", .timeLimit(.minutes(1)))
 struct WindowedTranscriberTests {
     func feed(_ chunks: [AudioChunk]) -> AsyncStream<AudioChunk> {
         AsyncStream { c in chunks.forEach { c.yield($0) }; c.finish() }
@@ -72,8 +72,15 @@ struct WindowedTranscriberTests {
     @Test("engine failure surfaces as DictationError.engineFailed")
     func engineFailure() async throws {
         let engine = FakeSpeechEngine(script: [])   // never loaded → modelNotLoaded
-        await #expect(throws: DictationError.engineFailed("modelNotLoaded")) {
+        do {
             _ = try await WindowedTranscriber(engine: engine).transcribe(feed([voiced(1)]), options: TranscriptionOptions(language: "en")) { _ in }
+            Issue.record("expected DictationError.engineFailed")
+        } catch DictationError.engineFailed {
+            // expected — matched on the case, not the payload (M8): the machine replaces the payload
+            // with a fixed message anyway, so a test pinned to reflection output of the raw string is
+            // both fragile and testing the wrong thing.
+        } catch {
+            Issue.record("expected .engineFailed, got \(error)")
         }
     }
 }

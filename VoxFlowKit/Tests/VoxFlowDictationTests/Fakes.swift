@@ -10,6 +10,9 @@ final class FakeDictationTranscriber: DictationTranscribing, Sendable {
         var received: [AudioChunk] = []
         var receivedWaiters: [(count: Int, continuation: CheckedContinuation<Void, Never>)] = []
         var cancelledWaiters: [CheckedContinuation<Void, Never>] = []
+        /// How many `transcribe()` calls have returned (by throwing or by returning normally).
+        var returned = 0
+        var returnedWaiters: [(count: Int, continuation: CheckedContinuation<Void, Never>)] = []
     }
     private let state = Mutex(State())
     /// When set, `transcribe` awaits this gate after the feed ends and before returning —
@@ -55,6 +58,29 @@ final class FakeDictationTranscriber: DictationTranscribing, Sendable {
         }
     }
 
+    /// Suspends until at least `count` `transcribe()` calls have returned (thrown or returned
+    /// normally) — for a test that needs to know a specific call has actually finished, rather than
+    /// hoping a bare `Task.yield()` happened to schedule far enough (M7).
+    func waitForReturns(_ count: Int) async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let ready = state.withLock { s -> Bool in
+                if s.returned >= count { return true }
+                s.returnedWaiters.append((count, continuation)); return false
+            }
+            if ready { continuation.resume() }
+        }
+    }
+
+    private func markReturned() {
+        let waiters = state.withLock { s -> [CheckedContinuation<Void, Never>] in
+            s.returned += 1
+            let ready = s.returnedWaiters.filter { $0.count <= s.returned }
+            s.returnedWaiters.removeAll { $0.count <= s.returned }
+            return ready.map(\.continuation)
+        }
+        waiters.forEach { $0.resume() }
+    }
+
     func transcribe(_ chunks: AsyncStream<AudioChunk>, options: TranscriptionOptions,
                     onEvent: @Sendable @escaping (DictationEvent) async -> Void) async throws -> DictationResult {
         state.withLock { $0.calls += 1 }
@@ -69,6 +95,7 @@ final class FakeDictationTranscriber: DictationTranscribing, Sendable {
             waiters.forEach { $0.resume() }
         }
         if let hold { await hold.wait() }
+        defer { markReturned() }
         if !ignoresCancellation, Task.isCancelled {
             let waiters = state.withLock { s -> [CheckedContinuation<Void, Never>] in
                 s.cancelled += 1

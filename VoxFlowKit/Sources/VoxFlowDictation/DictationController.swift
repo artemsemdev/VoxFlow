@@ -53,10 +53,32 @@ public actor DictationController {
 
     public var state: FlowBarState { machine.state }
 
+    /// Seconds since the current dictation started, from this controller's (monotonic) clock — nil
+    /// outside `.listening`/`.processing`. History timestamps use `Date`; this is the HUD's own
+    /// "00:12" elapsed counter and the two are not interchangeable (ADR-003).
+    public var elapsed: TimeInterval? {
+        switch machine.state {
+        case .listening(let l): clock.now() - l.startedAt
+        case .processing(let p): clock.now() - p.startedAt
+        default: nil
+        }
+    }
+
     /// Every subscriber gets each state change after subscribing (not the current state).
     public func states() -> AsyncStream<FlowBarState> {
         let id = UUID()
         let (stream, continuation) = AsyncStream<FlowBarState>.makeStream(bufferingPolicy: .unbounded)
+        subscribers[id] = continuation
+        continuation.onTermination = { [weak self] _ in Task { await self?.removeSubscriber(id) } }
+        return stream
+    }
+
+    /// Like `states()`, but yields the current state into the stream before any changes — safe to
+    /// subscribe *after* reading `state` without missing a change that lands in between (M3).
+    public func currentAndChanges() -> AsyncStream<FlowBarState> {
+        let id = UUID()
+        let (stream, continuation) = AsyncStream<FlowBarState>.makeStream(bufferingPolicy: .unbounded)
+        continuation.yield(machine.state)
         subscribers[id] = continuation
         continuation.onTermination = { [weak self] _ in Task { await self?.removeSubscriber(id) } }
         return stream

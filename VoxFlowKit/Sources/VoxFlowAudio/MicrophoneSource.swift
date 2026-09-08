@@ -21,6 +21,14 @@ public final class MicrophoneSource: MicrophoneCapturing, Sendable {
 /// Everything AVFoundation-side for one capture. All members are touched only on `queue` (setup, restart, stop)
 /// or inside the tap block, which AVAudioEngine serialises on its own render thread — the same confinement
 /// argument as `ContextBox` in `WhisperCppEngine`; hence the one permitted `@unchecked Sendable`.
+///
+/// One handoff is narrower than that confinement claim: `restart()` calls `removeTap` and then
+/// `installTapAndRun()` reassigns `chunker` on `queue`, but a tap callback already in flight when
+/// `removeTap` runs is still executing concurrently on the render thread and may still be reading the
+/// old `chunker` — `removeTap` does not join it. The window is tiny (only opens on a device switch)
+/// and the in-flight callback always finishes against the *old* chunker's state, never a torn one, so
+/// nothing is corrupted — but it means "touched only on `queue` or inside the tap block" is not quite
+/// "never touched from two places at once" across a `restart()`.
 private final class CaptureSession: @unchecked Sendable {
     private let queue = DispatchQueue(label: "dev.artemsem.voxflow.microphone")
     private let engine = AVAudioEngine()
