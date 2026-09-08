@@ -9,6 +9,13 @@ import VoxFlowTestSupport
 /// Settings › Models (design ST-03, ST-03v, ST-03d, ST-03o, SYS-DISK). Two speech models — `big`
 /// (300 000 B, catalog default) / `small` (100 000 B) — plus one style row with an empty checksum,
 /// matching the real Qwen catalog entry that ships in phase 5 (`Row.isAvailable == false`).
+/// Records whether/how often `openStorageSettings()` (SYS-DISK "Free up space…") was called,
+/// without actually opening System Settings during tests.
+final class FakeSystemSettingsOpener: SystemSettingsOpening, @unchecked Sendable {
+    private(set) var openStorageSettingsCallCount = 0
+    func openStorageSettings() { openStorageSettingsCallCount += 1 }
+}
+
 @Suite("ModelsViewModel") @MainActor
 struct ModelsViewModelTests {
     static func payload(_ seed: UInt8, count: Int) -> Data { Data((0..<count).map { UInt8(($0 &+ Int(seed)) % 256) }) }
@@ -39,7 +46,9 @@ struct ModelsViewModelTests {
             ModelStore(directory: dir.url, catalog: ModelsViewModelTests.catalog,
                        downloader: downloader, freeSpace: freeSpace, settings: settings)
         }
-        func viewModel() -> ModelsViewModel { ModelsViewModel(store: store(), catalog: ModelsViewModelTests.catalog) }
+        func viewModel(settingsOpener: any SystemSettingsOpening = FakeSystemSettingsOpener()) -> ModelsViewModel {
+            ModelsViewModel(store: store(), catalog: ModelsViewModelTests.catalog, settingsOpener: settingsOpener)
+        }
         func serveAll() async {
             await downloader.serve(ModelsViewModelTests.bigPayload, at: ModelsViewModelTests.big.downloadURL)
             await downloader.serve(ModelsViewModelTests.smallPayload, at: ModelsViewModelTests.small.downloadURL)
@@ -120,6 +129,36 @@ struct ModelsViewModelTests {
         #expect(await h.downloader.calls.count == 1)
     }
 
+    // MARK: refreshDoesNotClobberActiveDownload (fix round 1, item 1)
+
+    @Test("refresh() while a download is active keeps the live row state instead of a stale store read")
+    func refreshDoesNotClobberActiveDownload() async throws {
+        let h = Harness()
+        await h.serveAll()
+        await h.downloader.setBlockAfterBytes(131_072)
+        let model = h.viewModel()
+        await model.refresh()
+
+        let task = Task { await model.download(Self.big) }
+        await h.downloader.waitUntilBlocked()
+        var midState = model.speechRows.first { $0.id == "big" }?.state
+        for _ in 0..<1_000 where midState != .downloading(bytesWritten: 131_072, total: 300_000) {
+            await Task.yield()
+            midState = model.speechRows.first { $0.id == "big" }?.state
+        }
+        #expect(midState == .downloading(bytesWritten: 131_072, total: 300_000))
+
+        // A refresh triggered while the download is still in flight (e.g. the view's 1 Hz poll)
+        // must not roll the row back to whatever the store's own on-disk read happens to say —
+        // the stream (already reflected in `midState` above) stays authoritative for this row.
+        await model.refresh()
+        #expect(model.speechRows.first { $0.id == "big" }?.state == .downloading(bytesWritten: 131_072, total: 300_000))
+
+        await h.downloader.release()
+        await task.value
+        #expect(model.speechRows.first { $0.id == "big" }?.state == .installed)
+    }
+
     // MARK: 3. insufficientSpace
 
     @Test("insufficient space surfaces the SYS-DISK alert; useSmallerModelInstead falls back to the smaller model")
@@ -164,7 +203,8 @@ struct ModelsViewModelTests {
         let model = h.viewModel()
 
         await model.download(Self.big)
-        #expect(model.alert == .offline(Self.big, bytesWritten: 131_072, total: 300_000))
+        // No speech model is installed yet at this point, so dictation has nothing to fall back to.
+        #expect(model.alert == .offline(Self.big, bytesWritten: 131_072, total: 300_000, dictationKeepsWorking: false))
         #expect(model.speechRows.first { $0.id == "big" }?.state == .paused(bytesWritten: 131_072, total: 300_000))
 
         await model.resume(Self.big)
@@ -172,6 +212,51 @@ struct ModelsViewModelTests {
         #expect(model.speechRows.first { $0.id == "big" }?.state == .installed)
         let calls = await h.downloader.calls
         #expect(calls.map(\.resumedFrom) == [0, 131_072])
+    }
+
+    @Test("offline dictationKeepsWorking is true once another speech model is already installed")
+    func offlineWithFallbackModel() async throws {
+        let h = Harness()
+        await h.serveAll()
+        let model = h.viewModel()
+        await model.download(Self.small)   // small installs first, so it's the fallback
+
+        await h.downloader.setFailAfterBytes(131_072)
+        await model.download(Self.big)
+        #expect(model.alert == .offline(Self.big, bytesWritten: 131_072, total: 300_000, dictationKeepsWorking: true))
+    }
+
+    // MARK: discardDownload (fix round 1, item 3b)
+
+    @Test("discardDownload (ST-03o Cancel download) deletes the partial and never touches the downloader")
+    func discardDownloadResetsToNotInstalled() async throws {
+        let h = Harness()
+        await h.serveAll()
+        await h.downloader.setFailAfterBytes(131_072)
+        let model = h.viewModel()
+
+        await model.download(Self.big)
+        #expect(model.speechRows.first { $0.id == "big" }?.state == .paused(bytesWritten: 131_072, total: 300_000))
+        let callsBeforeDiscard = await h.downloader.calls.count
+
+        await model.discardDownload(Self.big)
+
+        #expect(model.alert == nil)
+        #expect(model.speechRows.first { $0.id == "big" }?.state == .notInstalled)
+        #expect(await h.downloader.calls.count == callsBeforeDiscard)   // discarding never calls the downloader
+    }
+
+    // MARK: openStorageSettings (fix round 1, item 3a)
+
+    @Test("openStorageSettings() delegates to the injected SystemSettingsOpening")
+    func openStorageSettingsDelegates() async throws {
+        let h = Harness()
+        let opener = FakeSystemSettingsOpener()
+        let model = h.viewModel(settingsOpener: opener)
+
+        model.openStorageSettings()
+
+        #expect(opener.openStorageSettingsCallCount == 1)
     }
 
     // MARK: 6. pauseKeepsPartial
@@ -210,7 +295,7 @@ struct ModelsViewModelTests {
         await model.refresh()
 
         await model.requestRemove(Self.big)
-        #expect(model.alert == .removeModel(Self.big))
+        #expect(model.alert == .removeModel(Self.big, keeps: "small"))
 
         await model.confirmRemove()
         #expect(model.alert == nil)
@@ -227,9 +312,28 @@ struct ModelsViewModelTests {
         #expect(message == "big needs \(ModelsViewModel.gigabytes(Self.big.sizeInBytes)) plus 500 MB to unpack. This Mac has 900 MB free.")
     }
 
-    @Test("Remove-model alert copy names the model and frees its size")
+    @Test("Remove-model alert copy names the model, frees its size, and names what stays default")
     func removeCopy() {
         #expect(ModelsViewModel.removeTitle(Self.small) == "Remove small?")
-        #expect(ModelsViewModel.removeMessage(Self.small) == "Frees \(ModelsViewModel.gigabytes(Self.small.sizeInBytes)). You can download it again anytime.")
+        #expect(ModelsViewModel.removeMessage(Self.small, keeps: "big")
+                == "Frees \(ModelsViewModel.gigabytes(Self.small.sizeInBytes)). Dictation keeps using big. You can download it again anytime.")
+        // No other model of the same role remains: the middle sentence is omitted entirely.
+        #expect(ModelsViewModel.removeMessage(Self.small, keeps: nil)
+                == "Frees \(ModelsViewModel.gigabytes(Self.small.sizeInBytes)). You can download it again anytime.")
+    }
+
+    @Test("cannotRemoveOnlyModel alert copy is exact")
+    func cannotRemoveOnlyModelCopy() {
+        #expect(ModelsViewModel.cannotRemoveOnlyModelTitle == "This is the only installed speech model")
+        #expect(ModelsViewModel.cannotRemoveOnlyModelMessage == "Download another model before removing it.")
+    }
+
+    @Test("offline alert copy adds the dictation-keeps-working clause only when true")
+    func offlineCopy() {
+        #expect(ModelsViewModel.offlineTitle == "Download paused — you're offline")
+        let base = ModelsViewModel.offlineMessage(bytesWritten: 131_072, total: 300_000, dictationKeepsWorking: false)
+        #expect(base == "\(ModelsViewModel.gigabytes(131_072)) of \(ModelsViewModel.gigabytes(300_000)) saved. It will resume when you're back online.")
+        let withFallback = ModelsViewModel.offlineMessage(bytesWritten: 131_072, total: 300_000, dictationKeepsWorking: true)
+        #expect(withFallback == base + " Dictation keeps working with your installed model.")
     }
 }

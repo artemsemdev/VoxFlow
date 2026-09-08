@@ -1,6 +1,20 @@
+import AppKit
 import Foundation
 import VoxFlowCore
 import VoxFlowModels
+
+/// Opens macOS System Settings (SYS-DISK "Free up space…"). A protocol so tests can fake it.
+protocol SystemSettingsOpening: Sendable {
+    func openStorageSettings()
+}
+
+/// Production `SystemSettingsOpening`: deep-links straight to the Storage pane.
+struct WorkspaceSystemSettingsOpener: SystemSettingsOpening {
+    func openStorageSettings() {
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.settings.Storage") else { return }
+        NSWorkspace.shared.open(url)
+    }
+}
 
 /// Settings › Models (design ST-03, ST-03v, ST-03d, ST-03o, SYS-DISK). Rows mirror `ModelStore`; alerts are data.
 @Observable @MainActor
@@ -19,10 +33,13 @@ final class ModelsViewModel {
 
     enum Alert: Equatable {
         case insufficientSpace(ModelDescriptor, required: Int64, available: Int64)
-        case removeModel(ModelDescriptor)
+        /// `keeps` is the display name of the model dictation falls back to (the remaining default
+        /// of the same role), or nil if there isn't one — `removeMessage` omits that clause then.
+        case removeModel(ModelDescriptor, keeps: String?)
         case cannotRemoveOnlyModel(ModelDescriptor)
         case downloadFailed(ModelDescriptor, reason: String)
-        case offline(ModelDescriptor, bytesWritten: Int64, total: Int64)
+        /// `dictationKeepsWorking` is true when another speech model is already installed.
+        case offline(ModelDescriptor, bytesWritten: Int64, total: Int64, dictationKeepsWorking: Bool)
     }
 
     private(set) var speechRows: [Row] = []
@@ -32,11 +49,14 @@ final class ModelsViewModel {
 
     private let store: ModelStore
     private let catalog: [ModelDescriptor]
+    private let settingsOpener: any SystemSettingsOpening
     private var installs: [String: Task<Void, Never>] = [:]
 
-    init(store: ModelStore, catalog: [ModelDescriptor] = ModelCatalog.all) {
+    init(store: ModelStore, catalog: [ModelDescriptor] = ModelCatalog.all,
+         settingsOpener: any SystemSettingsOpening = WorkspaceSystemSettingsOpener()) {
         self.store = store
         self.catalog = catalog
+        self.settingsOpener = settingsOpener
     }
 
     func refresh() async {
@@ -49,6 +69,22 @@ final class ModelsViewModel {
             if state == .installed { installedBytes += model.sizeInBytes }
             let row = Row(model: model, state: state, isDefault: (model.role == .speech ? defaultSpeech : defaultStyle) == model.id)
             if model.role == .speech { speech.append(row) } else { style.append(row) }
+        }
+        // Race fix: the `await store.state(of:)` calls above each suspend, and `download()`'s own
+        // stream-consuming loop (`setState`, below) can advance the *live* row several steps further
+        // while this loop is still working through the catalog — or even finish the whole install —
+        // before this function reaches its blanket `speechRows = speech` a few lines down. Assigning
+        // the array we built from those now-stale reads would silently roll a fast-moving download
+        // back to whatever it was partway through. The stream is the source of truth for any model
+        // still actively installing, so for those rows, keep whatever `speechRows`/`styleRows` holds
+        // *right now* (read as late as possible, i.e. after the loop above, not before it) instead of
+        // what was just read from the store.
+        let liveStates = Dictionary(uniqueKeysWithValues: (speechRows + styleRows).map { ($0.id, $0.state) })
+        for index in speech.indices where installs[speech[index].id] != nil {
+            if let live = liveStates[speech[index].id] { speech[index].state = live }
+        }
+        for index in style.indices where installs[style[index].id] != nil {
+            if let live = liveStates[style[index].id] { style[index].state = live }
         }
         speechRows = speech
         styleRows = style
@@ -76,8 +112,11 @@ final class ModelsViewModel {
                 guard let self else { return }
                 self.alert = .insufficientSpace(model, required: required, available: available)
             } catch ModelStoreError.downloadInterrupted(let written) {
+                // Dictation still works if some *other* speech model is already installed — this one
+                // never finished, so it can't be that other model itself.
+                let dictationKeepsWorking = !(await store.installedModels(role: .speech)).isEmpty
                 guard let self else { return }
-                self.alert = .offline(model, bytesWritten: written, total: model.sizeInBytes)
+                self.alert = .offline(model, bytesWritten: written, total: model.sizeInBytes, dictationKeepsWorking: dictationKeepsWorking)
             } catch ModelStoreError.checksumMismatch {
                 guard let self else { return }
                 self.alert = .downloadFailed(model, reason: "The download didn't verify (checksum mismatch). Nothing was installed and the file was deleted.")
@@ -101,23 +140,48 @@ final class ModelsViewModel {
     func pause(_ model: ModelDescriptor) { installs[model.id]?.cancel() }
     func resume(_ model: ModelDescriptor) async { await download(model) }
 
+    /// ST-03o "Cancel download": discards the partial file outright (vs. `pause`, which keeps it).
+    /// A no-op download-wise — nothing is in progress by the time this is offered (the alert only
+    /// shows after the install has already failed/stopped), so the downloader is never touched.
+    func discardDownload(_ model: ModelDescriptor) async {
+        alert = nil
+        try? await store.discardDownload(id: model.id)
+        await refresh()
+    }
+
+    /// SYS-DISK "Free up space…".
+    func openStorageSettings() { settingsOpener.openStorageSettings() }
+
     func requestRemove(_ model: ModelDescriptor) async {
         let others = await store.installedModels(role: model.role).filter { $0.id != model.id }
-        if model.role == .speech, others.isEmpty { alert = .cannotRemoveOnlyModel(model) } else { alert = .removeModel(model) }
+        if model.role == .speech, others.isEmpty {
+            alert = .cannotRemoveOnlyModel(model)
+        } else {
+            let keeps = (others.first(where: \.isDefault) ?? others.first)?.displayName
+            alert = .removeModel(model, keeps: keeps)
+        }
     }
 
     func confirmRemove() async {
-        guard case .removeModel(let model) = alert else { return }
+        guard case .removeModel(let model, _) = alert else { return }
         alert = nil
         do { try await store.remove(id: model.id) } catch { alert = .downloadFailed(model, reason: String(describing: error)) }
         await refresh()
     }
 
-    /// SYS-DISK: "Use the 480 MB model" — start the smallest speech model instead.
+    /// SYS-DISK: "Use the N model" — start the largest speech model smaller than the one that just
+    /// failed instead.
     func useSmallerModelInstead() async {
-        guard case .insufficientSpace = alert else { return }
+        guard case .insufficientSpace(let failed, _, _) = alert else { return }
         alert = nil
-        if let small = catalog.filter({ $0.role == .speech }).min(by: { $0.sizeInBytes < $1.sizeInBytes }) { await download(small) }
+        if let smaller = smallerSpeechModel(than: failed) { await download(smaller) }
+    }
+
+    /// The catalog's largest speech model still smaller than `model` — drives both the SYS-DISK
+    /// "Use the N model" button label and `useSmallerModelInstead()` itself, so the two can't drift.
+    func smallerSpeechModel(than model: ModelDescriptor) -> ModelDescriptor? {
+        catalog.filter { $0.role == .speech && $0.sizeInBytes < model.sizeInBytes }
+            .min { $0.sizeInBytes < $1.sizeInBytes }
     }
 
     func dismissAlert() { alert = nil }
@@ -147,15 +211,20 @@ final class ModelsViewModel {
     }
 
     static func removeTitle(_ model: ModelDescriptor) -> String { "Remove \(model.displayName)?" }
-    static func removeMessage(_ model: ModelDescriptor) -> String {
-        "Frees \(gigabytes(model.sizeInBytes)). You can download it again anytime."
+    static func removeMessage(_ model: ModelDescriptor, keeps: String?) -> String {
+        var message = "Frees \(gigabytes(model.sizeInBytes))."
+        if let keeps { message += " Dictation keeps using \(keeps)." }
+        message += " You can download it again anytime."
+        return message
     }
 
     static let cannotRemoveOnlyModelTitle = "This is the only installed speech model"
     static let cannotRemoveOnlyModelMessage = "Download another model before removing it."
 
     static let offlineTitle = "Download paused — you're offline"
-    static func offlineMessage(bytesWritten: Int64, total: Int64) -> String {
-        "\(gigabytes(bytesWritten)) of \(gigabytes(total)) saved. It will resume when you're back online."
+    static func offlineMessage(bytesWritten: Int64, total: Int64, dictationKeepsWorking: Bool) -> String {
+        var message = "\(gigabytes(bytesWritten)) of \(gigabytes(total)) saved. It will resume when you're back online."
+        if dictationKeepsWorking { message += " Dictation keeps working with your installed model." }
+        return message
     }
 }

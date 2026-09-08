@@ -150,7 +150,7 @@ struct ModelsSettingsView: View {
     private var alertTitle: String {
         switch model.alert {
         case .insufficientSpace: ModelsViewModel.insufficientSpaceTitle
-        case .removeModel(let m): ModelsViewModel.removeTitle(m)
+        case .removeModel(let m, _): ModelsViewModel.removeTitle(m)
         case .cannotRemoveOnlyModel: ModelsViewModel.cannotRemoveOnlyModelTitle
         case .downloadFailed(let m, _): m.displayName
         case .offline: ModelsViewModel.offlineTitle
@@ -161,10 +161,11 @@ struct ModelsSettingsView: View {
     private func alertMessage(_ alert: ModelsViewModel.Alert) -> String {
         switch alert {
         case .insufficientSpace(let m, _, let available): ModelsViewModel.insufficientSpaceMessage(m, available: available)
-        case .removeModel(let m): ModelsViewModel.removeMessage(m)
+        case .removeModel(let m, let keeps): ModelsViewModel.removeMessage(m, keeps: keeps)
         case .cannotRemoveOnlyModel: ModelsViewModel.cannotRemoveOnlyModelMessage
         case .downloadFailed(_, let reason): reason
-        case .offline(_, let written, let total): ModelsViewModel.offlineMessage(bytesWritten: written, total: total)
+        case .offline(_, let written, let total, let dictationKeepsWorking):
+            ModelsViewModel.offlineMessage(bytesWritten: written, total: total, dictationKeepsWorking: dictationKeepsWorking)
         }
     }
 
@@ -172,9 +173,10 @@ struct ModelsSettingsView: View {
     private func alertButtons(_ alert: ModelsViewModel.Alert) -> some View {
         switch alert {
         case .insufficientSpace(let failed, _, _):
-            if let smaller = smallestOtherSpeechModel(than: failed) {
+            if let smaller = model.smallerSpeechModel(than: failed) {
                 Button("Use the \(ModelsViewModel.gigabytes(smaller.sizeInBytes)) model") { Task { await model.useSmallerModelInstead() } }
             }
+            Button("Free up space…") { model.openStorageSettings() }
             Button("Cancel", role: .cancel) { model.dismissAlert() }
         case .removeModel:
             // Design ST-03d: Remove is destructive but *not* the default action — Cancel is safer
@@ -186,14 +188,9 @@ struct ModelsSettingsView: View {
         case .downloadFailed(let failed, _):
             Button("Retry download") { Task { await model.download(failed) } }
             Button("Cancel", role: .cancel) { model.dismissAlert() }
-        case .offline:
+        case .offline(let paused, _, _, _):
             Button("OK", role: .cancel) { model.dismissAlert() }
+            Button("Cancel download") { Task { await model.discardDownload(paused) } }
         }
-    }
-
-    private func smallestOtherSpeechModel(than failed: ModelDescriptor) -> ModelDescriptor? {
-        model.speechRows.map(\.model)
-            .filter { $0.sizeInBytes < failed.sizeInBytes }
-            .min { $0.sizeInBytes < $1.sizeInBytes }
     }
 }
