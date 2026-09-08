@@ -370,4 +370,18 @@ struct FilesViewModelTests {
         await rendered.transcriber.release(Self.a)
         await rendered.settle()
     }
+
+    // MARK: 7 — failure copy (MW-06x)
+
+    @Test("failureMessage matches the MW-06x copy; unsupported type offers no Retry")
+    func failureCopy() {
+        #expect(FilesViewModel.failureMessage(.decodeFailed("corrupt")) ==
+                "Couldn\u{2019}t decode this file — it may be incomplete or corrupt.")
+        #expect(FilesViewModel.failureMessage(.unsupportedType("pages")) ==
+                "Not an audio or video file. Supported: MP3, WAV, M4A, AAC, FLAC, MP4, MOV.")
+        #expect(FilesViewModel.canRetryFailure(.decodeFailed("corrupt")) == true)
+        #expect(FilesViewModel.canRetryFailure(.engineFailed("x")) == true)
+        #expect(FilesViewModel.canRetryFailure(.noModelInstalled) == true)
+        #expect(FilesViewModel.canRetryFailure(.unsupportedType("pages")) == false)
+    }
 }

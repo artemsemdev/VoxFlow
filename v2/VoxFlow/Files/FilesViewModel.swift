@@ -197,6 +197,26 @@ final class FilesViewModel {
         Int((hours * 60 * estimatedRealTimeFactor).rounded(.up))
     }
 
+    /// The MW-06x copy for a failed row. `.decodeFailed`/`.engineFailed`/`.noModelInstalled` read as
+    /// transient — retrying may help; `.unsupportedType` never will, so its row offers no Retry
+    /// (see `canRetryFailure`). `.cancelled` is listed for exhaustiveness only: the queue reports a
+    /// stopped job as `QueueItem.Status.cancelled`, never wrapped in `.failed`.
+    static func failureMessage(_ error: FileTranscriptionError) -> String {
+        switch error {
+        case .decodeFailed: "Couldn’t decode this file — it may be incomplete or corrupt."
+        case .unsupportedType: "Not an audio or video file. Supported: MP3, WAV, M4A, AAC, FLAC, MP4, MOV."
+        case .noModelInstalled: "No speech model installed."
+        case .engineFailed: "Transcription failed. You can try again."
+        case .cancelled: "Stopped before finishing."
+        }
+    }
+
+    /// Whether the failed row's MW-06x actions include Retry (vs. Remove only).
+    static func canRetryFailure(_ error: FileTranscriptionError) -> Bool {
+        if case .unsupportedType = error { return false }
+        return true
+    }
+
     // MARK: Events
 
     private func apply(_ event: FileQueueEvent) {

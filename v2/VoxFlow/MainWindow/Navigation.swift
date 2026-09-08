@@ -4,4 +4,7 @@ import SwiftUI
 @Observable @MainActor
 final class Navigation {
     var page: SidebarPage = .default
+    /// Which Settings tab shows when `page` is `.settings` (design ST-01…06); the Files page's model
+    /// banner sets this to `.models` before switching pages (controller ruling 1).
+    var settingsTab: SettingsTab = .general
 }
