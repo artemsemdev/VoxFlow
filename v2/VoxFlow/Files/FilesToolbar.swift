@@ -19,17 +19,21 @@ struct FilesToolbar: View {
         ("pt", "Português"),
     ]
 
+    /// "Save to " + the abbreviated output folder (design 1c) — the folder button's own label.
+    var folderTitle: String { "Save to \(ResultViewModel.abbreviate(settings.outputFolder))" }
+
     var body: some View {
         VStack(spacing: 10) {
             Divider()
-            HStack(spacing: 20) {
+            HStack(alignment: .bottom, spacing: 20) {
                 formatPicker
                 batchToggle
                 Toggle("Timestamps", isOn: $settings.timestamps)
                     .disabled(!settings.outputFormat.supportsTimestampToggle)
+                    .help(settings.outputFormat.supportsTimestampToggle ? "" : "SRT, VTT and JSON always include timestamps")
                 Spacer()
             }
-            HStack(spacing: 20) {
+            HStack(alignment: .bottom, spacing: 20) {
                 languagePicker
                 saveFolderButton
                 Spacer()
@@ -45,14 +49,25 @@ struct FilesToolbar: View {
         }
     }
 
+    // Caption above the control (not the control's own label) so a segmented picker never wraps
+    // its option titles vertically to fit — `.fixedSize()` keeps the caption from being compressed
+    // by its siblings, and `.labelsHidden()` on the control below drops the (redundant) built-in
+    // label SwiftUI would otherwise still reserve room for.
     private var formatPicker: some View {
-        Picker("Output format", selection: $settings.outputFormat) {
-            ForEach(OutputFormat.allCases, id: \.self) { format in
-                Text(format.displayName).tag(format)
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Output format")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize()
+            Picker("Output format", selection: $settings.outputFormat) {
+                ForEach(OutputFormat.allCases, id: \.self) { format in
+                    Text(format.displayName).tag(format)
+                }
             }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 260)
         }
-        .pickerStyle(.segmented)
-        .frame(maxWidth: 260)
     }
 
     private var batchToggle: some View {
@@ -67,21 +82,31 @@ struct FilesToolbar: View {
     }
 
     private var languagePicker: some View {
-        Picker("Language", selection: $settings.language) {
-            ForEach(Self.languages, id: \.name) { language in
-                Text(language.name).tag(language.code)
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Language")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize()
+            Picker("Language", selection: $settings.language) {
+                ForEach(Self.languages, id: \.name) { language in
+                    Text(language.name).tag(language.code)
+                }
             }
+            .labelsHidden()
+            .frame(width: 180)
         }
-        .frame(maxWidth: 180)
     }
 
     private var saveFolderButton: some View {
         Button {
             isFolderPickerPresented = true
         } label: {
-            Text("Save to \(ResultViewModel.abbreviate(settings.outputFolder))")
+            Label(folderTitle, systemImage: "folder")
         }
-        .buttonStyle(.plain)
-        .foregroundStyle(.secondary)
+        .buttonStyle(.link)
+        .lineLimit(1)
+        .truncationMode(.middle)
+        .help(settings.outputFolder.path)
+        .frame(maxWidth: 260, alignment: .leading)
     }
 }
