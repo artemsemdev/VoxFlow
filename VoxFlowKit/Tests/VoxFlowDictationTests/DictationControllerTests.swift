@@ -8,7 +8,7 @@ import VoxFlowTestSupport
 /// An append-only, thread-safe log of `Element`s a test can synchronize on (mirrors
 /// `FakeClock.waitForSleepers`) — captured behind a class reference for `@Sendable` closures,
 /// since a bare `Mutex` is `@_staticExclusiveOnly` and cannot be extracted from a stored property.
-final class Recorder<Element: Sendable>: @unchecked Sendable {
+final class Recorder<Element: Sendable>: Sendable {
     private struct Waiter: Sendable { let count: Int; let continuation: CheckedContinuation<Void, Never> }
     private struct State { var items: [Element] = []; var waiters: [Waiter] = [] }
     private let state = Mutex(State())
@@ -161,11 +161,11 @@ struct DictationControllerTests {
     @Test("20 s without a result → didn't catch with raw text; copy raw uses the partial")
     func timeout() async throws {
         let slow = FakeDictationTranscriber(result: .empty, events: [.partialText("so far")], hold: Gate())
-        let mic = FakeMicrophone(), clock = FakeClock(), clipboard = Mutex<[String]>([])
+        let mic = FakeMicrophone(), clock = FakeClock(), clipboard = Recorder<String>()
         let controller = DictationController(config: FlowBarConfig(), microphone: mic, transcriber: slow, inserter: FakeTextInserter(), clock: clock,
                                              preflight: { Preflight(excludedApp: nil, secureInput: false, microphone: .granted, model: .loaded) },
                                              loadModel: {}, options: { TranscriptionOptions() }, onSave: { _, _ in },
-                                             copyToClipboard: { t in clipboard.withLock { $0.append(t) } })
+                                             copyToClipboard: { t in clipboard.append(t) })
         var states = await controller.states().makeAsyncIterator()
         await controller.fnDown(); _ = await states.next()
         await mic.waitUntilCapturing()
@@ -181,6 +181,58 @@ struct DictationControllerTests {
         if case .processing = state { state = await states.next() }   // takingLonger flips first at 8 s
         #expect(state == .didntCatch(rawAvailable: true))
         await controller.copyRaw()
-        #expect(clipboard.withLock { $0 } == ["so far"])
+        #expect(clipboard.items == ["so far"])
+    }
+
+    @Test("a torn-down capture's late result is never inserted or saved into a newer one, even mid-processing")
+    func staleCaptureIgnored() async throws {
+        let hold = Gate()
+        let transcriber = FakeDictationTranscriber(
+            result: DictationResult(text: "stale text", rawText: "stale text", segments: [], language: nil, duration: 1, lowConfidence: false),
+            hold: hold, ignoresCancellation: true)
+        let mic = FakeMicrophone(), clock = FakeClock(), inserter = FakeTextInserter()
+        let saved = Recorder<(DictationResult, String?)>()
+        let controller = DictationController(config: FlowBarConfig(), microphone: mic, transcriber: transcriber, inserter: inserter, clock: clock,
+                                             preflight: { Preflight(excludedApp: nil, secureInput: false, microphone: .granted, model: .loaded) },
+                                             loadModel: {}, options: { TranscriptionOptions() },
+                                             onSave: { [saved] r, app in saved.append((r, app)) },
+                                             copyToClipboard: { _ in })
+        var states = await controller.states().makeAsyncIterator()
+
+        // First dictation: armed → listening → escape, while its transcribe() call is still in flight
+        // (parked on `hold`, and `ignoresCancellation` so it will return normally, not throw, once freed).
+        await controller.fnDown()
+        #expect(await states.next() == .armed(Pending(downAt: 0, fnIsDown: true, resolvedMode: nil)))
+        await mic.waitUntilCapturing()
+        await clock.waitForSleepers(1); await clock.advance(by: 0.25)
+        #expect(await states.next() == .listening(Listening(mode: .pushToTalk, startedAt: 0, language: nil)))
+        await controller.escape()
+        #expect(await states.next() == .discarded)
+        await mic.waitUntilStopped()
+
+        // Second dictation, driven all the way to `.processing` — its own transcribe() call is also
+        // parked on the same `hold`, so it hasn't produced a result yet either. The clock already reads
+        // 0.25 from the first dictation's hold timer, so this one's `downAt`/`startedAt` follow from there.
+        await controller.fnDown()
+        #expect(await states.next() == .armed(Pending(downAt: 0.25, fnIsDown: true, resolvedMode: nil)))
+        await mic.waitUntilCapturing()
+        await clock.waitForSleepers(1); await clock.advance(by: 0.25)
+        #expect(await states.next() == .listening(Listening(mode: .pushToTalk, startedAt: 0.25, language: nil)))
+        await controller.fnUp()
+        guard case .processing = await states.next() else { Issue.record("expected processing"); return }
+
+        // Release both calls at once, with the second dictation still `.processing` — the worst case:
+        // the first (discarded) capture's late result is the one that must be rejected, not the machine's
+        // own `.processing`-only gating (which would just as happily accept either).
+        await hold.open()
+
+        // The current dictation still completes normally...
+        #expect(await states.next() == .inserted(appName: "Mail", words: 2, limitReached: false))
+        // ...and exactly once: the discarded capture's late result never reached insertion or history,
+        // even though it shares the same text/shape and arrived while `.processing` was live.
+        await Task.yield()
+        #expect(inserter.insertedTexts.count == 1)
+        await saved.waitUntilCount(1)
+        #expect(saved.items.count == 1)
     }
 }

@@ -194,6 +194,17 @@ struct FlowBarMachineTests {
         #expect(m.handle(.timer(.processingTimeout), now: 21) == [.abortCapture, .startTimer(.dismiss, seconds: 4)])
         #expect(m.state == .didntCatch(rawAvailable: true))
         #expect(m.handle(.copyRawRequested, now: 22) == [.copyToClipboard("so far")])
+
+        // The same no-op-but-recorded handling also applies to the other two pre-listening states.
+        var tapped = FlowBarMachine()
+        tapped.state = .tapped(Pending(downAt: 0, fnIsDown: false, resolvedMode: nil))
+        #expect(tapped.handle(.partialText("still here"), now: 0.2).isEmpty)
+        #expect(tapped.state == .tapped(Pending(downAt: 0, fnIsDown: false, resolvedMode: nil)))
+
+        var loading = FlowBarMachine()
+        loading.state = .loadingModel(Pending(downAt: 0, fnIsDown: true, resolvedMode: nil))
+        #expect(loading.handle(.partialText("still here"), now: 0.2).isEmpty)
+        #expect(loading.state == .loadingModel(Pending(downAt: 0, fnIsDown: true, resolvedMode: nil)))
     }
 
     @Test("idle hint follows the default mode")

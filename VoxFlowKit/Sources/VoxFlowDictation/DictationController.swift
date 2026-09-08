@@ -19,7 +19,15 @@ public actor DictationController {
     private var feed: AsyncStream<AudioChunk>.Continuation?
     private var captureTask: Task<Void, Never>?
     private var transcribeTask: Task<Void, Never>?
-    private var timers: [FlowBarTimer: Task<Void, Never>] = [:]
+    /// Bumped by `teardown()` (so also by `startCapture()`, which calls it first): invalidates every
+    /// callback still in flight from a torn-down capture, so a stale mic chunk, transcript, insertion,
+    /// or mic/transcription failure from an aborted dictation can never reach a newer one.
+    private var captureID: UInt64 = 0
+    /// One id per `.startTimer`/`.cancelTimer` registration for `id`: `timerFired` only acts when the
+    /// generation it was created with still matches, so a timer whose `sleep` already returned when it
+    /// gets superseded by a fresh same-id registration can't fire in the new registration's place.
+    private var timers: [FlowBarTimer: (generation: UInt64, task: Task<Void, Never>)] = [:]
+    private var nextTimerGeneration: UInt64 = 0
     private var subscribers: [UUID: AsyncStream<FlowBarState>.Continuation] = [:]
     public private(set) var lastResult: DictationResult?
     private var lastAppName: String?
@@ -74,78 +82,105 @@ public actor DictationController {
         case .finishCapture: captureTask?.cancel(); captureTask = nil; feed?.finish(); feed = nil
         case .abortCapture: teardown(); lastResult = nil
         case .loadModel:
-            Task { [loadModel] in
-                do { try await loadModel(); self.handle(.modelLoaded) }
+            Task {
+                do { try await self.loadModel(); self.handle(.modelLoaded) }
                 catch { self.handle(.modelLoadFailed(String(describing: error))) }
             }
         case .startTimer(let id, let seconds):
-            timers[id]?.cancel()
-            timers[id] = Task { [clock] in
-                do { try await clock.sleep(for: seconds) } catch { return }
-                self.timerFired(id)
-            }
-        case .cancelTimer(let id): timers[id]?.cancel(); timers[id] = nil
+            timers[id]?.task.cancel()
+            let generation = nextTimerGeneration
+            nextTimerGeneration &+= 1
+            timers[id] = (generation, Task {
+                do { try await self.clock.sleep(for: seconds) } catch { return }
+                self.timerFired(id, generation)
+            })
+        case .cancelTimer(let id): timers[id]?.task.cancel(); timers[id] = nil
         case .insert(let text):
-            Task { [inserter] in
-                let result = await inserter.insert(text)
-                self.recordInsertion(result)
+            let id = captureID
+            Task {
+                let result = await self.inserter.insert(text)
+                self.recordInsertion(result, capture: id)
             }
         case .copyToClipboard(let text): copyToClipboard(text)
         case .saveHistory:
-            if let result = lastResult { Task { [onSave, lastAppName] in await onSave(result, lastAppName) } }
+            // Snapshot `lastAppName` now: it's read again (and reset) by the *next* `startCapture`,
+            // which must not change what this already-in-flight save reports.
+            if let result = lastResult {
+                let appName = lastAppName
+                Task { await self.onSave(result, appName) }
+            }
         }
     }
 
-    private func recordInsertion(_ result: InsertionResult) {
-        if case .inserted(let app) = result { lastAppName = app }
+    private func recordInsertion(_ result: InsertionResult, capture id: UInt64) {
+        guard id == captureID else { return }
+        lastAppName = if case .inserted(let app) = result { app } else { nil }
         handle(.insertionFinished(result))
     }
 
-    private func timerFired(_ id: FlowBarTimer) {
-        guard timers[id] != nil else { return }      // cancelled between wake-up and delivery
+    private func timerFired(_ id: FlowBarTimer, _ generation: UInt64) {
+        // Stale if cancelled outright (no entry) or if a fresh same-id registration replaced it.
+        guard let entry = timers[id], entry.generation == generation else { return }
         timers[id] = nil
         handle(.timer(id))
     }
 
     private func startCapture() {
         teardown()
+        lastAppName = nil
+        let id = captureID
         let (stream, continuation) = AsyncStream<AudioChunk>.makeStream(bufferingPolicy: .unbounded)
         feed = continuation
-        captureTask = Task { [microphone] in
+        captureTask = Task {
             do {
-                for try await event in microphone.start() {
-                    if case .chunk(let chunk) = event { self.receive(chunk) }
+                for try await event in self.microphone.start() {
+                    guard !Task.isCancelled, self.captureID == id else { break }
+                    if case .chunk(let chunk) = event { self.receive(chunk, capture: id) }
                 }
             } catch let error as MicrophoneError {
-                self.handle(.microphoneFailed(error))
+                self.microphoneFailed(error, capture: id)
             } catch {
-                self.handle(.microphoneFailed(.engineFailed(String(describing: error))))
+                self.microphoneFailed(.engineFailed(String(describing: error)), capture: id)
             }
         }
-        transcribeTask = Task { [transcriber, options] in
+        transcribeTask = Task {
             do {
-                let result = try await transcriber.transcribe(stream, options: options()) { event in await self.receive(event) }
-                self.finished(result)
+                let result = try await self.transcriber.transcribe(stream, options: self.options()) { event in await self.receive(event, capture: id) }
+                self.finished(result, capture: id)
             } catch DictationError.cancelled {
             } catch {
-                self.handle(.transcriptionFailed(String(describing: error)))
+                self.transcriptionFailed(String(describing: error), capture: id)
             }
         }
     }
 
-    private func receive(_ chunk: AudioChunk) { feed?.yield(chunk); handle(.level(rms: chunk.rms)) }
-    private func receive(_ event: DictationEvent) {
+    private func receive(_ chunk: AudioChunk, capture id: UInt64) {
+        guard id == captureID else { return }
+        feed?.yield(chunk); handle(.level(rms: chunk.rms))
+    }
+    private func receive(_ event: DictationEvent, capture id: UInt64) {
+        guard id == captureID else { return }
         switch event {
         case .language(let d): handle(.languageDetected(d))
         case .partialText(let t): handle(.partialText(t))
         }
     }
-    private func finished(_ result: DictationResult) {
+    private func finished(_ result: DictationResult, capture id: UInt64) {
+        guard id == captureID else { return }
         lastResult = result
         handle(.transcriptReady(text: result.text, lowConfidence: result.lowConfidence))
     }
+    private func microphoneFailed(_ error: MicrophoneError, capture id: UInt64) {
+        guard id == captureID else { return }
+        handle(.microphoneFailed(error))
+    }
+    private func transcriptionFailed(_ description: String, capture id: UInt64) {
+        guard id == captureID else { return }
+        handle(.transcriptionFailed(description))
+    }
 
     private func teardown() {
+        captureID &+= 1   // invalidates every callback still in flight from the old capture
         captureTask?.cancel(); captureTask = nil
         transcribeTask?.cancel(); transcribeTask = nil
         feed?.finish(); feed = nil

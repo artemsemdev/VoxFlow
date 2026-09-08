@@ -38,7 +38,13 @@ public final class FakeMicrophone: MicrophoneCapturing, Sendable {
         }
     }
 
-    public func emit(_ chunk: AudioChunk) { state.withLock { _ = $0.continuation?.yield(.chunk(chunk)) } }
+    public func emit(_ chunk: AudioChunk) {
+        // Same hardening as `fail`: extract the continuation under the lock and call it outside, so a
+        // future `emit` that can trigger `onTermination` (or any producer-side callback) can't re-enter
+        // the (non-reentrant) `Mutex` on this thread.
+        let continuation = state.withLock { $0.continuation }
+        _ = continuation?.yield(.chunk(chunk))
+    }
     public func emit(rms: Float, seconds: Double = 0.1) {
         let count = Int(seconds * AudioSamples.sampleRate)
         emit(AudioChunk(samples: Array(repeating: rms, count: count)))

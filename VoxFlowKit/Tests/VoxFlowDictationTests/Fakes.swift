@@ -15,10 +15,16 @@ final class FakeDictationTranscriber: DictationTranscribing, Sendable {
     /// When set, `transcribe` awaits this gate after the feed ends and before returning —
     /// lets a test hold "processing" open past the feed's end (e.g. to let a timer fire first).
     private let hold: Gate?
+    /// Models a transcribe call whose own cancellation check ran just before the real cancellation
+    /// landed (`WindowedTranscriber`'s narrow window): it returns the scripted result normally instead
+    /// of throwing `.cancelled`, so a test can prove a controller-side guard — not this fake's own
+    /// cancellation check — is what keeps a torn-down capture's result out of a newer one.
+    private let ignoresCancellation: Bool
 
-    init(result: DictationResult, events: [DictationEvent] = [], hold: Gate? = nil) {
+    init(result: DictationResult, events: [DictationEvent] = [], hold: Gate? = nil, ignoresCancellation: Bool = false) {
         state.withLock { $0.result = result; $0.events = events }
         self.hold = hold
+        self.ignoresCancellation = ignoresCancellation
     }
 
     var calls: Int { state.withLock { $0.calls } }
@@ -63,7 +69,7 @@ final class FakeDictationTranscriber: DictationTranscribing, Sendable {
             waiters.forEach { $0.resume() }
         }
         if let hold { await hold.wait() }
-        if Task.isCancelled {
+        if !ignoresCancellation, Task.isCancelled {
             let waiters = state.withLock { s -> [CheckedContinuation<Void, Never>] in
                 s.cancelled += 1
                 defer { s.cancelledWaiters.removeAll() }
