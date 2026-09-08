@@ -31,15 +31,13 @@ final class FilesViewModel {
     var selected: ExportedResult?
     private(set) var needsModel = false
     var isDragOver = false
-    private(set) var exportedURLs: [UUID: URL] = [:]
-    private(set) var exportErrors: [UUID: String] = [:]
     private(set) var etaSeconds: [UUID: TimeInterval] = [:]
 
     private let queue: FileQueue
     private let settings: FilesSettings
     private let modelStore: ModelStore
     private let durations: any AudioDurationProviding
-    private let makeExporter: () -> TranscriptExporter
+    private let exports: ExportCoordinator
     private let now: () -> Date
     private var estimators: [UUID: ETAEstimator] = [:]
     private var lastRender: [UUID: Date] = [:]
@@ -49,12 +47,12 @@ final class FilesViewModel {
     private nonisolated let eventTask = Mutex<Task<Void, Never>?>(nil)
 
     init(queue: FileQueue, settings: FilesSettings, modelStore: ModelStore, durations: any AudioDurationProviding,
-         exporter: @escaping () -> TranscriptExporter, now: @escaping () -> Date = { Date() }) {
+         exports: ExportCoordinator, now: @escaping () -> Date = { Date() }) {
         self.queue = queue
         self.settings = settings
         self.modelStore = modelStore
         self.durations = durations
-        self.makeExporter = exporter
+        self.exports = exports
         self.now = now
         // `[weak self]` only helps if nothing downstream re-establishes a *strong* reference across
         // a suspension point. `guard let self else { return }` at the top of an async closure does
@@ -179,12 +177,12 @@ final class FilesViewModel {
 
     func open(_ item: QueueItem) {
         guard case .done(let document) = item.status else { return }
-        selected = ExportedResult(item: item, document: document, url: exportedURLs[item.id])
+        selected = ExportedResult(item: item, document: document, url: exports.url(for: item.id))
     }
 
     func closeResult() { selected = nil }
-    func exported(for item: QueueItem) -> URL? { exportedURLs[item.id] }
-    func exportError(for item: QueueItem) -> String? { exportErrors[item.id] }
+    func exported(for item: QueueItem) -> URL? { exports.url(for: item.id) }
+    func exportError(for item: QueueItem) -> String? { exports.error(for: item.id) }
 
     /// "about 3 min left" for a running row, throttled to one update per second (design 3d).
     func etaText(for item: QueueItem) -> String? {
@@ -272,17 +270,8 @@ final class FilesViewModel {
             items[index] = item
         case .removed(let id):
             items.removeAll { $0.id == id }
-            exportedURLs[id] = nil
-            exportErrors[id] = nil
         case .finished(let item):
             if let index = items.firstIndex(where: { $0.id == item.id }) { items[index] = item }
-            if case .done(let document) = item.status {
-                do {
-                    exportedURLs[item.id] = try makeExporter().export(document, format: settings.outputFormat, timestamps: settings.timestamps)
-                } catch {
-                    exportErrors[item.id] = error.localizedDescription
-                }
-            }
         case .idle:
             break
         }

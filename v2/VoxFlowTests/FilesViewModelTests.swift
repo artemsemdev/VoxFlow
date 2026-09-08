@@ -59,6 +59,7 @@ struct FilesViewModelTests {
         let store: ModelStore
         let queue: FileQueue
         let clock: TestClock
+        let exports: ExportCoordinator
         let viewModel: FilesViewModel
 
         /// `clockStep` defaults to 2 s per `now()` call, comfortably above the 1 s render throttle
@@ -85,8 +86,9 @@ struct FilesViewModelTests {
             if !preSeed.isEmpty { await queue.add(preSeed) }
             let exportDir = exportDirectory ?? dir.file("Transcripts")
             clock = TestClock(step: clockStep)
+            exports = ExportCoordinator(queue: queue, settings: settings, exporter: { TranscriptExporter(directory: exportDir) })
             viewModel = FilesViewModel(queue: queue, settings: settings, modelStore: store, durations: self.durations,
-                                       exporter: { TranscriptExporter(directory: exportDir) }, now: clock.now)
+                                       exports: exports, now: clock.now)
             await viewModel.refreshModelState()
         }
 

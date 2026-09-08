@@ -16,13 +16,19 @@ final class AppServices {
     let queue: FileQueue
     let filesSettings: FilesSettings
     let durations: AudioDurationReader
+    /// Built right after `queue` — its subscription must exist before anything can `start()` the
+    /// queue, so the Dock-open path (queue running while the Files page isn't shown) still exports.
+    let exports: ExportCoordinator
+    let navigation = Navigation()
 
-    private init(modelStore: ModelStore, engine: WhisperCppEngine, queue: FileQueue, filesSettings: FilesSettings, durations: AudioDurationReader) {
+    private init(modelStore: ModelStore, engine: WhisperCppEngine, queue: FileQueue, filesSettings: FilesSettings,
+                 durations: AudioDurationReader, exports: ExportCoordinator) {
         self.modelStore = modelStore
         self.engine = engine
         self.queue = queue
         self.filesSettings = filesSettings
         self.durations = durations
+        self.exports = exports
     }
 
     static func live() -> AppServices {
@@ -37,7 +43,10 @@ final class AppServices {
         let queue = FileQueue(transcriber: transcriber, durations: durations,
                               supportedExtensions: SupportedAudio.extensions,
                               options: { snapshot.current })
-        return AppServices(modelStore: modelStore, engine: engine, queue: queue, filesSettings: filesSettings, durations: durations)
+        let exports = ExportCoordinator(queue: queue, settings: filesSettings,
+                                        exporter: { TranscriptExporter(directory: filesSettings.outputFolder) })
+        return AppServices(modelStore: modelStore, engine: engine, queue: queue, filesSettings: filesSettings,
+                           durations: durations, exports: exports)
     }
 
     var exporter: TranscriptExporter { TranscriptExporter(directory: filesSettings.outputFolder) }
