@@ -3,6 +3,12 @@
 All notable changes to VoxFlow are recorded here. The format follows Conventional Commits and semantic
 versioning.
 
+## Unreleased
+
+### Added
+- Dictation logic: microphone capture, Flow Bar state machine, windowed transcription,
+  encrypted history with 30-day retention (no UI yet — phase 3b).
+
 ## 2.0.0 — 2026-09-08
 
 VoxFlow 2 is a from-scratch native macOS rewrite (Swift 6, SwiftUI, whisper.cpp on Metal). It replaces

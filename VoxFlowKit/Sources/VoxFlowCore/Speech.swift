@@ -67,6 +67,6 @@ public protocol SpeechEngine: Sendable {
     /// Cancellation: if the consuming task is already cancelled when iteration starts, the stream
     /// throws `SpeechEngineError.cancelled`. If it is cancelled mid-run, the engine aborts promptly
     /// but `AsyncThrowingStream` may end the iteration without an error — check `Task.isCancelled`
-    /// after the loop. Tracked in issue #125.
+    /// after the loop. Decided in ADR-003: consumers check `Task.isCancelled` after the loop.
     func transcribe(_ audio: AudioSamples, options: TranscriptionOptions) -> AsyncThrowingStream<SegmentEvent, Error>
 }

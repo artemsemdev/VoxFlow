@@ -9,6 +9,8 @@ macOS 15+, Apple Silicon.
 VoxFlow 2.0 is a from-scratch rewrite. Version 2.0.0 ships **file transcription**; dictation into
 any app, style cleanup with a local LLM and an MCP server follow in 2.x (see the roadmap).
 
+**Status: 2.0.0 released · 2.1.0 (dictation) in progress.**
+
 ## What works today (2.0.0)
 
 - Drop audio or video files on the window or the Dock icon, use Finder's Open With, or File › Open.
@@ -32,6 +34,10 @@ any app, style cleanup with a local LLM and an MCP server follow in 2.x (see the
 | 2.3 | Style cleanup with a local LLM (Qwen2.5 3B via llama.cpp) | [#112](https://github.com/artemsemdev/VoxFlow/issues/112) |
 | 2.4 | MCP server on localhost | [#113](https://github.com/artemsemdev/VoxFlow/issues/113) |
 | — | Signed and notarized releases | [#115](https://github.com/artemsemdev/VoxFlow/issues/115) |
+
+Dictation's logic half (capture, Flow Bar state machine, windowed transcription, encrypted
+history) has landed on `feature/110-phase3a-dictation-logic`; the HUD, hotkey monitor and
+Accessibility insertion that make it usable follow next.
 
 Tracking issue: [#105](https://github.com/artemsemdev/VoxFlow/issues/105). The product design is the
 Claude Design canvas checked in at [design/](design/).
