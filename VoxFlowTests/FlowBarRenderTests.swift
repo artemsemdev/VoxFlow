@@ -11,8 +11,10 @@ import VoxFlowDictation
 @Suite(.enabled(if: ProcessInfo.processInfo.environment["VOXFLOW_RENDER"] != nil))
 @MainActor
 struct FlowBarRenderTests {
-    /// 14 varying levels so the waveform bars are visibly different heights, not a flat row.
-    private static let levels: [Float] = [0.2, 0.5, 0.8, 0.3, 0.6, 0.9, 0.4, 0.7, 0.3, 0.5, 0.8, 0.2, 0.6, 0.4]
+    /// 14 varying, low-amplitude levels — the D1 ruling's display gain (`min(1, level * 4)`)
+    /// saturates at `level == 0.25`, so realistic-looking speech (a ripple, not a wall of maxed-out
+    /// bars) needs values mostly well under that, with a couple of small peaks for visible variation.
+    private static let levels: [Float] = [0.02, 0.08, 0.18, 0.05, 0.12, 0.22, 0.04, 0.15, 0.03, 0.1, 0.19, 0.02, 0.13, 0.06]
 
     private struct RenderCase {
         let name: String

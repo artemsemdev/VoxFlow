@@ -5,11 +5,11 @@ import VoxFlowDictation
 /// Pure state → copy mapping for the Flow Bar pill (design 1a/2a, FB-01…FB-12). No business rules
 /// live in the view — every zone's content and every string come from here, and this is what
 /// `FlowBarContentTests` pins down as the copy spec.
-struct FlowBarContent: Equatable {
-    enum DotColor: Equatable { case idle, recording, warning, error }
-    enum Leading: Equatable { case dot(DotColor), spinner, check, cross, excluded }
-    enum Button: Equatable { case openSettings, download(sizeText: String), tryAgain, copyRaw }
-    enum Trailing: Equatable { case keycap(String), languageChip(String), button(Button) }
+struct FlowBarContent: Equatable, Hashable {
+    enum DotColor: Equatable, Hashable { case idle, recording, warning, error }
+    enum Leading: Equatable, Hashable { case dot(DotColor), spinner, check, cross, excluded }
+    enum Button: Equatable, Hashable { case openSettings, download(sizeText: String), tryAgain, copyRaw }
+    enum Trailing: Equatable, Hashable { case keycap(String), languageChip(String), button(Button) }
 
     var leading: Leading
     var title: String
@@ -19,12 +19,18 @@ struct FlowBarContent: Equatable {
     var timerIsAmber: Bool
     var trailing: Trailing?
 
-    /// `elapsed ≥ 870` (14:30) turns the timer amber — 30 s from the 15-minute cap.
-    private static let amberThreshold: TimeInterval = 870
-    /// The hard cap on a single dictation (`FlowBarConfig.maxDuration`); "15:00 · limit reached".
-    private static let maxDuration: TimeInterval = 900
+    /// Whether `subtitle` rides beside the trailing keycap (FB-02b "fn stop") instead of the title
+    /// zone — true exactly when there is no title to attach it to (listening, hands-free). A pure
+    /// read of already-decided fields, not a new zone decision — `FlowBarView` reads this instead
+    /// of re-deriving `title.isEmpty` itself.
+    var subtitleBesideTrailing: Bool { title.isEmpty && subtitle != nil }
+    /// Whether the title/subtitle zone renders at all — false while the waveform occupies that
+    /// space (listening/armed/tapped) or there is simply no title (shouldn't happen together with
+    /// a non-empty title, but keeps the view from having to re-check both conditions itself).
+    var showsTitleZone: Bool { !showsWaveform && !title.isEmpty }
 
-    static func make(state: FlowBarState, elapsed: TimeInterval, mode: HotkeyMode) -> FlowBarContent {
+    static func make(state: FlowBarState, elapsed: TimeInterval, mode: HotkeyMode,
+                      config: FlowBarConfig = FlowBarConfig()) -> FlowBarContent {
         switch state {
         case .idle:
             return FlowBarContent(leading: .dot(.idle), title: state.hint(mode: mode) ?? "", subtitle: nil,
@@ -40,7 +46,9 @@ struct FlowBarContent: Equatable {
                                    showsWaveform: true, timer: nil, timerIsAmber: false, trailing: nil)
 
         case .listening(let listening):
-            let amber = elapsed >= amberThreshold
+            // 30 s from the cap (design 2a FB-02b/3d "Auto-dismiss"), read from `FlowBarConfig`
+            // rather than a bare literal so a customised `maxDuration` moves the warning with it.
+            let amber = elapsed >= config.maxDuration - 30
             if listening.mode == .handsFree {
                 return FlowBarContent(leading: .dot(.recording), title: "", subtitle: "stop", showsWaveform: true,
                                        timer: timerText(elapsed), timerIsAmber: amber, trailing: .keycap("fn"))
@@ -55,7 +63,7 @@ struct FlowBarContent: Equatable {
 
         case .inserted(let appName, let words, let limitReached):
             let title = appName.map { "Inserted into \($0)" } ?? "Inserted"
-            let subtitle = limitReached ? "\(timerText(maxDuration)) · limit reached" : "\(words) words"
+            let subtitle = limitReached ? "\(timerText(config.maxDuration)) · limit reached" : "\(words) words"
             return FlowBarContent(leading: .check, title: title, subtitle: subtitle, showsWaveform: false,
                                    timer: nil, timerIsAmber: false, trailing: nil)
 
@@ -112,7 +120,10 @@ struct FlowBarContent: Equatable {
         return String(format: "%d:%02d", total / 60, total % 60)
     }
 
-    /// ≥ 1 GB → one decimal ("1.6 GB"); else MB truncated to the nearest ten ("480 MB").
+    /// ≥ 1 GB → one decimal ("1.6 GB"); else MB truncated to the nearest ten ("480 MB"). Pinned by
+    /// `FlowBarContentTests`, and deliberately *not* `ModelsViewModel.gigabytes` (which rounds to
+    /// the nearest MB, "488 MB" for the same bytes) — Settings and the HUD intentionally differ
+    /// here; unifying them would mean touching `ModelsViewModel.swift`, outside this task's files.
     static func sizeText(_ bytes: Int64) -> String {
         let gb = Double(bytes) / 1_000_000_000
         if gb >= 1 { return String(format: "%.1f GB", gb) }

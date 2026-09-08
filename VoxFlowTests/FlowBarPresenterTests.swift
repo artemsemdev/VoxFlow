@@ -34,4 +34,15 @@ struct FlowBarPresenterTests {
         scheduler.fire()
         #expect(!panel.isVisible && panel.hides == 1)
     }
+
+    @Test("FlowBarPanel.show() cancels an in-flight hide (C1): show(), hide(), show() leaves it fully visible")
+    func panelCancellableHide() {
+        let content = FlowBarContent.make(state: .idle, elapsed: 0, mode: .pushToTalk)
+        let panel = FlowBarPanel(rootView: FlowBarView(content: content, levels: Array(repeating: 0, count: 14)))
+        panel.show()
+        panel.hide()
+        panel.show()
+        #expect(panel.isVisible)
+        #expect(panel.alphaValue == 1)
+    }
 }

@@ -25,7 +25,8 @@ struct FlowBarView: View {
     }
 
     /// Production entry point — copy comes from `coordinator.state`/`elapsed`/`hotkeyMode`, re-read
-    /// on every render.
+    /// on every render, against the default `FlowBarConfig()` (the coordinator doesn't expose a
+    /// customised one; see the Task 4 fix report).
     init(coordinator: DictationCoordinator) {
         self.source = .coordinator(coordinator)
         self.onOpenSettings = { coordinator.openSettingsForCurrentError() }
@@ -47,15 +48,19 @@ struct FlowBarView: View {
     }
 
     var body: some View {
-        innerContent
-            .animation(.easeInOut(duration: 0.12), value: content)
-            .padding(.horizontal, 14)
-            .frame(height: 40)
-            .fixedSize()
-            .background(Capsule().fill(Palette.hudBackground))
-            .clipShape(Capsule())
-            .shadow(color: .black.opacity(0.4), radius: 14, x: 0, y: 6)
-            .animation(.easeOut(duration: 0.2), value: content)
+        ZStack {
+            innerContent
+                .id(content)
+                .transition(.opacity)
+        }
+        .animation(.easeInOut(duration: 0.12), value: content)
+        .padding(.horizontal, 14)
+        .frame(height: 40)
+        .fixedSize()
+        .background(Capsule().fill(Palette.hudBackground))
+        .clipShape(Capsule())
+        .shadow(color: .black.opacity(0.4), radius: 14, x: 0, y: 6)
+        .animation(.easeOut(duration: 0.2), value: content)
     }
 
     private var innerContent: some View {
@@ -64,8 +69,9 @@ struct FlowBarView: View {
             middle
             if let timer = content.timer {
                 Text(timer)
-                    .font(.system(size: 13).monospacedDigit())
-                    .foregroundStyle(content.timerIsAmber ? Palette.amber : Palette.hudSecondary)
+                    .font(.system(size: 14).monospacedDigit())
+                    .foregroundStyle(content.timerIsAmber ? Palette.amber : Palette.hudText)
+                    .fixedSize()
             }
             if case .languageChip = content.trailing {
                 Rectangle().fill(Color.white.opacity(0.16)).frame(width: 1, height: 14)
@@ -84,13 +90,24 @@ struct FlowBarView: View {
             // renders (FB-03/FB-12) — this draws correctly both live and as a static snapshot.
             SpinnerView()
         case .check:
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 15))
-                .foregroundStyle(Palette.onDevice)
+            // Not `checkmark.circle.fill`: its tick is a knockout (dark-on-green), the canvas shows
+            // a filled disc with a *white* tick — draw the disc and overlay the glyph instead.
+            ZStack {
+                Circle().fill(Palette.onDevice)
+                Image(systemName: "checkmark")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(.white)
+            }
+            .frame(width: 15, height: 15)
         case .cross:
-            Image(systemName: "xmark.circle.fill")
-                .font(.system(size: 15))
-                .foregroundStyle(Color.white.opacity(0.4))
+            // Same knockout problem as `.check` — a grey disc with a white ✕ on top.
+            ZStack {
+                Circle().fill(Color.white.opacity(0.32))
+                Image(systemName: "xmark")
+                    .font(.system(size: 7, weight: .bold))
+                    .foregroundStyle(.white)
+            }
+            .frame(width: 15, height: 15)
         case .excluded:
             Image(systemName: "rectangle.slash")
                 .font(.system(size: 13))
@@ -110,15 +127,17 @@ struct FlowBarView: View {
     @ViewBuilder private var middle: some View {
         if content.showsWaveform {
             WaveformView(levels: levels)
-        } else if !content.title.isEmpty {
+        } else if content.showsTitleZone {
             HStack(spacing: 6) {
                 Text(content.title)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(Palette.hudText)
+                    .fixedSize()
                 if let subtitle = content.subtitle {
                     Text(subtitle)
                         .font(.system(size: 13))
                         .foregroundStyle(Palette.hudSecondary)
+                        .fixedSize()
                 }
             }
         }
@@ -130,17 +149,31 @@ struct FlowBarView: View {
             HStack(spacing: 6) {
                 keycap(text)
                 // "fn stop": the hands-free hint has no title zone, so its "stop" subtitle rides
-                // along the trailing keycap instead (FB-02b).
-                if content.title.isEmpty, let subtitle = content.subtitle {
+                // along the trailing keycap instead (FB-02b) — `FlowBarContent.subtitleBesideTrailing`
+                // is the (model-owned) placement decision, not something re-derived here.
+                if content.subtitleBesideTrailing, let subtitle = content.subtitle {
                     Text(subtitle)
                         .font(.system(size: 13))
                         .foregroundStyle(Palette.hudSecondary)
+                        .fixedSize()
                 }
             }
         case .languageChip(let text):
-            Text(text)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(Palette.hudSecondary)
+            HStack(spacing: 2) {
+                Text(text)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Palette.hudText)
+                    .fixedSize()
+                // An SF Symbol rather than a raw "▾" glyph: the bare Unicode triangle fell back to
+                // a font with wildly different metrics, which starved the sibling `Text(text)` of
+                // width and truncated "EN?" down to an ellipsis in `FlowBarRenderTests`' renders.
+                Image(systemName: "arrowtriangle.down.fill")
+                    .font(.system(size: 6))
+                    .foregroundStyle(Palette.hudText.opacity(0.7))
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(Capsule().fill(Color.white.opacity(0.14)))
         case .button(let button):
             trailingButton(button)
         case nil:
@@ -157,8 +190,9 @@ struct FlowBarView: View {
                 Text("Download \(sizeText)")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.white)
+                    .fixedSize()
                     .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
+                    .padding(.vertical, 7)
                     .background(Capsule().fill(Palette.accent(.blue)))
             }
             .buttonStyle(.plain)
@@ -166,14 +200,19 @@ struct FlowBarView: View {
             pillButton("Copy raw", action: onCopyRaw)
         case .tryAgain:
             // fn is the action; the pill is a hint, not a control (FB-05) — no button, no action.
+            // The canvas renders the trailing "fn" as plain dimmed text here, not a boxed keycap.
             HStack(spacing: 4) {
                 Text("Try again")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(Palette.hudText)
-                keycap("fn")
+                    .fixedSize()
+                Text("fn")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Palette.hudSecondary)
+                    .fixedSize()
             }
             .padding(.horizontal, 10)
-            .padding(.vertical, 5)
+            .padding(.vertical, 7)
             .background(Capsule().fill(Color.white.opacity(0.16)))
         }
     }
@@ -183,8 +222,9 @@ struct FlowBarView: View {
             Text(title)
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(Palette.hudText)
+                .fixedSize()
                 .padding(.horizontal, 10)
-                .padding(.vertical, 5)
+                .padding(.vertical, 7)
                 .background(Capsule().fill(Color.white.opacity(0.16)))
         }
         .buttonStyle(.plain)
@@ -194,21 +234,25 @@ struct FlowBarView: View {
         Text(text)
             .font(.system(size: 11, weight: .medium))
             .foregroundStyle(Palette.hudText.opacity(0.85))
-            .padding(.horizontal, 6)
-            .padding(.vertical, 3)
-            .background(RoundedRectangle(cornerRadius: 5).fill(Color.white.opacity(0.16)))
+            .fixedSize()
+            .padding(.horizontal, 7)
+            .padding(.vertical, 4)
+            .background(
+                RoundedRectangle(cornerRadius: 5).fill(Color.white.opacity(0.16))
+                    .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.white.opacity(0.2), lineWidth: 1))
+            )
     }
 }
 
-/// A ¾-ring that spins forever (FB-03 "Cleaning up…", FB-12 "Loading model…"). Drawn rather than
-/// `ProgressView` so it also renders correctly as a static frame in `FlowBarRenderTests`.
+/// A near-full ring that spins forever (FB-03 "Cleaning up…", FB-12 "Loading model…"). Drawn rather
+/// than `ProgressView` so it also renders correctly as a static frame in `FlowBarRenderTests`.
 private struct SpinnerView: View {
     @State private var degrees: Double = 0
 
     var body: some View {
         Circle()
-            .trim(from: 0, to: 0.75)
-            .stroke(Palette.hudSecondary, style: StrokeStyle(lineWidth: 1.6, lineCap: .round))
+            .trim(from: 0, to: 0.85)
+            .stroke(Palette.hudText.opacity(0.9), style: StrokeStyle(lineWidth: 2.2, lineCap: .round))
             .frame(width: 13, height: 13)
             .rotationEffect(.degrees(degrees))
             .onAppear {

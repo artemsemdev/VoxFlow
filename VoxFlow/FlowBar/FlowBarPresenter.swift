@@ -48,6 +48,7 @@ final class FlowBarPresenter {
     private let scheduler: any HideScheduling
     private let idleHideDelay: TimeInterval
     private var hasPendingHide = false
+    private var isBound = false
 
     init(panel: any FlowBarPanelling, scheduler: any HideScheduling, idleHideDelay: TimeInterval = 6) {
         self.panel = panel
@@ -73,12 +74,23 @@ final class FlowBarPresenter {
     }
 
     /// Production wiring: tracks `coordinator.state` via `withObservationTracking`, re-registering
-    /// after each change (the tracking closure fires once per generation).
+    /// after each change (the tracking closure fires once per generation). Idempotent — a second
+    /// call is a no-op rather than starting a second self-perpetuating tracking chain, which would
+    /// otherwise handle every subsequent change twice.
     func bind(to coordinator: DictationCoordinator) {
+        guard !isBound else { return }
+        isBound = true
         stateChanged(to: coordinator.state)
         trackState(of: coordinator)
     }
 
+    /// `withObservationTracking`'s `onChange` fires *before* the mutation that triggered it is
+    /// necessarily fully settled, and re-registration happens one `Task` hop later — a second change
+    /// landing in that narrow window is coalesced with the first rather than handled separately.
+    /// Harmless for show/hide today (`stateChanged` always ends up looking at `coordinator.state` as
+    /// of whenever it actually runs, so the presenter's terminal show/hide decision is still correct
+    /// for whatever the state is by then), but worth calling out for anyone reusing this pattern
+    /// somewhere the intermediate state matters.
     private func trackState(of coordinator: DictationCoordinator) {
         withObservationTracking { _ = coordinator.state } onChange: { [weak self] in
             Task { @MainActor in

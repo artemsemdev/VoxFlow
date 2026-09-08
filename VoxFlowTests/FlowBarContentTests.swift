@@ -54,4 +54,26 @@ struct FlowBarContentTests {
         #expect(FlowBarContent.sizeText(1_624_555_275) == "1.6 GB")
         #expect(FlowBarContent.sizeText(487_601_967) == "480 MB")
     }
+
+    @Test("timer turns amber 30 s from FlowBarConfig.maxDuration, not a bare literal")
+    func amberThreshold() {
+        let config = FlowBarConfig()
+        let listening = Listening(mode: .pushToTalk, startedAt: 0, language: nil)
+        let justBefore = FlowBarContent.make(state: .listening(listening), elapsed: config.maxDuration - 31, mode: .pushToTalk, config: config)
+        #expect(!justBefore.timerIsAmber)
+        let atThreshold = FlowBarContent.make(state: .listening(listening), elapsed: config.maxDuration - 30, mode: .pushToTalk, config: config)
+        #expect(atThreshold.timerIsAmber)
+
+        // A customised cap moves the amber threshold with it, since it comes from the config.
+        var shorter = FlowBarConfig()
+        shorter.maxDuration = 120
+        let customised = FlowBarContent.make(state: .listening(listening), elapsed: 90, mode: .pushToTalk, config: shorter)
+        #expect(customised.timerIsAmber)
+    }
+
+    @Test(".tapped renders like .armed: recording dot + waveform, no timer/chip")
+    func tapped() {
+        let tapped = FlowBarContent.make(state: .tapped(Pending(downAt: 0, fnIsDown: false, resolvedMode: nil)), elapsed: 0, mode: .pushToTalk)
+        #expect(tapped.leading == .dot(.recording) && tapped.showsWaveform && tapped.timer == nil && tapped.trailing == nil)
+    }
 }
