@@ -180,6 +180,22 @@ struct FlowBarMachineTests {
         #expect(m.state == .micUnavailable(.inUse(by: nil)))
     }
 
+    @Test("partial text belongs to the dictation from fn-down: recorded while armed, survives to a raw copy on timeout")
+    func partialTextBeforeListening() {
+        var m = FlowBarMachine()
+        _ = m.handle(.fnDown(ok), now: 0)
+        #expect(m.handle(.partialText("so far"), now: 0.1).isEmpty)
+        #expect(m.state == .armed(Pending(downAt: 0, fnIsDown: true, resolvedMode: nil)))
+
+        _ = m.handle(.timer(.hold), now: 0.25)
+        #expect(m.state == .listening(Listening(mode: .pushToTalk, startedAt: 0, language: nil)))
+        _ = m.handle(.fnUp, now: 1)
+        #expect(m.state.isProcessing)
+        #expect(m.handle(.timer(.processingTimeout), now: 21) == [.abortCapture, .startTimer(.dismiss, seconds: 4)])
+        #expect(m.state == .didntCatch(rawAvailable: true))
+        #expect(m.handle(.copyRawRequested, now: 22) == [.copyToClipboard("so far")])
+    }
+
     @Test("idle hint follows the default mode")
     func hints() {
         #expect(FlowBarState.idle.hint(mode: .pushToTalk) == "Hold fn to dictate")

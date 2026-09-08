@@ -233,8 +233,8 @@ public struct FlowBarMachine: Sendable, Equatable {
             state = .micUnavailable(Self.access(for: e))
             return [.cancelTimer(.cap), .cancelTimer(.silence), .abortCapture, .startTimer(.dismiss, seconds: config.dismissError)]
 
-        // ── partial text arrives while listening or processing ──
-        case (.listening, .partialText(let t)):
+        // ── partial text belongs to the current dictation from the moment capture starts ──
+        case (.armed, .partialText(let t)), (.tapped, .partialText(let t)), (.loadingModel, .partialText(let t)), (.listening, .partialText(let t)):
             partialText = t
             return []
         case (.processing(var p), .partialText(let t)):
