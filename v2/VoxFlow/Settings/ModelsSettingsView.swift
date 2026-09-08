@@ -20,17 +20,12 @@ struct ModelsSettingsView: View {
             .frame(maxWidth: 640, alignment: .leading)
         }
         .frame(maxWidth: .infinity)
-        .task {
-            await model.refresh()
-            // Poll for display only — the row states themselves are already pushed live by
-            // `download()`'s consumption of `store.install`'s stream; this just keeps derived text
-            // (progress, footer) current while something is in flight, at most once a second.
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(1))
-                guard !Task.isCancelled else { return }
-                if isAnyRowActive { await model.refresh() }
-            }
-        }
+        .task { await model.refresh() }
+        // Re-triggered whenever `isAnyRowActive` flips — a download starting (from this view or
+        // `useSmallerModelInstead`/`resume`) or `refresh()` itself picking one up — since SwiftUI
+        // cancels and restarts a `.task(id:)` when its id changes. `pollWhileActive()` then exits on
+        // its own once nothing is left downloading/verifying, instead of sleeping forever (M6).
+        .task(id: isAnyRowActive) { await pollWhileActive() }
         .alert(alertTitle, isPresented: alertIsPresented, presenting: model.alert) { alert in
             alertButtons(alert)
         } message: { alert in
@@ -44,6 +39,18 @@ struct ModelsSettingsView: View {
             case .downloading, .verifying: true
             default: false
             }
+        }
+    }
+
+    /// Poll for display only — the row states themselves are already pushed live by `download()`'s
+    /// consumption of `store.install`'s stream; this just keeps derived text (progress, footer)
+    /// current while something is in flight, at most once a second.
+    private func pollWhileActive() async {
+        guard isAnyRowActive else { return }
+        while !Task.isCancelled {
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled, isAnyRowActive else { return }
+            await model.refresh()
         }
     }
 

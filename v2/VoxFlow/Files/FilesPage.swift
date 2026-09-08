@@ -2,6 +2,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 import VoxFlowCore
 import VoxFlowFiles
+import VoxFlowModels
 
 /// The Files page (design 1c Files, MW-06): drop zone/queue + toolbar, replaced by the transcript
 /// result view (design 2f) when a row is opened — not a sheet (controller ruling 6).
@@ -49,12 +50,13 @@ struct FilesPage: View {
             return
         }
         let settings = services.filesSettings
+        let modelDisplayName = ModelCatalog.model(id: selected.document.modelID)?.displayName ?? selected.document.modelID
         resultModel = ResultViewModel(
             document: selected.document, format: settings.outputFormat, timestamps: settings.timestamps,
             // No per-job record of "was auto-detect requested" survives onto `QueueItem`/
             // `TranscriptDocument` — this reads the *current* Files setting as the best available
             // proxy for what the job that produced this transcript most likely used.
-            autoDetectedLanguage: settings.language == nil, savedURL: selected.url,
+            autoDetectedLanguage: settings.language == nil, modelDisplayName: modelDisplayName, savedURL: selected.url,
             exporter: { services.exporter }, pasteboard: SystemPasteboard(), revealer: FinderRevealer())
     }
 

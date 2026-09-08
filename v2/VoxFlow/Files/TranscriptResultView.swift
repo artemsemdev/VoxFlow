@@ -25,6 +25,7 @@ struct TranscriptResultView: View {
             Button("‹ Queue", action: onBack)
                 .buttonStyle(.plain)
                 .foregroundStyle(.tint)
+                .accessibilityLabel("Back to queue")
             VStack(alignment: .leading, spacing: 2) {
                 Text(resultModel.document.baseName).fontWeight(.semibold)
                 Text(resultModel.metaLine)
@@ -70,14 +71,13 @@ struct TranscriptResultView: View {
     private var segmentList: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 10) {
-                ForEach(Array(resultModel.visibleSegments.enumerated()), id: \.offset) { _, segment in
-                    let index = (resultModel.document.transcript.segments.firstIndex(of: segment) ?? 0) + 1
+                ForEach(Array(resultModel.visibleIndexedSegments.enumerated()), id: \.offset) { _, indexed in
                     HStack(alignment: .top, spacing: 18) {
-                        Text("\(index)\n\(TimeCode.srt(segment.start)) → \(TimeCode.srt(segment.end))")
+                        Text("\(indexed.index)\n\(TimeCode.srt(indexed.segment.start)) → \(TimeCode.srt(indexed.segment.end))")
                             .font(.system(.caption, design: .monospaced))
                             .foregroundStyle(.secondary)
                             .frame(width: 190, alignment: .leading)
-                        Text(segment.text)
+                        Text(indexed.segment.text)
                             .font(.system(.callout, design: .monospaced))
                     }
                 }

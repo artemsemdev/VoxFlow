@@ -411,7 +411,8 @@ struct FilesViewModelTests {
         #expect(FilesViewModel.stopAlertTitle(for: item) == "Stop transcribing \u{201C}interview-raw.m4a\u{201D}?")
         #expect(FilesViewModel.stopAlertMessage(progress: 0.72) ==
                 "It\u{2019}s 72% done. The partial transcript will be discarded and the file stays in the queue.")
-        #expect(FilesViewModel.longAudioAlertTitle(hours: 5.0) == "Transcribe 5.0 h of audio?")
+        #expect(FilesViewModel.longAudioAlertTitle(hours: 5.0) == "Transcribe 5 h of audio?")   // whole hours: no decimal (M3)
+        #expect(FilesViewModel.longAudioAlertTitle(hours: 4.5) == "Transcribe 4.5 h of audio?")   // fractional: one decimal place
         #expect(FilesViewModel.longAudioAlertMessage(hours: 5.0) == "About 19 min on this Mac.")
     }
 }

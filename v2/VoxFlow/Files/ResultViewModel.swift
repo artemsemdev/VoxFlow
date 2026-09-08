@@ -10,6 +10,10 @@ protocol FileRevealing { func reveal(_ url: URL) }
 final class ResultViewModel {
     let document: TranscriptDocument
     let autoDetectedLanguage: Bool
+    /// The catalog's display name for `document.modelID` (falls back to the raw id when the model
+    /// isn't in the catalog — e.g. an older transcript) — resolved by the caller, not here, since
+    /// `ResultViewModel` has no `ModelCatalog` dependency of its own (M1).
+    let modelDisplayName: String
     var format: OutputFormat { didSet { rerender() } }
     var timestamps: Bool { didSet { rerender() } }
     var searchText = ""
@@ -21,12 +25,13 @@ final class ResultViewModel {
     private let pasteboard: any Pasteboard
     private let revealer: any FileRevealing
 
-    init(document: TranscriptDocument, format: OutputFormat, timestamps: Bool, autoDetectedLanguage: Bool, savedURL: URL?,
-         exporter: @escaping () -> TranscriptExporter, pasteboard: any Pasteboard, revealer: any FileRevealing) {
+    init(document: TranscriptDocument, format: OutputFormat, timestamps: Bool, autoDetectedLanguage: Bool, modelDisplayName: String,
+         savedURL: URL?, exporter: @escaping () -> TranscriptExporter, pasteboard: any Pasteboard, revealer: any FileRevealing) {
         self.document = document
         self.format = format
         self.timestamps = timestamps
         self.autoDetectedLanguage = autoDetectedLanguage
+        self.modelDisplayName = modelDisplayName
         self.savedURL = savedURL
         self.makeExporter = exporter
         self.pasteboard = pasteboard
@@ -35,13 +40,20 @@ final class ResultViewModel {
         rerender()
     }
 
-    var visibleSegments: [TranscriptSegment] {
+    /// (1-based transcript position, segment) pairs matching `searchText` — `document.transcript.segments`
+    /// is enumerated exactly once, so a row's number reflects its real position even when two
+    /// segments have identical text (a `firstIndex(of:)` lookup per row would find the same — wrong —
+    /// position for both; M2).
+    var visibleIndexedSegments: [(index: Int, segment: TranscriptSegment)] {
         let needle = searchText.trimmingCharacters(in: .whitespaces)
-        guard !needle.isEmpty else { return document.transcript.segments }
-        return document.transcript.segments.filter { $0.text.localizedCaseInsensitiveContains(needle) }
+        let indexed = document.transcript.segments.enumerated().map { (index: $0.offset + 1, segment: $0.element) }
+        guard !needle.isEmpty else { return indexed }
+        return indexed.filter { $0.segment.text.localizedCaseInsensitiveContains(needle) }
     }
 
-    /// "1:32:10 · 13,842 words · EN (auto) · whisper-large-v3-turbo · took 4 min 12 s on this Mac"
+    var visibleSegments: [TranscriptSegment] { visibleIndexedSegments.map(\.segment) }
+
+    /// "1:32:10 · 13,842 words · EN (auto) · Whisper large-v3-turbo · took 4 min 12 s on this Mac"
     /// When the language is unknown (nil) under auto-detect, the language field is just "AUTO" —
     /// not "AUTO (auto)", which the code+suffix would otherwise produce.
     var metaLine: String {
@@ -52,7 +64,7 @@ final class ResultViewModel {
         } else {
             language = "AUTO"
         }
-        return "\(TimeCode.short(document.audioDuration)) · \(words) words · \(language) · \(document.modelID) · took \(Self.took(document.processingTime)) on this Mac"
+        return "\(TimeCode.short(document.audioDuration)) · \(words) words · \(language) · \(modelDisplayName) · took \(Self.took(document.processingTime)) on this Mac"
     }
 
     /// A fixed `en_US_POSIX` grouping ("13,842") regardless of the system locale — the design

@@ -243,7 +243,10 @@ final class FilesViewModel {
     }
 
     static func longAudioAlertTitle(hours: Double) -> String {
-        "Transcribe \(String(format: "%.1f", hours)) h of audio?"
+        // A whole number of hours reads as "5 h", not the misleadingly-precise "5.0 h" — anything
+        // else keeps the one decimal place (M3).
+        let hoursText = hours.truncatingRemainder(dividingBy: 1) == 0 ? String(Int(hours)) : String(format: "%.1f", hours)
+        return "Transcribe \(hoursText) h of audio?"
     }
 
     static func longAudioAlertMessage(hours: Double) -> String {

@@ -151,7 +151,16 @@ final class ModelsViewModel {
     /// shows after the install has already failed/stopped), so the downloader is never touched.
     func discardDownload(_ model: ModelDescriptor) async {
         alert = nil
-        try? await store.discardDownload(id: model.id)
+        do {
+            try await store.discardDownload(id: model.id)
+        } catch ModelStoreError.alreadyInProgress {
+            // The row resumed (or a fresh attempt started) between the offline alert appearing and
+            // Cancel being pressed — surfaced as its own alert (T4) instead of the discard silently
+            // no-op'ing, which would leave the user thinking Cancel did nothing.
+            alert = .downloadFailed(model, reason: "The download is still running; pause it first.")
+        } catch {
+            // Any other failure (e.g. nothing to discard) — refresh() below re-syncs the row either way.
+        }
         await refresh()
     }
 
@@ -175,15 +184,15 @@ final class ModelsViewModel {
         await refresh()
     }
 
-    /// SYS-DISK: "Use the N model" — start the largest speech model smaller than the one that just
-    /// failed instead.
+    /// SYS-DISK: "Use the N model" — start the smallest speech model smaller than the one that just
+    /// failed instead (the safest bet to actually fit in whatever free space triggered the alert).
     func useSmallerModelInstead() async {
         guard case .insufficientSpace(let failed, _, _) = alert else { return }
         alert = nil
         if let smaller = smallerSpeechModel(than: failed) { await download(smaller) }
     }
 
-    /// The catalog's largest speech model still smaller than `model` — drives both the SYS-DISK
+    /// The catalog's smallest speech model still smaller than `model` — drives both the SYS-DISK
     /// "Use the N model" button label and `useSmallerModelInstead()` itself, so the two can't drift.
     func smallerSpeechModel(than model: ModelDescriptor) -> ModelDescriptor? {
         catalog.filter { $0.role == .speech && $0.sizeInBytes < model.sizeInBytes }

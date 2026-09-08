@@ -28,9 +28,11 @@ struct ResultViewModelTests {
     }
 
     static func makeVM(document: TranscriptDocument = smallDoc(), format: OutputFormat = .txt, timestamps: Bool = false,
-                       autoDetectedLanguage: Bool = false, savedURL: URL? = nil, exportDirectory: URL = TemporaryDirectory().url,
+                       autoDetectedLanguage: Bool = false, modelDisplayName: String = "m", savedURL: URL? = nil,
+                       exportDirectory: URL = TemporaryDirectory().url,
                        pasteboard: any Pasteboard = FakePasteboard(), revealer: any FileRevealing = FakeRevealer()) -> ResultViewModel {
-        ResultViewModel(document: document, format: format, timestamps: timestamps, autoDetectedLanguage: autoDetectedLanguage, savedURL: savedURL,
+        ResultViewModel(document: document, format: format, timestamps: timestamps, autoDetectedLanguage: autoDetectedLanguage,
+                        modelDisplayName: modelDisplayName, savedURL: savedURL,
                         exporter: { TranscriptExporter(directory: exportDirectory) }, pasteboard: pasteboard, revealer: revealer)
     }
 
@@ -72,6 +74,24 @@ struct ResultViewModelTests {
         #expect(vm.visibleSegments.isEmpty)
     }
 
+    @Test("visibleIndexedSegments numbers by real transcript position, even for a duplicated segment (M2)")
+    func indexedSegmentsNumberByRealPosition() {
+        // Two segments share identical text — a `firstIndex(of:)` lookup would report "1" for both;
+        // enumerating once must still say "3" for the later one.
+        let segments = [
+            TranscriptSegment(start: 0, end: 1, text: "Hello there")!,
+            TranscriptSegment(start: 1, end: 2, text: "This needs your attention")!,
+            TranscriptSegment(start: 2, end: 3, text: "Hello there")!,
+        ]
+        let document = TranscriptDocument(sourceURL: URL(fileURLWithPath: "/tmp/dup.m4a"), transcript: Transcript(segments: segments, language: "en"),
+                                          modelID: "m", audioDuration: 3, processingTime: 1, createdAt: Date(timeIntervalSince1970: 0))
+        let vm = Self.makeVM(document: document)
+        #expect(vm.visibleIndexedSegments.map(\.index) == [1, 2, 3])
+
+        vm.searchText = "hello"
+        #expect(vm.visibleIndexedSegments.map(\.index) == [1, 3])   // the filtered-out middle segment doesn't shift the numbering
+    }
+
     @Test("metaLine matches the design example")
     func metaLineDesignExample() {
         let words = Array(repeating: "word", count: 13_842).joined(separator: " ")
@@ -79,8 +99,10 @@ struct ResultViewModelTests {
                                           transcript: Transcript(segments: [TranscriptSegment(start: 0, end: 5530, text: words)!], language: "en"),
                                           modelID: "whisper-large-v3-turbo", audioDuration: 5530, processingTime: 252, createdAt: Date(timeIntervalSince1970: 0))
         #expect(document.wordCount == 13_842)
-        let vm = Self.makeVM(document: document, autoDetectedLanguage: true)
-        #expect(vm.metaLine == "1:32:10 · 13,842 words · EN (auto) · whisper-large-v3-turbo · took 4 min 12 s on this Mac")
+        // The catalog's display name ("Whisper large-v3-turbo"), not the raw `document.modelID`
+        // ("whisper-large-v3-turbo") — `FilesPage` is what resolves one from the other (M1).
+        let vm = Self.makeVM(document: document, autoDetectedLanguage: true, modelDisplayName: "Whisper large-v3-turbo")
+        #expect(vm.metaLine == "1:32:10 · 13,842 words · EN (auto) · Whisper large-v3-turbo · took 4 min 12 s on this Mac")
     }
 
     @Test("metaLine omits '(auto)' and shows seconds-only processing time when the language was explicit")

@@ -306,6 +306,26 @@ struct ModelsViewModelTests {
         await task.value
     }
 
+    // MARK: discardDownload while still running (T4)
+
+    @Test("discardDownload surfaces alreadyInProgress as its own alert instead of silently no-op'ing")
+    func discardDownloadWhileInProgressSurfacesAlert() async throws {
+        let h = Harness()
+        await h.serveAll()
+        await h.downloader.setBlockAfterBytes(131_072)
+        let model = h.viewModel()
+
+        let task = Task { await model.download(Self.big) }
+        await h.downloader.waitUntilBlocked()   // download() is still running: the store's inProgress[id] is set
+
+        await model.discardDownload(Self.big)
+
+        #expect(model.alert == .downloadFailed(Self.big, reason: "The download is still running; pause it first."))
+
+        await h.downloader.release()
+        await task.value
+    }
+
     // MARK: openStorageSettings (fix round 1, item 3a)
 
     @Test("openStorageSettings() delegates to the injected SystemSettingsOpening")

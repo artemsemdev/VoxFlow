@@ -68,6 +68,7 @@ struct QueueRowView: View {
                     .controlSize(.small)
             }
             ProgressView(value: progress)
+                .accessibilityValue("\(Int((progress * 100).rounded()))%")
         }
     }
 
@@ -106,6 +107,9 @@ struct QueueRowView: View {
                 .fill(FilesViewModel.isUnsupportedFailure(error) ? Color.orange : Color.red)
                 .frame(width: 18, height: 18)
                 .overlay(Text("!").font(.caption2.weight(.heavy)).foregroundStyle(.white))
+                // Purely decorative — `FilesViewModel.failureMessage(error)` right next to it already
+                // says what's wrong, so VoiceOver would otherwise read a bare, unexplained "!".
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 nameLine
                 Text(FilesViewModel.failureMessage(error))
