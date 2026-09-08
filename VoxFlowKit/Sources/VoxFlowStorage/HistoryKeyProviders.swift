@@ -1,0 +1,95 @@
+import CryptoKit
+import Foundation
+import Security
+
+/// Hands out the symmetric key that encrypts history rows (design ST-05 "Key stored in the Secure Enclave").
+public protocol HistoryKeyProviding: Sendable {
+    func historyKey() throws -> SymmetricKey
+}
+
+public enum HistoryKeyProviders {
+    public enum Choice: Equatable { case secureEnclave, keychain }
+
+    public static func select(secureEnclaveAvailable: Bool) -> Choice { secureEnclaveAvailable ? .secureEnclave : .keychain }
+
+    /// Secure Enclave when the hardware and signature allow it (not on CI VMs), else a Keychain-held random key.
+    public static func `default`(service: String = "dev.artemsem.voxflow", account: String = "history-key") -> any HistoryKeyProviding {
+        switch select(secureEnclaveAvailable: SecureEnclave.isAvailable) {
+        case .secureEnclave: SecureEnclaveKeyProvider(service: service, account: account)
+        case .keychain: KeychainKeyProvider(service: service, account: account)
+        }
+    }
+}
+
+/// A random 256-bit key stored as a generic password (`ThisDeviceOnly`, after first unlock).
+public struct KeychainKeyProvider: HistoryKeyProviding {
+    let service: String, account: String
+    public init(service: String, account: String) {
+        self.service = service
+        self.account = account
+    }
+
+    public func historyKey() throws -> SymmetricKey {
+        if let data = try KeychainItem.read(service: service, account: account) { return SymmetricKey(data: data) }
+        let key = SymmetricKey(size: .bits256)
+        try KeychainItem.write(key.withUnsafeBytes { Data($0) }, service: service, account: account)
+        return key
+    }
+
+    func deleteForTesting() throws { try KeychainItem.delete(service: service, account: account) }
+}
+
+/// ECIES-style wrap: a P-256 key agreement key that never leaves the Secure Enclave, combined with a stored
+/// public "salt" key, derives the AES key through HKDF. Both halves persist in the Keychain; the SE key is
+/// only a handle (`dataRepresentation`), so the AES key cannot be reconstructed on another machine.
+public struct SecureEnclaveKeyProvider: HistoryKeyProviding {
+    let service: String, account: String
+    public init(service: String, account: String) {
+        self.service = service
+        self.account = account
+    }
+
+    public func historyKey() throws -> SymmetricKey {
+        guard SecureEnclave.isAvailable else { throw StorageError.secureEnclaveUnavailable }
+        let privateKey: SecureEnclave.P256.KeyAgreement.PrivateKey
+        let saltPublic: P256.KeyAgreement.PublicKey
+        if let handle = try KeychainItem.read(service: service, account: account + ".se"),
+           let salt = try KeychainItem.read(service: service, account: account + ".salt") {
+            privateKey = try SecureEnclave.P256.KeyAgreement.PrivateKey(dataRepresentation: handle)
+            saltPublic = try P256.KeyAgreement.PublicKey(rawRepresentation: salt)
+        } else {
+            privateKey = try SecureEnclave.P256.KeyAgreement.PrivateKey()
+            saltPublic = P256.KeyAgreement.PrivateKey().publicKey      // private half discarded on purpose
+            try KeychainItem.write(privateKey.dataRepresentation, service: service, account: account + ".se")
+            try KeychainItem.write(saltPublic.rawRepresentation, service: service, account: account + ".salt")
+        }
+        let shared = try privateKey.sharedSecretFromKeyAgreement(with: saltPublic)
+        return shared.hkdfDerivedSymmetricKey(using: SHA256.self, salt: Data("VoxFlow history".utf8), sharedInfo: Data(), outputByteCount: 32)
+    }
+}
+
+enum KeychainItem {
+    static func read(service: String, account: String) throws -> Data? {
+        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
+                                    kSecAttrAccount as String: account, kSecReturnData as String: true, kSecMatchLimit as String: kSecMatchLimitOne]
+        var item: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        if status == errSecItemNotFound { return nil }
+        guard status == errSecSuccess else { throw StorageError.keychain(status) }
+        return item as? Data
+    }
+
+    static func write(_ data: Data, service: String, account: String) throws {
+        let attributes: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
+                                         kSecAttrAccount as String: account, kSecValueData as String: data,
+                                         kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly]
+        let status = SecItemAdd(attributes as CFDictionary, nil)
+        guard status == errSecSuccess else { throw StorageError.keychain(status) }
+    }
+
+    static func delete(service: String, account: String) throws {
+        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account]
+        let status = SecItemDelete(query as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else { throw StorageError.keychain(status) }
+    }
+}
