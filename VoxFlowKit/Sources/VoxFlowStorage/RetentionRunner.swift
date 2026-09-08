@@ -10,6 +10,7 @@ public actor RetentionRunner {
     private let clock: any MonotonicClock
     private var task: Task<Void, Never>?
     private var passes = 0
+    private var stopped = false
     private var waiters: [(Int, CheckedContinuation<Void, Never>)] = []
 
     public init(store: DictationStore, policy: @escaping @Sendable () -> RetentionPolicy, now: @escaping @Sendable () -> Date, clock: any MonotonicClock) {
@@ -36,6 +37,7 @@ public actor RetentionRunner {
     /// not as proof the requested count was actually reached.
     public func stop() {
         task?.cancel(); task = nil
+        stopped = true
         let pending = waiters
         waiters.removeAll()
         pending.forEach { $0.1.resume() }
@@ -44,7 +46,7 @@ public actor RetentionRunner {
     /// Suspends until at least `count` purge passes have run — or `stop()` is called first, in which
     /// case this returns early without the count having been reached (see `stop()`).
     public func waitForPass(_ count: Int) async {
-        if passes >= count { return }
+        if passes >= count || stopped { return }
         await withCheckedContinuation { waiters.append((count, $0)) }
     }
 

@@ -77,9 +77,9 @@ public final class DictationStore: Sendable {
     /// everything readable. Unreadable rows (see `fetch`) are skipped — there's no text to match.
     public func search(_ query: String) throws -> [DictationRecord] {
         let needle = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let readable = try fetch(limit: Int.max).filter { !$0.isUnreadable }
-        guard !needle.isEmpty else { return readable }
-        return readable.filter { $0.text.lowercased().contains(needle) || $0.rawText.lowercased().contains(needle) }
+        let all = try fetch(limit: Int.max)
+        guard !needle.isEmpty else { return all }                 // a blank query lists everything, unreadable rows included
+        return all.filter { !$0.isUnreadable }.filter { $0.text.lowercased().contains(needle) || $0.rawText.lowercased().contains(needle) }
     }
 
     public func count() throws -> Int { try queue.read { try Int.fetchOne($0, sql: "SELECT COUNT(*) FROM dictations") ?? 0 } }
