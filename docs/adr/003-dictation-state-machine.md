@@ -53,6 +53,10 @@ state with I/O.
   `WindowedTranscriber` against `SpeechEngine`, with the previous window's decoded
   text tail (last 200 chars, `WindowedTranscriber.promptTailLength`) fed back in as
   `TranscriptionOptions.promptContext` so whisper conditions on what was just said.
+  Any remainder shorter than `minFlush` (0.3 s) at the end of the feed is dropped
+  rather than transcribed as its own tiny window — a deliberate trade against
+  spending a whisper pass on a fragment too short to be meaningful; the last spoken
+  word can occasionally be lost if the user trails off right at the cutoff.
   Text streams to the HUD as `partialText` while the user keeps talking, but
   insertion is a single final write at the end of the dictation — nothing is
   inserted before the user stops (live insertion is a phase-4 follow-up).
@@ -75,3 +79,15 @@ state with I/O.
 - A capture that is torn down (abort, or superseded by a new fn-down) drops every
   in-flight callback by generation; nothing from an old dictation can leak into a
   new one's state or history row.
+- `Listening.startedAt`/`Processing.startedAt` are seconds from the controller's
+  own `MonotonicClock`, not wall-clock time. `DictationController.elapsed` (the
+  HUD's "00:12" counter) is derived from that same clock, so it stays correct
+  across a system clock change or sleep/wake; history rows, by contrast, store
+  `Date` (wall-clock) timestamps, because "when was this dictated" is a calendar
+  question, not a duration one. The two are not interchangeable and a 3b view
+  model must not mix them.
+- `DictationResult` → `DictationDraft` has no bridge in phase 3a: the mapping is
+  the composition root's job in phase 3b (`language = result.language?.code`
+  discarding the detection's confidence, `style = nil` until phase 5 adds
+  styling, `createdAt = Date()` taken at save time rather than from the result).
+  Deferred deliberately rather than left undecided.
