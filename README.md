@@ -1,40 +1,52 @@
-# VoxFlow v2
+# VoxFlow
 
-Native macOS dictation and file transcription, entirely on-device. Swift 6, SwiftUI,
-whisper.cpp, macOS 15+, Apple Silicon.
+[![CI](https://github.com/artemsemdev/VoxFlow/actions/workflows/ci.yml/badge.svg)](https://github.com/artemsemdev/VoxFlow/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/artemsemdev/VoxFlow/actions/workflows/codeql.yml/badge.svg)](https://github.com/artemsemdev/VoxFlow/actions/workflows/codeql.yml)
 
-This directory is the v2 rewrite growing on the `develop` branch until promotion (see
-issue #105 and `docs/superpowers/specs/2026-09-07-voxflow-v2-design.md`). The .NET v1
-code at the repository root is frozen and will be removed at promotion.
+Native macOS transcription that never leaves your Mac. Swift 6, SwiftUI, whisper.cpp on Metal.
+macOS 15+, Apple Silicon.
 
-## What works today
+VoxFlow 2.0 is a from-scratch rewrite. Version 2.0.0 ships **file transcription**; dictation into
+any app, style cleanup with a local LLM and an MCP server follow in 2.x (see the roadmap).
 
-Drop (or open) an audio or video file — the Dock icon, Finder's Open With, the Files page's own
-drop zone, or File › Open (⌘O) all work the same way — and VoxFlow transcribes it entirely
-on-device and writes the transcript to `~/Transcripts/` in your chosen format (TXT, SRT, VTT,
-JSON or MD), whether or not the Files page happens to be showing at the time. Settings › Models
-lets you download the turbo or small speech model to get started.
+## What works today (2.0.0)
 
-## Layout
+- Drop audio or video files on the window or the Dock icon, use Finder's Open With, or File › Open.
+  MP3, WAV, M4A/AAC, FLAC, AIFF, CAF, MP4, MOV are accepted; anything else is rejected on drop.
+- A queue with progress and an ETA, Stop with a confirmation above 10 %, a confirmation for drops
+  over four hours, failed rows that never stall the queue, a "2×" badge for duplicate drops.
+- Transcripts saved to `~/Transcripts` in the format you chose — TXT, SRT, VTT, JSON or Markdown —
+  and re-exported to any other format instantly, without re-processing. Spec: [docs/formats.md](docs/formats.md).
+- A result view with the transcript's segments, search, Copy, Save as… and Reveal in Finder.
+- Settings › Models: download Whisper large-v3-turbo (default, 1.6 GB) or Whisper small (480 MB),
+  pause and resume, checksum verification before a model counts as installed, remove.
+- Everything on this Mac: audio is processed in memory and discarded; the only network action is a
+  model download you start. No account, no analytics.
 
-| Path | What |
-|---|---|
-| `project.yml` | XcodeGen definition of the app target and the `VoxFlow` scheme |
-| `VoxFlow/` | SwiftUI app shell: App, MainWindow, MenuBar, FlowBar, Onboarding, Settings, Design (per-screen folders appear with their phase) |
-| `VoxFlowTests/` | App-layer tests |
-| `VoxFlowKit/` | SwiftPM package with all logic: Core, Audio, Speech, Models, Dictation, Storage, Styling, MCP |
-| `VoxFlowKit/Sources/VoxFlowFiles/` | File queue, transcript writers (TXT/SRT/VTT/JSON/MD), export, ETA (see [`docs/formats.md`](docs/formats.md)) |
-| `design/` | The Claude Design canvas that is the product spec |
-| `spikes/` | Throwaway benchmarks (not built in CI) |
-| `docs/adr/` | Architecture decision records for v2 |
-| `docs/superpowers/` | Design specs and implementation plans |
+## Roadmap
+
+| Version | Phase | Issue |
+|---|---|---|
+| 2.1 | Dictation: fn push-to-talk / hands-free, Flow Bar, insertion into any app, onboarding, History | [#110](https://github.com/artemsemdev/VoxFlow/issues/110) |
+| 2.2 | Main window and Settings complete, menu bar, notifications, rule-based styles | [#111](https://github.com/artemsemdev/VoxFlow/issues/111) |
+| 2.3 | Style cleanup with a local LLM (Qwen2.5 3B via llama.cpp) | [#112](https://github.com/artemsemdev/VoxFlow/issues/112) |
+| 2.4 | MCP server on localhost | [#113](https://github.com/artemsemdev/VoxFlow/issues/113) |
+| — | Signed and notarized releases | [#115](https://github.com/artemsemdev/VoxFlow/issues/115) |
+
+Tracking issue: [#105](https://github.com/artemsemdev/VoxFlow/issues/105). The product design is the
+Claude Design canvas checked in at [design/](design/).
+
+## Requirements
+
+- macOS 15 or later on Apple Silicon (Intel Macs are not supported).
+- To build: Xcode 26.x and [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`).
+- Models are downloaded on demand into `~/Library/Application Support/VoxFlow/Models`.
+
+There are no signed binaries yet; build from source (see [SETUP.md](SETUP.md)).
 
 ## Build and test
 
-Requires Xcode 26.x and XcodeGen (`brew install xcodegen`).
-
 ```bash
-cd v2
 xcodegen generate                       # creates VoxFlow.xcodeproj (gitignored)
 xcodebuild -scheme VoxFlow -destination 'platform=macOS' build test
 ```
@@ -42,30 +54,57 @@ xcodebuild -scheme VoxFlow -destination 'platform=macOS' build test
 Package-only tests, no Xcode project needed:
 
 ```bash
-cd v2/VoxFlowKit && swift test
+cd VoxFlowKit && swift test
 ```
 
-Integration tests that need a Whisper model look in `~/Library/Application Support/VoxFlow/Models` and skip with a reason when none is installed.
+Open `VoxFlow.xcodeproj` in Xcode to run the app (scheme `VoxFlow`). `VoxFlow/Info.plist` is
+generated by XcodeGen from `project.yml` (`info.properties`) and is not committed: add usage strings
+such as `NSMicrophoneUsageDescription` to `project.yml`. Integration tests that need a Whisper model
+look in `~/Library/Application Support/VoxFlow/Models` and skip with a reason when none is installed.
 
-Open `VoxFlow.xcodeproj` in Xcode to run the app (scheme `VoxFlow`).
+## Layout
 
-`VoxFlow/Info.plist` is generated by XcodeGen from `project.yml` (`info.properties`) and is not
-committed: add usage strings such as `NSMicrophoneUsageDescription` to `project.yml`.
+| Path | What |
+|---|---|
+| `project.yml` | XcodeGen definition of the app target and the `VoxFlow` scheme |
+| `VoxFlow/` | SwiftUI app shell: App, MainWindow, Files, Settings, Design (per-screen folders appear with their phase) |
+| `VoxFlowTests/` | App-layer tests (view models, navigation) |
+| `VoxFlowKit/` | SwiftPM package with all logic: Core, Audio, Speech, Models, Files, Dictation, Storage, Styling, MCP |
+| `design/` | The Claude Design canvas that is the product spec |
+| `docs/adr/` | Architecture decision records |
+| `docs/formats.md` | Transcript output format specification |
+| `docs/superpowers/` | Design specs and implementation plans (pre-2.0 documents refer to the old `v2/` prefix) |
+| `scripts/` | CI helpers (`affected_tests.py`) |
+| `spikes/` | Throwaway benchmarks (not built in CI) |
 
 ## CI
 
-`.github/workflows/ci-v2.yml` runs a ladder so a small change does not pay for a full
-macOS build:
+`.github/workflows/ci.yml` runs a ladder so a small change does not pay for a full macOS build:
 
 | Changed files (PR) | What runs |
 |---|---|
-| only `v2/docs/**`, `v2/design/**`, `*.md` | nothing on macOS; `result` is green |
-| `v2/scripts/**` | Python unit tests for the CI scripts (Ubuntu) |
-| `v2/VoxFlowKit/**`, modules the app does not link | `swift test` for the changed modules and their dependents, derived from `swift package describe` by `v2/scripts/affected_tests.py` |
-| `v2/VoxFlow/**`, `v2/VoxFlowTests/**`, `v2/project.yml`, `Package.swift`/`Package.resolved`, a module the app links (per `product:` in `project.yml`), any other path under `v2/`, the workflow itself, or PR label `ci:full` | full `VoxFlow` scheme: build + all tests |
+| only `docs/**`, `design/**`, `*.md` | nothing on macOS; `result` is green |
+| `scripts/**` | Python unit tests for the CI scripts (Ubuntu) |
+| `VoxFlowKit/**`, modules the app does not link | `swift test` for the changed modules and their dependents, derived from `swift package describe` by `scripts/affected_tests.py` |
+| `VoxFlow/**`, `VoxFlowTests/**`, `project.yml`, `Package.swift`/`Package.resolved`, a module the app links (per `product:` in `project.yml`), any other path in the repository, the workflow itself, or PR label `ci:full` | full `VoxFlow` scheme: build + all tests |
 
-Every pull request, including ones that touch only the v1 .NET tree, runs the classify job
-and `result` (seconds on Ubuntu) so the required check always exists. Adding the `ci:full`
-label to an open PR starts a full run. Pushes to `develop`/`master` and manual runs always
-run the full scheme. Branch protection needs only the `CI v2 / result` check. `codeql-v2.yml`
-runs CodeQL for Swift on pushes to `develop`/`master`, weekly, and on demand.
+Every pull request runs the classify job and `result` (seconds on Ubuntu) so the required check
+always exists. Adding the `ci:full` label to an open PR starts a full run. Pushes to `develop`/`master`
+and manual runs always run the full scheme. Branch protection needs only the `CI / result` check.
+`codeql.yml` runs CodeQL for Swift on pushes to `develop`/`master`, weekly, and on demand.
+
+## Branching
+
+GitFlow: `master` holds released, tagged versions; `develop` is the integration branch;
+`feature/<issue>-<slug>` branches open pull requests into `develop`; `release/x.y.z` branches merge
+to `master` with a tag and back into `develop`. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## VoxFlow 1.x
+
+The previous implementation (.NET 9, Mac Catalyst, pyannote speaker labeling) is archived on the
+[`v1`](https://github.com/artemsemdev/VoxFlow/tree/v1) branch and tag `v1.0.0-final`. It is not
+maintained; speaker labeling, Intel Macs and Mac Catalyst are out of scope for 2.x.
+
+## License
+
+See [LICENSE](LICENSE).
