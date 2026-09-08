@@ -10,10 +10,10 @@ struct MainWindow: View {
             SidebarView(selection: $navigation.page)
                 .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 260)
         } detail: {
-            if navigation.page == .files {
-                FilesPage()
-            } else {
-                PlaceholderPageView(page: navigation.page)
+            switch navigation.page {
+            case .files: FilesPage()
+            case .settings: SettingsPage()
+            default: PlaceholderPageView(page: navigation.page)
             }
         }
         .frame(minWidth: 900, minHeight: 600)
