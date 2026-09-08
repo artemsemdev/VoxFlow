@@ -7,7 +7,10 @@ public struct DictationCipher: Sendable {
     public init(key: SymmetricKey) { self.key = key }
 
     public func seal(_ text: String) throws -> Data {
-        try AES.GCM.seal(Data(text.utf8), using: key).combined!
+        guard let combined = try AES.GCM.seal(Data(text.utf8), using: key).combined else {
+            throw StorageError.corruptRow
+        }
+        return combined
     }
 
     public func open(_ data: Data) throws -> String {

@@ -73,7 +73,7 @@ public final class DictationStore: Sendable {
         }
     }
 
-    func rawTextColumnForTesting(id: Int64) throws -> Data? {
+    func textColumnForTesting(id: Int64) throws -> Data? {
         try queue.read { try Data.fetchOne($0, sql: "SELECT text FROM dictations WHERE id = ?", arguments: [id]) }
     }
 

@@ -30,7 +30,7 @@ struct DictationStoreTests {
     func encryption() throws {
         let store = try DictationStore(inMemoryWith: FakeKeyProvider())
         _ = try store.insert(draft("secret words", at: Date()))
-        let raw = try store.rawTextColumnForTesting(id: 1)
+        let raw = try store.textColumnForTesting(id: 1)
         #expect(raw != Data("secret words".utf8))
         #expect(try store.fetch(limit: 1).first?.text == "secret words")
     }

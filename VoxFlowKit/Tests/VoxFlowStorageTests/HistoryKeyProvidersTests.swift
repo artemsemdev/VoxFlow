@@ -19,4 +19,12 @@ struct HistoryKeyProvidersTests {
         let a = try provider.historyKey(), b = try provider.historyKey()
         #expect(a == b)
     }
+
+    @Test("the Secure Enclave key pair round-trips through the single-blob Codable encoding")
+    func secureEnclaveKeyPairRoundTrip() throws {
+        let pair = SecureEnclaveKeyPair(se: Data([0x01, 0x02, 0x03, 0x04]), salt: Data([0x05, 0x06, 0x07, 0x08]))
+        let encoded = try JSONEncoder().encode(pair)
+        let decoded = try JSONDecoder().decode(SecureEnclaveKeyPair.self, from: encoded)
+        #expect(decoded == pair)
+    }
 }
