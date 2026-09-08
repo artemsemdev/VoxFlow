@@ -5,11 +5,11 @@ import VoxFlowDictation
 /// Pure state → copy mapping for the Flow Bar pill (design 1a/2a, FB-01…FB-12). No business rules
 /// live in the view — every zone's content and every string come from here, and this is what
 /// `FlowBarContentTests` pins down as the copy spec.
-struct FlowBarContent: Equatable, Hashable {
-    enum DotColor: Equatable, Hashable { case idle, recording, warning, error }
-    enum Leading: Equatable, Hashable { case dot(DotColor), spinner, check, cross, excluded }
-    enum Button: Equatable, Hashable { case openSettings, download(sizeText: String), tryAgain, copyRaw }
-    enum Trailing: Equatable, Hashable { case keycap(String), languageChip(String), button(Button) }
+struct FlowBarContent: Hashable {
+    enum DotColor: Hashable { case idle, recording, warning, error }
+    enum Leading: Hashable { case dot(DotColor), spinner, check, cross, excluded }
+    enum Button: Hashable { case openSettings, download(sizeText: String), tryAgain, copyRaw }
+    enum Trailing: Hashable { case keycap(String), languageChip(String), button(Button) }
 
     var leading: Leading
     var title: String
@@ -28,6 +28,17 @@ struct FlowBarContent: Equatable, Hashable {
     /// space (listening/armed/tapped) or there is simply no title (shouldn't happen together with
     /// a non-empty title, but keeps the view from having to re-check both conditions itself).
     var showsTitleZone: Bool { !showsWaveform && !title.isEmpty }
+
+    /// Identity for `FlowBarView`'s `.id(...)`-keyed content transition — `self` with the ticking
+    /// `timer`/`timerIsAmber` zeroed out. `DictationCoordinator.elapsed` (and so `timer`) changes
+    /// every second while listening; keying the transition on the *whole* content would cross-dissolve
+    /// the entire pill on every tick instead of just updating the timer text in place.
+    var contentIdentity: FlowBarContent {
+        var identity = self
+        identity.timer = nil
+        identity.timerIsAmber = false
+        return identity
+    }
 
     static func make(state: FlowBarState, elapsed: TimeInterval, mode: HotkeyMode,
                       config: FlowBarConfig = FlowBarConfig()) -> FlowBarContent {

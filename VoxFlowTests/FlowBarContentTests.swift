@@ -76,4 +76,44 @@ struct FlowBarContentTests {
         let tapped = FlowBarContent.make(state: .tapped(Pending(downAt: 0, fnIsDown: false, resolvedMode: nil)), elapsed: 0, mode: .pushToTalk)
         #expect(tapped.leading == .dot(.recording) && tapped.showsWaveform && tapped.timer == nil && tapped.trailing == nil)
     }
+
+    @Test("contentIdentity ignores the ticking timer, so a per-second tick doesn't retrigger FlowBarView's transition (N1)")
+    func contentIdentityIgnoresTimer() {
+        let listening = Listening(mode: .pushToTalk, startedAt: 0, language: LanguageDetection(code: "en", confidence: 0.9))
+        let atFourSeconds = FlowBarContent.make(state: .listening(listening), elapsed: 4, mode: .pushToTalk)
+        let atFiveSeconds = FlowBarContent.make(state: .listening(listening), elapsed: 5, mode: .pushToTalk)
+        #expect(atFourSeconds.timer != atFiveSeconds.timer)
+        #expect(atFourSeconds != atFiveSeconds)
+        #expect(atFourSeconds.contentIdentity == atFiveSeconds.contentIdentity)
+
+        // Amber flipping is also just a timer-adjacent field — identity ignores it too.
+        let config = FlowBarConfig()
+        let justBefore = FlowBarContent.make(state: .listening(listening), elapsed: config.maxDuration - 31, mode: .pushToTalk, config: config)
+        let atThreshold = FlowBarContent.make(state: .listening(listening), elapsed: config.maxDuration - 30, mode: .pushToTalk, config: config)
+        #expect(justBefore.timerIsAmber != atThreshold.timerIsAmber)
+        #expect(justBefore.contentIdentity == atThreshold.contentIdentity)
+
+        // A genuine state change (recording → processing) must still change identity.
+        let processing = FlowBarContent.make(state: .processing(Processing(startedAt: 0, takingLonger: false, limitReached: false, partialText: "")), elapsed: 4, mode: .pushToTalk)
+        #expect(atFourSeconds.contentIdentity != processing.contentIdentity)
+    }
+
+    @Test("subtitleBesideTrailing / showsTitleZone pin the zone-placement properties (C7)")
+    func zonePlacement() {
+        let handsFree = FlowBarContent.make(state: .listening(Listening(mode: .handsFree, startedAt: 0, language: nil)), elapsed: 10, mode: .pushToTalk)
+        #expect(handsFree.subtitleBesideTrailing)
+        #expect(!handsFree.showsTitleZone)
+
+        let pushToTalk = FlowBarContent.make(state: .listening(Listening(mode: .pushToTalk, startedAt: 0, language: nil)), elapsed: 10, mode: .pushToTalk)
+        #expect(!pushToTalk.subtitleBesideTrailing)
+        #expect(!pushToTalk.showsTitleZone)
+
+        let processing = FlowBarContent.make(state: .processing(Processing(startedAt: 0, takingLonger: false, limitReached: false, partialText: "")), elapsed: 0, mode: .pushToTalk)
+        #expect(!processing.subtitleBesideTrailing)
+        #expect(processing.showsTitleZone)
+
+        let idle = FlowBarContent.make(state: .idle, elapsed: 0, mode: .pushToTalk)
+        #expect(!idle.subtitleBesideTrailing)
+        #expect(idle.showsTitleZone)
+    }
 }

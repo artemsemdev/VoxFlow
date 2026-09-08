@@ -49,13 +49,19 @@ struct FlowBarView: View {
 
     var body: some View {
         ZStack {
+            // Keyed on `content.contentIdentity` (leading/title/subtitle/waveform/trailing — not
+            // `timer`/`timerIsAmber`), not `content` itself: `.id()` is *identity*, and `content`
+            // changes every time `DictationCoordinator.elapsed` ticks, which would otherwise remove
+            // and re-insert this whole subtree — a visible cross-dissolve of the entire pill once a
+            // second while listening — instead of just updating the timer text in place.
             innerContent
-                .id(content)
+                .id(content.contentIdentity)
                 .transition(.opacity)
         }
-        .animation(.easeInOut(duration: 0.12), value: content)
+        .animation(.easeInOut(duration: 0.12), value: content.contentIdentity)
         .padding(.horizontal, 14)
         .frame(height: 40)
+        .frame(maxWidth: 560)
         .fixedSize()
         .background(Capsule().fill(Palette.hudBackground))
         .clipShape(Capsule())
@@ -73,7 +79,9 @@ struct FlowBarView: View {
                     .foregroundStyle(content.timerIsAmber ? Palette.amber : Palette.hudText)
                     .fixedSize()
             }
-            if case .languageChip = content.trailing {
+            // FB-02 *and* FB-02b both show the divider before the trailing zone (chip or "fn"
+            // keycap) — not just before the language chip.
+            if content.timer != nil && content.trailing != nil {
                 Rectangle().fill(Color.white.opacity(0.16)).frame(width: 1, height: 14)
             }
             trailing
@@ -129,10 +137,18 @@ struct FlowBarView: View {
             WaveformView(levels: levels)
         } else if content.showsTitleZone {
             HStack(spacing: 6) {
+                // No `.fixedSize()` here, unlike every other label in the pill: `title` can carry an
+                // arbitrary app/error name ("Inserted into <app>", "Dictation is off in <app>",
+                // "Microphone in use by <app>", `.error`'s message) with no length the model can
+                // bound. `.lineLimit(1)` + a capped width truncates instead of growing the pill (and
+                // the outer `.frame(maxWidth: 560)`) without limit — see `FlowBarRenderTests`'
+                // "excluded-long-app-name" case.
                 Text(content.title)
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(Palette.hudText)
-                    .fixedSize()
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: 400, alignment: .leading)
                 if let subtitle = content.subtitle {
                     Text(subtitle)
                         .font(.system(size: 13))

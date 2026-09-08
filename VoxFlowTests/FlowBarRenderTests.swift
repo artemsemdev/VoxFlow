@@ -21,6 +21,9 @@ struct FlowBarRenderTests {
         let state: FlowBarState
         let elapsed: TimeInterval
         let mode: HotkeyMode
+        /// Wide enough for every normal state (40 pt pill, generous margin); a couple of cases
+        /// widen this to see the full 560 pt pill cap (N7) without the canvas itself clipping first.
+        var canvasWidth: CGFloat = 420
     }
 
     private static let cases: [RenderCase] = [
@@ -47,6 +50,11 @@ struct FlowBarRenderTests {
         RenderCase(name: "loading", state: .loadingModel(Pending(downAt: 0, fnIsDown: true, resolvedMode: nil)), elapsed: 0, mode: .pushToTalk),
         RenderCase(name: "error", state: .error("Couldn't load the speech model"), elapsed: 0, mode: .pushToTalk),
         RenderCase(name: "armed", state: .armed(Pending(downAt: 0, fnIsDown: true, resolvedMode: nil)), elapsed: 0, mode: .pushToTalk),
+        // N7: an app name with no length the model can bound — must truncate the title (and cap the
+        // pill at 560 pt) rather than grow forever or (like the D2 chip bug) collapse to nothing.
+        RenderCase(name: "excluded-long-app-name",
+                    state: .excluded(app: "Some Very Long Enterprise Application Name Incorporated LLC"),
+                    elapsed: 0, mode: .pushToTalk, canvasWidth: 620),
     ]
 
     @Test("renders every Flow Bar state for design-fidelity comparison")
@@ -56,7 +64,7 @@ struct FlowBarRenderTests {
 
         for (index, testCase) in Self.cases.enumerated() {
             let content = FlowBarContent.make(state: testCase.state, elapsed: testCase.elapsed, mode: testCase.mode)
-            let renderer = ImageRenderer(content: RenderCanvas(content: content, levels: Self.levels))
+            let renderer = ImageRenderer(content: RenderCanvas(content: content, levels: Self.levels, width: testCase.canvasWidth))
             renderer.scale = 2
             guard let image = renderer.nsImage else {
                 Issue.record("Failed to render \(testCase.name)")
@@ -88,12 +96,13 @@ struct FlowBarRenderTests {
 private struct RenderCanvas: View {
     let content: FlowBarContent
     let levels: [Float]
+    var width: CGFloat = 420
 
     var body: some View {
         ZStack {
             Color(red: 0xd9 / 255, green: 0xdb / 255, blue: 0xe0 / 255)
             FlowBarView(content: content, levels: levels)
         }
-        .frame(width: 420, height: 80)
+        .frame(width: width, height: 80)
     }
 }

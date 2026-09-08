@@ -13,13 +13,17 @@ import SwiftUI
 /// `NSView.frameDidChangeNotification` observer, which depends on Auto Layout constraints this
 /// borderless panel never installs and so may not fire reliably.
 @MainActor
-final class FlowBarPanel: NSPanel, FlowBarPanelling {
+final class FlowBarPanel: NSPanel, FlowBarPanelling, NSWindowDelegate {
     private let hostingController: NSHostingController<FlowBarView>
-    /// The x-origin established the last time the pill was (re)shown — held fixed across content
-    /// growth so the pill grows to the *right*, left edge pinned (design 2a "ширина растёт вправо,
-    /// левый край фиксирован"). Cleared on `show()` so each fresh appearance re-centers on the
-    /// current screen (design 3d).
+    /// The x-origin established the last time the pill was (re)shown or moved to a new screen — held
+    /// fixed across content growth so the pill grows to the *right*, left edge pinned (design 2a
+    /// "ширина растёт вправо, левый край фиксирован"). Cleared on `show()` (each fresh appearance
+    /// re-centers, design 3d) and whenever `anchoredScreen` changes underneath it (N4).
     private var leftEdgeX: CGFloat?
+    /// The screen `leftEdgeX` was computed against — if the key window (and so the Flow Bar) moves to
+    /// a different display mid-dictation, the old x-anchor is meaningless on the new screen's
+    /// coordinate space and must be re-established there instead.
+    private var anchoredScreen: NSScreen?
     /// Bumped by both `show()` and `hide()`; a `hide()`'s fade-out completion only `orderOut`s if
     /// this hasn't moved on since — the mechanism that makes `hide()` cancellable (a `show()` mid-fade
     /// bumps it, so the stale completion becomes a no-op instead of hiding a panel that was just
@@ -31,8 +35,8 @@ final class FlowBarPanel: NSPanel, FlowBarPanelling {
     /// `show()` promptly instead of skipping it (the root cause of the fixed bug: AppKit's own
     /// `isVisible` stays true for the whole fade, until `orderOut` actually runs).
     private var isHiding = false
-    /// Suppressed while `show()`'s own scale-in animates the frame, so that its intermediate frames
-    /// don't each re-trigger `reflow()` via `NSWindow.didResizeNotification` and cut the animation short.
+    /// Suppressed while `show()`'s own scale-in animates the frame, so its intermediate frames don't
+    /// each re-trigger `reflow()` via `windowDidResize` and cut the animation short.
     private var suppressReflow = false
 
     init(rootView: FlowBarView) {
@@ -50,23 +54,28 @@ final class FlowBarPanel: NSPanel, FlowBarPanelling {
         isMovableByWindowBackground = false
 
         contentViewController = hostingController
+        // `delegate` on `NSWindow` is an unowned/unsafe reference (no retain cycle), and a delegate
+        // callback needs no registration bookkeeping to leak or clean up — unlike the
+        // `NotificationCenter` observer this replaces (former C8 finding), there is nothing here to
+        // remove in a `deinit` in the first place.
+        delegate = self
         reflow()
+    }
 
-        // Not retained/removed in a `deinit`: `self` (a `@MainActor`-isolated class) can't be safely
-        // touched from `deinit`, which AppKit/Swift always runs non-isolated — the block only
-        // weak-captures `self`, so once this (one long-lived, app-lifetime) panel is gone the block
-        // becomes a harmless no-op; the single leftover registration entry is a bounded, one-time cost.
-        _ = NotificationCenter.default.addObserver(forName: NSWindow.didResizeNotification, object: self, queue: .main) { [weak self] _ in
-            Task { @MainActor in self?.reflow() }
-        }
+    /// `NSWindowDelegate` — fires reliably for *any* frame change (ours or the content-driven
+    /// auto-resize from `NSHostingController.sizingOptions`).
+    func windowDidResize(_ notification: Notification) {
+        reflow()
     }
 
     /// Re-derives the frame from the hosting controller's current (auto-updated) size and
-    /// re-positions per `present(on:)`. Driven by `NSWindow.didResizeNotification`, which fires
-    /// reliably for *any* frame change (ours or the content-driven auto-resize) — unlike observing
-    /// the hosting view directly.
+    /// re-positions per `present(on:)`; re-anchors (N4) if the key screen has changed.
     private func reflow() {
         guard !suppressReflow, let screen = NSScreen.main ?? NSScreen.screens.first else { return }
+        if anchoredScreen !== screen {
+            anchoredScreen = screen
+            leftEdgeX = nil
+        }
         present(on: screen)
     }
 
@@ -92,7 +101,22 @@ final class FlowBarPanel: NSPanel, FlowBarPanelling {
     func show() {
         generation += 1
         isHiding = false
+        // Must come before `reflow()` below (N2): while still `true` from a previous `show()`'s
+        // in-flight scale-in, `reflow()` early-returns and the anchor below is computed from a
+        // stale (mid-animation, inset) frame instead of this call's real target.
+        suppressReflow = false
         leftEdgeX = nil
+        anchoredScreen = nil
+
+        // Force any layout the presenter's state-change `Task` may have outrun (N3): the presenter
+        // calls `show()` synchronously off a coordinator state change, which can happen before
+        // SwiftUI has re-rendered `hostingController.view` for that same new state — anchoring on
+        // whatever stale size is currently laid out would centre the pill on the *previous* state's
+        // width instead of this one's.
+        hostingController.view.layoutSubtreeIfNeeded()
+        if hostingController.view.fittingSize != .zero {
+            setContentSize(hostingController.view.fittingSize)
+        }
         reflow()
         let target = frame
 
