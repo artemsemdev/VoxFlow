@@ -78,6 +78,13 @@ final class ResultViewModel {
         return url
     }
 
+    /// Surfaces a failure from an action the view attempted (`exportAlso`'s throw, or a failed
+    /// `SavePanel.save`) as `exportMessage`, so it reads next to where "Saved to …" would otherwise
+    /// show — never silently swallowed via `try?`.
+    func report(error: Error) {
+        exportMessage = "Couldn’t save: \(error.localizedDescription)"
+    }
+
     func reveal() { if let savedURL { revealer.reveal(savedURL) } }
 
     private func rerender() { rendered = TranscriptRenderer.render(document, format: format, timestamps: timestamps) }

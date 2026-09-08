@@ -217,6 +217,32 @@ final class FilesViewModel {
         return true
     }
 
+    /// Whether the badge should read as "this file was never eligible" (orange) rather than "the
+    /// engine tried and failed" (red) — same distinction `canRetryFailure` draws, kept as its own
+    /// named predicate so a row's badge color doesn't have to be inferred from Retry availability.
+    static func isUnsupportedFailure(_ error: FileTranscriptionError) -> Bool {
+        if case .unsupportedType = error { return true }
+        return false
+    }
+
+    // MARK: Alert copy (design MW-06c stop confirmation, 3e long-audio confirmation)
+
+    static func stopAlertTitle(for item: QueueItem) -> String {
+        "Stop transcribing “\(item.url.lastPathComponent)”?"
+    }
+
+    static func stopAlertMessage(progress: Double) -> String {
+        "It’s \(Int((progress * 100).rounded()))% done. The partial transcript will be discarded and the file stays in the queue."
+    }
+
+    static func longAudioAlertTitle(hours: Double) -> String {
+        "Transcribe \(String(format: "%.1f", hours)) h of audio?"
+    }
+
+    static func longAudioAlertMessage(hours: Double) -> String {
+        "About \(estimatedMinutes(forHours: hours)) min on this Mac."
+    }
+
     // MARK: Events
 
     private func apply(_ event: FileQueueEvent) {

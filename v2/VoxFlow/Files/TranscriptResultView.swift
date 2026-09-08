@@ -53,7 +53,10 @@ struct TranscriptResultView: View {
             .frame(maxWidth: 260)
             Button("Copy") { resultModel.copy() }
             Button("Save as…") {
-                SavePanel.save(baseName: resultModel.document.baseName, format: resultModel.format, contents: resultModel.rendered)
+                switch SavePanel.save(baseName: resultModel.document.baseName, format: resultModel.format, contents: resultModel.rendered) {
+                case .saved, .cancelled: break
+                case .failed(let error): resultModel.report(error: error)
+                }
             }
             .buttonStyle(.borderedProminent)
         }
@@ -111,7 +114,9 @@ struct TranscriptResultView: View {
             HStack(spacing: 4) {
                 Text("Also export:").font(.caption).foregroundStyle(.secondary)
                 ForEach(resultModel.otherFormats, id: \.self) { format in
-                    Button(format.displayName) { _ = try? resultModel.exportAlso(format) }
+                    Button(format.displayName) {
+                        do { try resultModel.exportAlso(format) } catch { resultModel.report(error: error) }
+                    }
                         .buttonStyle(.plain)
                         .font(.caption)
                         .foregroundStyle(.tint)

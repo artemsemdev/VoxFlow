@@ -25,13 +25,26 @@ struct FinderRevealer: FileRevealing {
 /// extension; on OK it writes the already-rendered text directly (no re-render, no re-processing).
 @MainActor
 enum SavePanel {
-    static func save(baseName: String, format: OutputFormat, contents: String) {
+    /// `.failed` carries the write error instead of the caller silently losing it to `try?` — the
+    /// result view routes it into `ResultViewModel.report(error:)`.
+    enum Outcome {
+        case saved(URL)
+        case cancelled
+        case failed(Error)
+    }
+
+    static func save(baseName: String, format: OutputFormat, contents: String) -> Outcome {
         let panel = NSSavePanel()
         panel.nameFieldStringValue = "\(baseName).\(format.fileExtension)"
         if let type = UTType(filenameExtension: format.fileExtension) {
             panel.allowedContentTypes = [type]
         }
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        try? Data(contents.utf8).write(to: url)
+        guard panel.runModal() == .OK, let url = panel.url else { return .cancelled }
+        do {
+            try Data(contents.utf8).write(to: url)
+            return .saved(url)
+        } catch {
+            return .failed(error)
+        }
     }
 }

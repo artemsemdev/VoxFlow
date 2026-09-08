@@ -45,7 +45,7 @@ struct FilesPage: View {
             ScrollView {
                 Group {
                     if model.items.isEmpty {
-                        DropZoneView(model: model, isFileImporterPresented: $isFileImporterPresented)
+                        DropZoneView(isFileImporterPresented: $isFileImporterPresented)
                     } else {
                         QueueListView(model: model)
                     }
@@ -60,11 +60,36 @@ struct FilesPage: View {
         } isTargeted: { targeted in
             model.isDragOver = targeted
         }
+        // Page-level, not `DropZoneView`-level: `DropZoneView` is replaced by `QueueListView` once
+        // the queue is non-empty, so an overlay scoped to the empty state would give no feedback
+        // when dropping more files onto an already-populated queue (design MW-06g applies either
+        // way). `allowsHitTesting(false)` keeps it from stealing the drop itself.
+        .overlay {
+            if model.isDragOver { dragOverOverlay }
+        }
         .fileImporter(isPresented: $isFileImporterPresented, allowedContentTypes: [.audio, .movie], allowsMultipleSelection: true) { result in
             if case .success(let urls) = result {
                 Task { await model.addFiles(urls) }
             }
         }
+    }
+
+    private var dragOverOverlay: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "arrow.down.circle")
+                .font(.system(size: 32, weight: .medium))
+                .foregroundStyle(Color.accentColor)
+            Text("Release to add files").font(.headline)
+            Text("Processed on this Mac").font(.caption).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.accentColor.opacity(0.08))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Color.accentColor, lineWidth: 2)
+        )
+        .padding(8)
+        .allowsHitTesting(false)
     }
 
     // MARK: Alerts (design MW-06c stop confirmation, 3e long-audio confirmation)
@@ -77,18 +102,16 @@ struct FilesPage: View {
 
     private var alertTitle: String {
         switch model.confirmation {
-        case .stop(let item, _): "Stop transcribing “\(item.url.lastPathComponent)”?"
-        case .longAudio(_, let hours): "Transcribe \(String(format: "%.1f", hours)) h of audio?"
+        case .stop(let item, _): FilesViewModel.stopAlertTitle(for: item)
+        case .longAudio(_, let hours): FilesViewModel.longAudioAlertTitle(hours: hours)
         case nil: ""
         }
     }
 
     private func alertMessage(_ confirmation: FilesViewModel.Confirmation) -> String {
         switch confirmation {
-        case .stop(_, let progress):
-            "It’s \(Int((progress * 100).rounded()))% done. The partial transcript will be discarded and the file stays in the queue."
-        case .longAudio(_, let hours):
-            "About \(FilesViewModel.estimatedMinutes(forHours: hours)) min on this Mac."
+        case .stop(_, let progress): FilesViewModel.stopAlertMessage(progress: progress)
+        case .longAudio(_, let hours): FilesViewModel.longAudioAlertMessage(hours: hours)
         }
     }
 

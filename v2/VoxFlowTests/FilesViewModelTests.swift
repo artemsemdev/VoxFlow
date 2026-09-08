@@ -383,5 +383,23 @@ struct FilesViewModelTests {
         #expect(FilesViewModel.canRetryFailure(.engineFailed("x")) == true)
         #expect(FilesViewModel.canRetryFailure(.noModelInstalled) == true)
         #expect(FilesViewModel.canRetryFailure(.unsupportedType("pages")) == false)
+        #expect(FilesViewModel.isUnsupportedFailure(.unsupportedType("pages")) == true)
+        #expect(FilesViewModel.isUnsupportedFailure(.decodeFailed("corrupt")) == false)
+    }
+
+    // MARK: 8 — alert copy (MW-06c stop confirmation, 3e long-audio confirmation)
+
+    @Test("stop/long-audio alert copy matches the design's exact wording")
+    func alertCopy() async throws {
+        let h = try await Harness()
+        await h.viewModel.addFiles([Self.a])   // Self.a → "interview-raw.m4a", the design's own example
+        await h.settle()
+        let item = try #require(h.viewModel.items.first)
+
+        #expect(FilesViewModel.stopAlertTitle(for: item) == "Stop transcribing \u{201C}interview-raw.m4a\u{201D}?")
+        #expect(FilesViewModel.stopAlertMessage(progress: 0.72) ==
+                "It\u{2019}s 72% done. The partial transcript will be discarded and the file stays in the queue.")
+        #expect(FilesViewModel.longAudioAlertTitle(hours: 5.0) == "Transcribe 5.0 h of audio?")
+        #expect(FilesViewModel.longAudioAlertMessage(hours: 5.0) == "About 19 min on this Mac.")
     }
 }

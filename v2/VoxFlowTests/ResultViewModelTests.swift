@@ -121,6 +121,21 @@ struct ResultViewModelTests {
         #expect(vm.exportMessage?.hasPrefix("Saved to") == true)
     }
 
+    @Test("a failing export's error is not swallowed: report(error:) surfaces it as \"Couldn't save: …\"")
+    func failingExportSurfacesViaReport() throws {
+        let outerDir = TemporaryDirectory()
+        let blockedPath = outerDir.file("Transcripts")
+        try Data("not a directory".utf8).write(to: blockedPath)   // a plain file where the exporter needs a directory
+        let vm = Self.makeVM(exportDirectory: blockedPath)
+        do {
+            try vm.exportAlso(.vtt)
+            Issue.record("expected exportAlso to throw")
+        } catch {
+            vm.report(error: error)
+        }
+        #expect(vm.exportMessage?.hasPrefix("Couldn\u{2019}t save:") == true)
+    }
+
     @Test("reveal forwards the saved URL to the revealer; a fresh result with no saved URL has no message and reveal is a no-op")
     func revealForwardsSavedURL() {
         let revealer = FakeRevealer()

@@ -101,10 +101,9 @@ struct QueueRowView: View {
     /// `.unsupportedType` shows an orange badge (it's a drop-time gate, not an engine failure);
     /// every other case shows red.
     private func failedRow(_ error: FileTranscriptionError) -> some View {
-        let isUnsupported: Bool = { if case .unsupportedType = error { return true }; return false }()
-        return HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .top, spacing: 12) {
             Circle()
-                .fill(isUnsupported ? Color.orange : Color.red)
+                .fill(FilesViewModel.isUnsupportedFailure(error) ? Color.orange : Color.red)
                 .frame(width: 18, height: 18)
                 .overlay(Text("!").font(.caption2.weight(.heavy)).foregroundStyle(.white))
             VStack(alignment: .leading, spacing: 2) {
