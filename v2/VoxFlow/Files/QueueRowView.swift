@@ -59,7 +59,7 @@ struct QueueRowView: View {
             HStack {
                 nameLine
                 Spacer()
-                Text("\(durationText) · \(Int((progress * 100).rounded()))%\(etaSuffix)")
+                Text("\(durationText) · \(FilesViewModel.progressText(for: progress))\(etaSuffix)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .monospacedDigit()

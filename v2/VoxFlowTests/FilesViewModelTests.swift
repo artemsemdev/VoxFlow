@@ -373,6 +373,16 @@ struct FilesViewModelTests {
         await rendered.settle()
     }
 
+    // MARK: progressText (I5 — "Preparing…" below 5%)
+
+    @Test("progressText reads Preparing… below 5% and a rounded percentage above it")
+    func progressTextPreparingBelowThreshold() {
+        #expect(FilesViewModel.progressText(for: 0) == "Preparing…")
+        #expect(FilesViewModel.progressText(for: 0.049) == "Preparing…")
+        #expect(FilesViewModel.progressText(for: 0.05) == "5%")
+        #expect(FilesViewModel.progressText(for: 0.72) == "72%")
+    }
+
     // MARK: 7 — failure copy (MW-06x)
 
     @Test("failureMessage matches the MW-06x copy; unsupported type offers no Retry")

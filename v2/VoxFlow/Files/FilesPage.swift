@@ -78,12 +78,7 @@ struct FilesPage: View {
             }
             FilesToolbar(model: model, settings: services.filesSettings)
         }
-        .dropDestination(for: URL.self) { urls, _ in
-            Task { await model.addFiles(urls) }
-            return true
-        } isTargeted: { targeted in
-            model.isDragOver = targeted
-        }
+        .onDrop(of: [.fileURL], delegate: FilesDropDelegate(model: model))
         // Page-level, not `DropZoneView`-level: `DropZoneView` is replaced by `QueueListView` once
         // the queue is non-empty, so an overlay scoped to the empty state would give no feedback
         // when dropping more files onto an already-populated queue (design MW-06g applies either
@@ -104,8 +99,8 @@ struct FilesPage: View {
             Image(systemName: "arrow.down.circle")
                 .font(.system(size: 32, weight: .medium))
                 .foregroundStyle(Color.accentColor)
-            Text("Release to add files").font(.headline)
-            Text("Processed on this Mac").font(.caption).foregroundStyle(.secondary)
+            Text("Release to add \(model.dragCount) \(model.dragCount == 1 ? "file" : "files")").font(.headline)
+            Text("processed on this Mac").font(.caption).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.accentColor.opacity(0.08))

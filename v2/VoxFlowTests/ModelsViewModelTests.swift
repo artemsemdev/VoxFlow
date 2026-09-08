@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import Synchronization
 import Testing
 import VoxFlowCore
 import VoxFlowModels
@@ -14,6 +15,21 @@ import VoxFlowTestSupport
 final class FakeSystemSettingsOpener: SystemSettingsOpening, @unchecked Sendable {
     private(set) var openStorageSettingsCallCount = 0
     func openStorageSettings() { openStorageSettingsCallCount += 1 }
+}
+
+/// Deterministic clock for `ModelsViewModel`'s injected `now:` (design 3d / F): returns each date
+/// in `times` in order, then freezes on the last one — lets a test drive `ETAEstimator` samples at
+/// exact, arbitrary intervals without depending on wall-clock timing.
+final class SequentialClock: Sendable {
+    private let state: Mutex<(times: [Date], index: Int)>
+    init(_ times: [Date]) { state = Mutex((times: times, index: 0)) }
+    func now() -> Date {
+        state.withLock { box in
+            let date = box.index < box.times.count ? box.times[box.index] : (box.times.last ?? Date())
+            box.index += 1
+            return date
+        }
+    }
 }
 
 @Suite("ModelsViewModel") @MainActor
@@ -46,8 +62,9 @@ struct ModelsViewModelTests {
             ModelStore(directory: dir.url, catalog: ModelsViewModelTests.catalog,
                        downloader: downloader, freeSpace: freeSpace, settings: settings)
         }
-        func viewModel(settingsOpener: any SystemSettingsOpening = FakeSystemSettingsOpener()) -> ModelsViewModel {
-            ModelsViewModel(store: store(), catalog: ModelsViewModelTests.catalog, settingsOpener: settingsOpener)
+        func viewModel(settingsOpener: any SystemSettingsOpening = FakeSystemSettingsOpener(),
+                       now: @escaping () -> Date = { Date() }) -> ModelsViewModel {
+            ModelsViewModel(store: store(), catalog: ModelsViewModelTests.catalog, settingsOpener: settingsOpener, now: now)
         }
         func serveAll() async {
             await downloader.serve(ModelsViewModelTests.bigPayload, at: ModelsViewModelTests.big.downloadURL)
@@ -244,6 +261,49 @@ struct ModelsViewModelTests {
         #expect(model.alert == nil)
         #expect(model.speechRows.first { $0.id == "big" }?.state == .notInstalled)
         #expect(await h.downloader.calls.count == callsBeforeDiscard)   // discarding never calls the downloader
+    }
+
+    // MARK: downloadText ETA (F)
+
+    @Test("downloadText adds an ETA once two downloading samples 10 s apart give ETAEstimator a rate")
+    func downloadTextShowsETA() async throws {
+        let h = Harness()
+        await h.serveAll()
+        // One chunk per block point (15 000 B each) means exactly the two downloading states this
+        // test cares about are ever emitted — no intermediate samples to reason about.
+        await h.downloader.setChunkSize(15_000)
+        await h.downloader.setBlockAfterBytes(15_000)
+        let clock = SequentialClock([Date(timeIntervalSince1970: 0), Date(timeIntervalSince1970: 10)])
+        let model = h.viewModel(now: clock.now)
+        await model.refresh()   // seed the rows so setState(...) below has something to update
+
+        let task = Task { await model.download(Self.big) }
+        await h.downloader.waitUntilBlocked()
+        var firstState = model.speechRows.first { $0.id == "big" }?.state
+        for _ in 0..<1_000 where firstState != .downloading(bytesWritten: 15_000, total: 300_000) {
+            await Task.yield()
+            firstState = model.speechRows.first { $0.id == "big" }?.state
+        }
+        #expect(firstState == .downloading(bytesWritten: 15_000, total: 300_000))
+        let firstRow = try #require(model.speechRows.first { $0.id == "big" })
+        // One sample isn't enough for ETAEstimator to have a rate yet — no " · … left" suffix.
+        #expect(model.downloadText(for: firstRow) == ModelsViewModel.progressText(written: 15_000, total: 300_000))
+
+        await h.downloader.setBlockAfterBytes(30_000)
+        await h.downloader.release()
+        await h.downloader.waitUntilBlocked()
+        var secondState = model.speechRows.first { $0.id == "big" }?.state
+        for _ in 0..<1_000 where secondState != .downloading(bytesWritten: 30_000, total: 300_000) {
+            await Task.yield()
+            secondState = model.speechRows.first { $0.id == "big" }?.state
+        }
+        #expect(secondState == .downloading(bytesWritten: 30_000, total: 300_000))
+        // progress 0.05 at t=0, 0.10 at t=10 → rate 0.005/s → (1 - 0.10) / 0.005 = 180 s = "3 min left".
+        let secondRow = try #require(model.speechRows.first { $0.id == "big" })
+        #expect(model.downloadText(for: secondRow) == "\(ModelsViewModel.progressText(written: 30_000, total: 300_000)) · 3 min left")
+
+        await h.downloader.release()
+        await task.value
     }
 
     // MARK: openStorageSettings (fix round 1, item 3a)

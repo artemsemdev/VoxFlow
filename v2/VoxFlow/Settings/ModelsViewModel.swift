@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import VoxFlowCore
+import VoxFlowFiles
 import VoxFlowModels
 
 /// Opens macOS System Settings (SYS-DISK "Free up space…"). A protocol so tests can fake it.
@@ -51,12 +52,17 @@ final class ModelsViewModel {
     private let catalog: [ModelDescriptor]
     private let settingsOpener: any SystemSettingsOpening
     private var installs: [String: Task<Void, Never>] = [:]
+    private let now: () -> Date
+    /// One ETA estimator per actively-downloading row (design 3d's rate/window logic, reused from
+    /// `ETAEstimator`); cleared whenever a row leaves `.downloading` for any other state.
+    private var estimators: [String: ETAEstimator] = [:]
 
     init(store: ModelStore, catalog: [ModelDescriptor] = ModelCatalog.all,
-         settingsOpener: any SystemSettingsOpening = WorkspaceSystemSettingsOpener()) {
+         settingsOpener: any SystemSettingsOpening = WorkspaceSystemSettingsOpener(), now: @escaping () -> Date = { Date() }) {
         self.store = store
         self.catalog = catalog
         self.settingsOpener = settingsOpener
+        self.now = now
     }
 
     func refresh() async {
@@ -187,8 +193,26 @@ final class ModelsViewModel {
     func dismissAlert() { alert = nil }
 
     private func setState(_ state: ModelState, for id: String) {
+        if case .downloading(let written, let total) = state, total > 0 {
+            var estimator = estimators[id] ?? ETAEstimator()
+            estimator.record(progress: Double(written) / Double(total), at: now().timeIntervalSince1970)
+            estimators[id] = estimator
+        } else {
+            estimators[id] = nil
+        }
         if let index = speechRows.firstIndex(where: { $0.id == id }) { speechRows[index].state = state }
         if let index = styleRows.firstIndex(where: { $0.id == id }) { styleRows[index].state = state }
+    }
+
+    /// "744 MB of 1.2 GB" for a downloading row, plus " · N min left"/" · N s left" once
+    /// `ETAEstimator` has enough samples to estimate (design 3d's rate/window logic, F).
+    func downloadText(for row: Row) -> String {
+        guard case .downloading(let written, let total) = row.state else { return row.subtitle }
+        var text = Self.progressText(written: written, total: total)
+        if let seconds = estimators[row.id]?.secondsRemaining {
+            text += seconds < 60 ? " · \(Int(seconds.rounded())) s left" : " · \(Int((seconds / 60).rounded())) min left"
+        }
+        return text
     }
 
     nonisolated static func gigabytes(_ bytes: Int64) -> String {

@@ -102,8 +102,8 @@ struct ModelsSettingsView: View {
         case .verifying:
             Text("Verifying download… checking \(row.sizeText) against the published checksum")
                 .font(.caption).foregroundStyle(.secondary)
-        case .downloading(let written, let total):
-            Text(ModelsViewModel.progressText(written: written, total: total))
+        case .downloading:
+            Text(model.downloadText(for: row))
                 .font(.caption).foregroundStyle(.secondary)
         default:
             Text(row.subtitle).font(.caption).foregroundStyle(.secondary)

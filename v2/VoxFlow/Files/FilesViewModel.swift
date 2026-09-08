@@ -31,6 +31,9 @@ final class FilesViewModel {
     var selected: ExportedResult?
     private(set) var needsModel = false
     var isDragOver = false
+    /// The number of items being dragged, shown in the overlay copy while `isDragOver` is true
+    /// (design MW-06g, I3) — set by `FilesDropDelegate.dropEntered`, cleared on `dropExited`.
+    var dragCount = 0
     private(set) var etaSeconds: [UUID: TimeInterval] = [:]
 
     private let queue: FileQueue
@@ -193,6 +196,12 @@ final class FilesViewModel {
 
     static func estimatedMinutes(forHours hours: Double) -> Int {
         Int((hours * 60 * estimatedRealTimeFactor).rounded(.up))
+    }
+
+    /// "Preparing…" below 5 % (the engine hasn't reported real progress yet), else "72 %" (design
+    /// I5) — the running row's progress text.
+    static func progressText(for progress: Double) -> String {
+        progress < 0.05 ? "Preparing…" : "\(Int((progress * 100).rounded()))%"
     }
 
     /// The MW-06x copy for a failed row. `.decodeFailed`/`.engineFailed`/`.noModelInstalled` read as
