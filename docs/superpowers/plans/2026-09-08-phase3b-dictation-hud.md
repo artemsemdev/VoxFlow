@@ -28,6 +28,7 @@
 - Views hold no business rules: every decision (copy per state, editable-role classification, fn transition decoding, save mapping, hide timing) lives in a testable type in `VoxFlow/Dictation` or `VoxFlow/FlowBar` with a Swift Testing test in `VoxFlowTests`.
 - Copy follows the canvas verbatim: "Hold fn to dictate" / "Press fn to dictate", "Cleaning up…" + "on this Mac", "Taking longer…", "✓ Inserted into {app}" + "{n} words", "✓ Copied — no text field here" + "⌘V", "Didn't catch that" + "Try again" + "fn", "✕ Discarded", "Microphone access needed" + "Open Settings", "Can't type here · Open Settings", "Speech model not installed" + "Download 1.6 GB", "Dictation is off in {app}", "Loading model…" + "keep talking", "15:00 · limit reached", "Copy raw transcript".
 - Timings from `FlowBarConfig` (3a) are not duplicated in the app; the HUD only renders.
+- **Design reference is the rendered canvas**, not its text: `scripts/render_design.sh` produces `.superpowers/design/canvas.pdf` (12 pages). Every UI task's implementer and reviewer compares against the relevant pages; Task 4 renders the HUD states to PNG for that comparison.
 - Global key monitoring forwards only fn transitions, esc, and "any key pressed" booleans to the coordinator. No key codes or characters are stored or logged.
 - No network. Audio never written to disk.
 - Commits: Conventional Commits, owner-authored, no attribution trailers. Branch `feature/110-phase3b-dictation-ui` from `develop`; PR into `develop`.
@@ -888,7 +889,12 @@ The ticker's `Task.sleep` is the one intentional sleep in production code (a 10 
 - Test: `VoxFlowTests/FlowBarContentTests.swift`, `VoxFlowTests/FlowBarPresenterTests.swift`
 
 **Interfaces:**
-- `struct FlowBarContent: Equatable` — `title: String`, `subtitle: String?`, `showsWaveform: Bool`, `showsRecordingDot: Bool`, `showsSpinner: Bool`, `timer: String?` (m:ss, tabular; amber when `elapsed ≥ 870`), `languageChip: String?` ("EN" / "EN?" / nil), `button: Button?` (`enum Button: Equatable { case openSettings, download(sizeText: String), tryAgain, copyRaw, resume }`), `isAccentButton: Bool` (only `.download`), `isError: Bool`; `static func make(state: FlowBarState, elapsed: TimeInterval, mode: HotkeyMode) -> FlowBarContent`; `static func timerText(_ seconds: TimeInterval) -> String` ("0:04", "1:24", "15:00"); `static func sizeText(_ bytes: Int64) -> String` ("1.6 GB", "480 MB").
+- `struct FlowBarContent: Equatable` — mirrors the pill's three zones in the canvas (rendered reference: `.superpowers/design/canvas.pdf` pages 8–9 "2a Flow Bar — edge states", page 11 "1a Flow Bar", page 4 FB-12/TT-01):
+  - `leading: Leading` — `enum Leading: Equatable { case dot(DotColor), spinner, check, cross, excluded }` with `enum DotColor { case idle, recording, warning, error }` (idle grey, recording red `#ff453a`, warning amber `#ffd60a` for FB-05/FB-08, error red for FB-07; `.check` green `#30d158` for FB-04/FB-04b; `.cross` grey for FB-06; `.excluded` = SF Symbol `rectangle.slash` for FB-10).
+  - `title: String`, `subtitle: String?` (dimmed, same line: "on this Mac", "42 words", "keep talking").
+  - `showsWaveform: Bool`, `timer: String?` (m:ss tabular; `timerIsAmber: Bool` when `elapsed ≥ 870`).
+  - `trailing: Trailing?` — `enum Trailing: Equatable { case keycap(String), languageChip(String), button(Button) }`; `enum Button: Equatable { case openSettings, download(sizeText: String), tryAgain, copyRaw }`. Keycaps are the small dark rounded labels ("fn", "⌘V", "fn stop" → `.keycap("fn")` with subtitle "stop"); `.languageChip("EN")` / `"EN?"` / `"AUTO"` is the chip right of the timer with a divider; `.button(.download)` is the only accent-blue control, `.button(.openSettings)` / `.tryAgain` / `.copyRaw` are darker pills (`.tryAgain` renders "Try again" + a tiny "fn" keycap).
+  - `static func make(state: FlowBarState, elapsed: TimeInterval, mode: HotkeyMode) -> FlowBarContent`; `static func timerText(_:)` ("0:04", "1:24", "15:00"); `static func sizeText(_:)` ("1.6 GB", "480 MB").
 - `WaveformView(levels: [Float])` — 14 bars, 3 pt wide, 2 pt gap, heights 4…20 pt, `.animation(.linear(duration: 0.05))`.
 - `FlowBarView(coordinator: DictationCoordinator)` — pill: `Capsule` fill `Palette.hudBackground`, 40 pt tall, horizontal padding 14, content per `FlowBarContent`; buttons call `coordinator.openSettingsForCurrentError()` / `coordinator.copyRaw()` / for `.tryAgain` nothing (fn is the action, the button is a hint per FB-05) / `.download` → `openSettingsForCurrentError()`; width animates `.easeOut(duration: 0.2)`, content `.transition(.opacity)` 120 ms.
 - `FlowBarPanel: NSPanel` — `init()` with `styleMask: [.nonactivatingPanel, .borderless, .fullSizeContentView]`, `level = .statusBar`, `collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]`, `isFloatingPanel = true`, `hidesOnDeactivate = false`, `isOpaque = false`, `backgroundColor = .clear`, `hasShadow = true`, `isMovableByWindowBackground = false`; `func present(on screen: NSScreen)` positions the panel bottom-center: `x = screen.visibleFrame.midX - width/2`, `y = screen.visibleFrame.minY + 24`; `contentView = NSHostingView(rootView:)`; `func show()` (`orderFrontRegardless()` + scale/fade 160 ms via `NSAnimationContext`), `func hide()` (fade 120 ms then `orderOut`).
@@ -908,41 +914,41 @@ struct FlowBarContentTests {
     @Test("copy per state matches the canvas")
     func copy() {
         let idle = FlowBarContent.make(state: .idle, elapsed: 0, mode: .pushToTalk)
-        #expect(idle.title == "Hold fn to dictate" && idle.button == nil && !idle.showsWaveform)
+        #expect(idle.leading == .dot(.idle) && idle.title == "Hold fn to dictate" && idle.trailing == .keycap("fn") && !idle.showsWaveform)
         #expect(FlowBarContent.make(state: .idle, elapsed: 0, mode: .handsFree).title == "Press fn to dictate")
 
         let listening = FlowBarContent.make(state: .listening(Listening(mode: .pushToTalk, startedAt: 0, language: LanguageDetection(code: "en", confidence: 0.4))), elapsed: 4, mode: .pushToTalk)
-        #expect(listening.showsWaveform && listening.showsRecordingDot && listening.timer == "0:04" && listening.languageChip == "EN?")
+        #expect(listening.leading == .dot(.recording) && listening.showsWaveform && listening.timer == "0:04" && listening.trailing == .languageChip("EN?"))
         let handsFree = FlowBarContent.make(state: .listening(Listening(mode: .handsFree, startedAt: 0, language: nil)), elapsed: 84, mode: .pushToTalk)
-        #expect(handsFree.subtitle == "fn — stop" && handsFree.timer == "1:24" && handsFree.languageChip == nil)
+        #expect(handsFree.trailing == .keycap("fn") && handsFree.subtitle == "stop" && handsFree.timer == "1:24")
 
         let processing = FlowBarContent.make(state: .processing(Processing(startedAt: 0, takingLonger: false, limitReached: false, partialText: "")), elapsed: 1, mode: .pushToTalk)
-        #expect(processing.title == "Cleaning up…" && processing.subtitle == "on this Mac" && processing.showsSpinner)
+        #expect(processing.leading == .spinner && processing.title == "Cleaning up…" && processing.subtitle == "on this Mac")
         let longer = FlowBarContent.make(state: .processing(Processing(startedAt: 0, takingLonger: true, limitReached: false, partialText: "")), elapsed: 9, mode: .pushToTalk)
         #expect(longer.title == "Taking longer…")
 
         #expect(FlowBarContent.make(state: .inserted(appName: "Mail", words: 42, limitReached: false), elapsed: 0, mode: .pushToTalk)
-                == FlowBarContent(title: "✓ Inserted into Mail", subtitle: "42 words", showsWaveform: false, showsRecordingDot: false, showsSpinner: false,
-                                  timer: nil, languageChip: nil, button: nil, isAccentButton: false, isError: false))
+                == FlowBarContent(leading: .check, title: "Inserted into Mail", subtitle: "42 words", showsWaveform: false,
+                                  timer: nil, timerIsAmber: false, trailing: nil))
         #expect(FlowBarContent.make(state: .inserted(appName: nil, words: 3, limitReached: true), elapsed: 0, mode: .pushToTalk).subtitle == "15:00 · limit reached")
-        #expect(FlowBarContent.make(state: .inserted(appName: nil, words: 1, limitReached: false), elapsed: 0, mode: .pushToTalk).title == "✓ Inserted")
+        #expect(FlowBarContent.make(state: .inserted(appName: nil, words: 1, limitReached: false), elapsed: 0, mode: .pushToTalk).title == "Inserted")
         let copied = FlowBarContent.make(state: .copied, elapsed: 0, mode: .pushToTalk)
-        #expect(copied.title == "✓ Copied — no text field here" && copied.subtitle == "⌘V")
+        #expect(copied.leading == .check && copied.title == "Copied — no text field here" && copied.trailing == .keycap("⌘V"))
         let didnt = FlowBarContent.make(state: .didntCatch(rawAvailable: false), elapsed: 0, mode: .pushToTalk)
-        #expect(didnt.title == "Didn't catch that" && didnt.subtitle == "Try again" && didnt.button == .tryAgain)
-        #expect(FlowBarContent.make(state: .didntCatch(rawAvailable: true), elapsed: 0, mode: .pushToTalk).button == .copyRaw)
-        #expect(FlowBarContent.make(state: .discarded, elapsed: 0, mode: .pushToTalk).title == "✕ Discarded")
+        #expect(didnt.leading == .dot(.warning) && didnt.title == "Didn't catch that" && didnt.trailing == .button(.tryAgain))
+        #expect(FlowBarContent.make(state: .didntCatch(rawAvailable: true), elapsed: 0, mode: .pushToTalk).trailing == .button(.copyRaw))
+        #expect(FlowBarContent.make(state: .discarded, elapsed: 0, mode: .pushToTalk) == FlowBarContent(leading: .cross, title: "Discarded", subtitle: nil, showsWaveform: false, timer: nil, timerIsAmber: false, trailing: nil))
         let mic = FlowBarContent.make(state: .micUnavailable(.denied), elapsed: 0, mode: .pushToTalk)
-        #expect(mic.title == "Microphone access needed" && mic.button == .openSettings && mic.isError)
+        #expect(mic.leading == .dot(.error) && mic.title == "Microphone access needed" && mic.trailing == .button(.openSettings))
         #expect(FlowBarContent.make(state: .micUnavailable(.inUse(by: nil)), elapsed: 0, mode: .pushToTalk).title == "Microphone in use by another app")
         #expect(FlowBarContent.make(state: .micUnavailable(.noDevice), elapsed: 0, mode: .pushToTalk).title == "No microphone")
         let model = FlowBarContent.make(state: .modelNotInstalled(sizeBytes: 1_624_555_275), elapsed: 0, mode: .pushToTalk)
-        #expect(model.title == "Speech model not installed" && model.button == .download(sizeText: "1.6 GB") && model.isAccentButton)
-        #expect(FlowBarContent.make(state: .excluded(app: "1Password"), elapsed: 0, mode: .pushToTalk).title == "Dictation is off in 1Password")
+        #expect(model.leading == .dot(.warning) && model.title == "Speech model not installed" && model.trailing == .button(.download(sizeText: "1.6 GB")))
+        #expect(FlowBarContent.make(state: .excluded(app: "1Password"), elapsed: 0, mode: .pushToTalk) == FlowBarContent(leading: .excluded, title: "Dictation is off in 1Password", subtitle: nil, showsWaveform: false, timer: nil, timerIsAmber: false, trailing: nil))
         let loading = FlowBarContent.make(state: .loadingModel(Pending(downAt: 0, fnIsDown: true, resolvedMode: nil)), elapsed: 0, mode: .pushToTalk)
-        #expect(loading.title == "Loading model…" && loading.subtitle == "keep talking" && loading.showsSpinner)
+        #expect(loading.leading == .spinner && loading.title == "Loading model…" && loading.subtitle == "keep talking")
         let err = FlowBarContent.make(state: .error("Couldn't load the speech model"), elapsed: 0, mode: .pushToTalk)
-        #expect(err.title == "Couldn't load the speech model" && err.button == .openSettings && err.isError)
+        #expect(err.leading == .dot(.error) && err.title == "Couldn't load the speech model" && err.trailing == .button(.openSettings))
         #expect(FlowBarContent.make(state: .armed(Pending(downAt: 0, fnIsDown: true, resolvedMode: nil)), elapsed: 0, mode: .pushToTalk).showsWaveform)
     }
 
@@ -1020,8 +1026,9 @@ func bind(to coordinator: DictationCoordinator) {
 ```
 `FlowBarPanel` conforms to `FlowBarPanelling`; `present(on:)` is called by `show()` using `NSScreen.main ?? NSScreen.screens.first`. `FlowBarView` uses `@Environment(DictationCoordinator.self)`? Simpler: `FlowBarView(coordinator:)` stored property; the hosting view is created once in `AppServices` with the coordinator.
 
-- [ ] **Step 4: Run** app tests — PASS; launch the app (`open build/…/VoxFlow.app` or via Xcode) and confirm the panel appears when fn is pressed (Task 5 does the full e2e).
-- [ ] **Step 5: Commit** `git commit -m "feat(app): Flow Bar panel, view and presenter"`
+- [ ] **Step 4: Design-fidelity renders.** Add `VoxFlowTests/FlowBarRenderTests.swift`: `@Suite(.enabled(if: ProcessInfo.processInfo.environment["VOXFLOW_RENDER"] != nil))`, `@MainActor`, one test that builds `FlowBarView` for every `FlowBarState` in the copy test (idle PTT, idle hands-free, listening EN?, listening hands-free 1:24, processing, taking longer, inserted Mail 42, copied, didn't catch, didn't catch raw, discarded, mic denied, mic in use, no device, model missing, excluded, loading, error, armed) with a fixed 14-level waveform, renders each with `ImageRenderer(content:)` at `scale = 2` on a 420×80 canvas with the desktop-grey background from the canvas (`#d9dbe0`), and writes `.superpowers/design/renders/FlowBar-<n>-<state>.png` (create the directory). Run it: `VOXFLOW_RENDER=1 xcodebuild -scheme VoxFlow -destination 'platform=macOS' test -only-testing:VoxFlowTests/FlowBarRenderTests`. Then compare each PNG side by side with `.superpowers/design/canvas.pdf` pages 8–9 and 11 (use the Read tool on the PNGs and the PDF pages): pill height 40 pt, dark material, leading indicator, text weight/size (13 pt semibold title, 13 pt regular dimmed subtitle), keycap/chip/button styling, spacing. Fix the view until they match; list residual differences in the report. The reviewer repeats the comparison.
+- [ ] **Step 5: Run** app tests — PASS; launch the app (`open build/…/VoxFlow.app` or via Xcode) and confirm the panel appears when fn is pressed (Task 5 does the full e2e).
+- [ ] **Step 6: Commit** `git commit -m "feat(app): Flow Bar panel, view and presenter"`
 
 ---
 
