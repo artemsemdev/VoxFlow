@@ -36,6 +36,8 @@ public actor ModelStore {
     private let settings: any KeyValueStore
     private let fileManager = FileManager.default
     private var inProgress: [String: ModelState] = [:]
+    /// One producer task per in-flight install; `cancelInstall(id:)` awaits it so callers observe the cleanup.
+    private var installTasks: [String: (token: UUID, task: Task<Void, Never>)] = [:]
 
     public init(directory: URL, catalog: [ModelDescriptor] = ModelCatalog.all, downloader: any ModelDownloading,
                 freeSpace: any FreeSpaceProviding, settings: any KeyValueStore) {
@@ -90,17 +92,34 @@ public actor ModelStore {
 
     /// Streams states until `.installed`, or throws a `ModelStoreError`.
     public func install(id: String) -> AsyncThrowingStream<ModelState, Error> {
-        AsyncThrowingStream { continuation in
-            let task = Task {
-                do {
-                    try await self.performInstall(id: id, emit: { continuation.yield($0) })
-                    continuation.finish()
-                } catch {
-                    continuation.finish(throwing: error)
-                }
+        let (stream, continuation) = AsyncThrowingStream<ModelState, Error>.makeStream()
+        let token = UUID()
+        let task = Task {
+            do {
+                try await self.performInstall(id: id, emit: { continuation.yield($0) })
+                continuation.finish()
+            } catch {
+                continuation.finish(throwing: error)
             }
-            continuation.onTermination = { _ in task.cancel() }
+            await self.forgetInstallTask(id: id, token: token)
         }
+        // A second install for an id already in flight fails fast inside performInstall and must
+        // not displace (or later erase) the real producer's registration — hence the token.
+        if installTasks[id] == nil { installTasks[id] = (token, task) }
+        continuation.onTermination = { _ in task.cancel() }
+        return stream
+    }
+
+    /// Cancels an in-flight install (the partial stays on disk) and returns only after the
+    /// producer's cleanup ran, so `state(of:)` reports `.paused` immediately afterwards.
+    public func cancelInstall(id: String) async {
+        guard let entry = installTasks[id] else { return }
+        entry.task.cancel()
+        await entry.task.value
+    }
+
+    private func forgetInstallTask(id: String, token: UUID) {
+        if installTasks[id]?.token == token { installTasks[id] = nil }
     }
 
     private func performInstall(id: String, emit: @Sendable @escaping (ModelState) -> Void) async throws {

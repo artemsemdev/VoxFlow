@@ -217,6 +217,21 @@ struct ModelStoreTests {
         #expect(await h.downloader.calls.map(\.resumedFrom) == [0])
     }
 
+    @Test("cancelInstall waits for the producer's cleanup: state is paused right after it returns")
+    func cancelInstallWaitsForCleanup() async throws {
+        let h = Harness()
+        await h.serveAll()
+        await h.downloader.setBlockAfterBytes(131_072)
+        let store = h.store()
+        let consumer = Task { try await Self.drain(await store.install(id: "big")) }
+        await h.downloader.waitUntilBlocked()
+        await store.cancelInstall(id: "big")
+        #expect(await store.state(of: "big") == .paused(bytesWritten: 131_072, total: 300_000))   // no yielding needed
+        await #expect(throws: CancellationError.self) { try await consumer.value }
+        await store.cancelInstall(id: "big")   // idempotent when nothing is in flight
+        #expect(await store.state(of: "big") == .paused(bytesWritten: 131_072, total: 300_000))
+    }
+
     @Test("cancelling an install keeps the partial and reports paused (ST-03o pause)")
     func cancelKeepsPartial() async throws {
         let h = Harness()

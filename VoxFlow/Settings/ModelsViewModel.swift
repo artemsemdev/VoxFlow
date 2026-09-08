@@ -143,7 +143,12 @@ final class ModelsViewModel {
         await task.value
     }
 
-    func pause(_ model: ModelDescriptor) { installs[model.id]?.cancel() }
+    /// ST-03o pause: cancels the store's producer and waits for its cleanup, so the row reads `.paused`
+    /// as soon as this returns (the consumer task finishes on its own and refreshes).
+    func pause(_ model: ModelDescriptor) async {
+        await store.cancelInstall(id: model.id)
+        installs[model.id]?.cancel()
+    }
     func resume(_ model: ModelDescriptor) async { await download(model) }
 
     /// ST-03o "Cancel download": discards the partial file outright (vs. `pause`, which keeps it).
