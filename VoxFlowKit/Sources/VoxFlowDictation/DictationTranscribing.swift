@@ -26,7 +26,7 @@ public struct DictationResult: Sendable, Equatable {
         self.lowConfidence = lowConfidence
     }
 
-    public var wordCount: Int { text.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).count }
+    public var wordCount: Int { text.wordCount }
     public static let empty = DictationResult(text: "", rawText: "", segments: [], language: nil, duration: 0, lowConfidence: false)
 }
 
