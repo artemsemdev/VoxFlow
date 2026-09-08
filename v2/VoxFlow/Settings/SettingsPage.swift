@@ -4,12 +4,10 @@ import SwiftUI
 /// one shows. Only Models (ST-03) is real in this phase — the other five read "Coming in a later
 /// phase", matching `PlaceholderPageView`'s treatment of the not-yet-built sidebar pages.
 struct SettingsPage: View {
+    @Environment(AppServices.self) private var services
     @Environment(Navigation.self) private var navigation
-    @State private var model: ModelsViewModel
 
-    init() {
-        _model = State(wrappedValue: ModelsViewModel(store: AppServices.shared.modelStore))
-    }
+    private var model: ModelsViewModel { services.modelsViewModel }
 
     var body: some View {
         @Bindable var navigation = navigation

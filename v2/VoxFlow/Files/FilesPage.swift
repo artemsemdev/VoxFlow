@@ -6,31 +6,45 @@ import VoxFlowFiles
 /// The Files page (design 1c Files, MW-06): drop zone/queue + toolbar, replaced by the transcript
 /// result view (design 2f) when a row is opened — not a sheet (controller ruling 6).
 struct FilesPage: View {
+    @Environment(AppServices.self) private var services
     @Environment(Navigation.self) private var navigation
-    @State private var model: FilesViewModel
+    /// Built once per opened row (not per render) in `.onChange` below — `TranscriptResultView`
+    /// only ever receives an already-built `ResultViewModel`, never constructs its own.
+    @State private var resultModel: ResultViewModel?
 
-    init() {
-        let services = AppServices.shared
-        _model = State(wrappedValue: FilesViewModel(
-            queue: services.queue, settings: services.filesSettings, modelStore: services.modelStore,
-            durations: services.durations, exports: services.exports))
-    }
+    private var model: FilesViewModel { services.filesViewModel }
 
     var body: some View {
         Group {
-            if let selected = model.selected {
-                TranscriptResultView(result: selected, settings: AppServices.shared.filesSettings, onBack: model.closeResult)
+            if let resultModel {
+                TranscriptResultView(resultModel: resultModel, onBack: model.closeResult)
             } else {
                 queueBody
             }
         }
         .navigationTitle("Files")
         .task { await model.refreshModelState() }
+        .onChange(of: model.selected?.item.id, initial: true) { _, _ in updateResultModel() }
         .alert(alertTitle, isPresented: alertIsPresented, presenting: model.confirmation) { confirmation in
             alertButtons(confirmation)
         } message: { confirmation in
             Text(alertMessage(confirmation))
         }
+    }
+
+    private func updateResultModel() {
+        guard let selected = model.selected else {
+            resultModel = nil
+            return
+        }
+        let settings = services.filesSettings
+        resultModel = ResultViewModel(
+            document: selected.document, format: settings.outputFormat, timestamps: settings.timestamps,
+            // No per-job record of "was auto-detect requested" survives onto `QueueItem`/
+            // `TranscriptDocument` — this reads the *current* Files setting as the best available
+            // proxy for what the job that produced this transcript most likely used.
+            autoDetectedLanguage: settings.language == nil, savedURL: selected.url,
+            exporter: { services.exporter }, pasteboard: SystemPasteboard(), revealer: FinderRevealer())
     }
 
     private var queueBody: some View {
@@ -51,7 +65,7 @@ struct FilesPage: View {
                 }
                 .padding(20)
             }
-            FilesToolbar(model: model, settings: AppServices.shared.filesSettings)
+            FilesToolbar(model: model, settings: services.filesSettings)
         }
         .dropDestination(for: URL.self) { urls, _ in
             Task { await model.addFiles(urls) }

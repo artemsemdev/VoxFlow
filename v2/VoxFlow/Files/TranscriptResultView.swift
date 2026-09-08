@@ -5,19 +5,8 @@ import VoxFlowFiles
 /// The transcript result screen (design 2f), shown inside the Files page in place of the queue —
 /// not a sheet (controller ruling 6). Builds its own `ResultViewModel` from the row that was opened.
 struct TranscriptResultView: View {
+    @Bindable var resultModel: ResultViewModel
     let onBack: () -> Void
-    @State private var resultModel: ResultViewModel
-
-    init(result: FilesViewModel.ExportedResult, settings: FilesSettings, onBack: @escaping () -> Void) {
-        self.onBack = onBack
-        _resultModel = State(wrappedValue: ResultViewModel(
-            document: result.document, format: settings.outputFormat, timestamps: settings.timestamps,
-            // No per-job record of "was auto-detect requested" survives onto `QueueItem`/
-            // `TranscriptDocument` — this reads the *current* Files setting as the best available
-            // proxy for what the job that produced this transcript most likely used.
-            autoDetectedLanguage: settings.language == nil, savedURL: result.url,
-            exporter: { AppServices.shared.exporter }, pasteboard: SystemPasteboard(), revealer: FinderRevealer()))
-    }
 
     var body: some View {
         VStack(spacing: 0) {
