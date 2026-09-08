@@ -29,7 +29,6 @@ private final class CaptureSession: @unchecked Sendable {
     private var observer: NSObjectProtocol?
     private var stopped = false
     private var chunker: AudioChunker
-    private var converter: AVAudioConverter?
 
     init(chunkSeconds: Double, continuation: AsyncThrowingStream<MicrophoneEvent, Error>.Continuation) {
         self.chunkSeconds = chunkSeconds
@@ -53,7 +52,6 @@ private final class CaptureSession: @unchecked Sendable {
         guard inputFormat.channelCount > 0, inputFormat.sampleRate > 0 else { throw MicrophoneError.noInputDevice }
         let target = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: AudioSamples.sampleRate, channels: 1, interleaved: false)!
         guard let converter = AVAudioConverter(from: inputFormat, to: target) else { throw MicrophoneError.engineFailed("no converter \(inputFormat) → 16 kHz mono") }
-        self.converter = converter
         chunker = AudioChunker(seconds: chunkSeconds)
         let continuation = continuation
         input.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [self] buffer, _ in
