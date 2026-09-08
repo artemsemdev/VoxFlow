@@ -136,7 +136,7 @@ struct FilesViewModelTests {
 
     @Test("a drop over 4 h asks first and adds nothing until confirmed")
     func longAudioPerDrop() async throws {
-        let h = try await Harness(durations: [Self.a: 5 * 3600])
+        let h = try await Harness(durations: [Self.a: 5 * 3600.0])
         await h.viewModel.addFiles([Self.a])
         #expect(h.viewModel.confirmation == .longAudio(urls: [Self.a], hours: 5))
         #expect(h.viewModel.items.isEmpty)
@@ -148,7 +148,7 @@ struct FilesViewModelTests {
 
     @Test("cancelling the long-audio confirmation leaves the queue empty")
     func longAudioCancelled() async throws {
-        let h = try await Harness(durations: [Self.a: 5 * 3600])
+        let h = try await Harness(durations: [Self.a: 5 * 3600.0])
         await h.viewModel.addFiles([Self.a])
         #expect(h.viewModel.confirmation == .longAudio(urls: [Self.a], hours: 5))
         h.viewModel.cancelConfirmation()
