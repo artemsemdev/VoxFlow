@@ -4,6 +4,9 @@ import VoxFlowCore
 import VoxFlowTestSupport
 @testable import VoxFlowDictation
 
+// `Gate` now lives in `VoxFlowTestSupport` (see `FakeDictationTranscriber.swift`), shared with the
+// app-target Preflight/ModelLoader tests instead of being duplicated per test target.
+
 @Suite("WindowedTranscriber", .timeLimit(.minutes(1)))
 struct WindowedTranscriberTests {
     func feed(_ chunks: [AudioChunk]) -> AsyncStream<AudioChunk> {
@@ -88,15 +91,4 @@ struct WindowedTranscriberTests {
 actor EventLog {
     var entries: [DictationEvent] = []
     func append(_ e: DictationEvent) { entries.append(e) }
-}
-
-/// One-shot gate: `wait()` suspends until `open()` was called (returns at once afterwards).
-actor Gate {
-    private var isOpen = false
-    private var waiters: [CheckedContinuation<Void, Never>] = []
-    func open() { isOpen = true; waiters.forEach { $0.resume() }; waiters.removeAll() }
-    func wait() async {
-        if isOpen { return }
-        await withCheckedContinuation { waiters.append($0) }
-    }
 }

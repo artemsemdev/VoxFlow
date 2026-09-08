@@ -47,7 +47,8 @@ final class AppServices {
         let engine = WhisperCppEngine()
         let filesSettings = FilesSettings(store: settingsStore)
         let snapshot = filesSettings.optionsSnapshot
-        let transcriber = LazyModelFileTranscriber(store: modelStore, engine: engine, decoder: AudioDecoder())
+        let modelLoader = ModelLoader(store: modelStore, engine: engine)
+        let transcriber = LazyModelFileTranscriber(loader: modelLoader, store: modelStore, engine: engine, decoder: AudioDecoder())
         let durations = AudioDurationReader()
         let queue = FileQueue(transcriber: transcriber, durations: durations,
                               supportedExtensions: SupportedAudio.extensions,
