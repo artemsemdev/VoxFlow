@@ -13,7 +13,7 @@ struct MenuBarContent: View {
                 Circle().fill(Palette.onDevice).frame(width: 8, height: 8)
                 Text(MenuBarStatus.text(for: dictation.state))
             }
-            Text(dictation.hotkeyMode == .handsFree ? "Hotkey: Double-tap fn" : "Hotkey: Hold fn")
+            Text(MenuBarStatus.hotkeyLine(for: dictation.hotkeyMode))
                 .foregroundStyle(.secondary)
         }
         Divider()

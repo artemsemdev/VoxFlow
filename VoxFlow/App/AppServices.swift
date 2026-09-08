@@ -12,11 +12,19 @@ import VoxFlowStorage
 /// Sendable pipe from `MeteredMicrophone`'s `@Sendable` level callback (called off the main actor)
 /// into the main-actor `DictationCoordinator` — same `Mutex`-boxed pattern as `DictationSettingsBox`,
 /// needed because `DictationCoordinator` itself isn't `Sendable`.
+///
+/// Holds the coordinator *weakly*: `dictation.controller.microphone.onLevel` closure captures this
+/// sink, so a strong reference back to `dictation` here would close a retain cycle among
+/// `dictation` → `dictationController` → `MeteredMicrophone` → sink → `dictation`, none of which
+/// would ever deallocate as a group. `WeakBox` is a private, unchecked-by-the-compiler `weak var`
+/// holder — sound because it only ever lives inside `Mutex`'s protected storage, which is what
+/// makes concurrent mutation of that `weak var` safe, not an `@unchecked Sendable` on this type.
 private final class DictationLevelSink: Sendable {
-    private let box = Mutex<DictationCoordinator?>(nil)
-    func attach(_ coordinator: DictationCoordinator) { box.withLock { $0 = coordinator } }
+    private struct WeakBox { weak var coordinator: DictationCoordinator? }
+    private let box = Mutex(WeakBox(coordinator: nil))
+    func attach(_ coordinator: DictationCoordinator) { box.withLock { $0.coordinator = coordinator } }
     func report(_ rms: Float) {
-        Task { @MainActor in self.box.withLock { $0 }?.reportLevel(rms) }
+        Task { @MainActor in self.box.withLock { $0.coordinator }?.reportLevel(rms) }
     }
 }
 
@@ -121,10 +129,12 @@ final class AppServices {
 
         // Reads the persisted value straight from `settingsStore` (Sendable) rather than
         // `dictationSettings.retentionDays` (a main-actor-isolated `var`), which a `@Sendable`
-        // closure called from the actor's own executor cannot touch directly.
+        // closure called from the actor's own executor cannot touch directly. `DictationSettings.Keys`
+        // is the single source of truth for the key name, so this can't silently drift from what
+        // `DictationSettings` itself persists to.
         let retention: RetentionRunner? = dictationStore.map { store in
             RetentionRunner(store: store,
-                            policy: { RetentionPolicy(days: settingsStore.string(forKey: "privacy.retentionDays").flatMap(Int.init) ?? 30) },
+                            policy: { RetentionPolicy(days: settingsStore.string(forKey: DictationSettings.Keys.retentionDays).flatMap(Int.init) ?? 30) },
                             now: Date.init, clock: SystemMonotonicClock())
         }
         if let retention { Task { await retention.start() } }

@@ -15,4 +15,10 @@ struct MenuBarStatusTests {
         let inserted = FlowBarState.inserted(appName: "Mail", words: 3, limitReached: false)
         #expect(MenuBarStatus.text(for: inserted) == "Ready · on-device")
     }
+
+    @Test("hotkey line follows the hotkey mode")
+    func hotkeyLine() {
+        #expect(MenuBarStatus.hotkeyLine(for: .pushToTalk) == "Hotkey: Hold fn")
+        #expect(MenuBarStatus.hotkeyLine(for: .handsFree) == "Hotkey: Double-tap fn")
+    }
 }

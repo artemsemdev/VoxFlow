@@ -24,6 +24,13 @@ final class DictationSettings {
     private let store: any KeyValueStore
     let box: DictationSettingsBox
 
+    /// `UserDefaults` key names, shared with any Sendable-context reader that can't touch this
+    /// main-actor-isolated class's properties directly (e.g. `AppServices.live()`'s `RetentionRunner`
+    /// policy closure) — a single source of truth instead of a second copy of the literal.
+    enum Keys {
+        static let retentionDays = "privacy.retentionDays"
+    }
+
     var hotkeyMode: HotkeyMode { didSet { store.set(hotkeyMode.rawValue, forKey: "dictation.hotkeyMode") } }
     var silenceStop: TimeInterval {
         didSet {
@@ -41,7 +48,7 @@ final class DictationSettings {
     var language: String? { didSet { store.set(language, forKey: "dictation.language"); sync() } }
     var keepHistory: Bool { didSet { store.set(keepHistory ? "1" : "0", forKey: "privacy.keepHistory"); sync() } }
     var encryptHistory: Bool { didSet { store.set(encryptHistory ? "1" : "0", forKey: "privacy.encryptHistory") } }
-    var retentionDays: Int { didSet { store.set(String(retentionDays), forKey: "privacy.retentionDays") } }
+    var retentionDays: Int { didSet { store.set(String(retentionDays), forKey: Keys.retentionDays) } }
     var excludedBundleIDs: [String] { didSet { store.set(excludedBundleIDs.joined(separator: ","), forKey: "privacy.excludedApps"); sync() } }
 
     init(store: any KeyValueStore) {
@@ -51,7 +58,7 @@ final class DictationSettings {
         language = store.string(forKey: "dictation.language")
         keepHistory = store.string(forKey: "privacy.keepHistory") != "0"
         encryptHistory = store.string(forKey: "privacy.encryptHistory") != "0"
-        retentionDays = store.string(forKey: "privacy.retentionDays").flatMap(Int.init) ?? 30
+        retentionDays = store.string(forKey: Keys.retentionDays).flatMap(Int.init) ?? 30
         excludedBundleIDs = store.string(forKey: "privacy.excludedApps").map { $0.split(separator: ",").map(String.init) } ?? Self.defaultExcluded
         box = DictationSettingsBox(DictationSettingsSnapshot(excludedBundleIDs: [], keepHistory: true, options: TranscriptionOptions()))
         sync()
