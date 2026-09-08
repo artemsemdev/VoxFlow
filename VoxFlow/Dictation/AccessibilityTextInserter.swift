@@ -31,8 +31,8 @@ final class AccessibilityTextInserter: TextInserting {
         var focused: CFTypeRef?
         let system = AXUIElementCreateSystemWide()
         guard AXUIElementCopyAttributeValue(system, kAXFocusedUIElementAttribute as CFString, &focused) == .success,
-              let element = focused else { return }
-        target = (element as! AXUIElement)
+              let element = focused, CFGetTypeID(element) == AXUIElementGetTypeID() else { return }
+        target = unsafeDowncast(element, to: AXUIElement.self)
     }
 
     nonisolated func insert(_ text: String) async -> InsertionResult {

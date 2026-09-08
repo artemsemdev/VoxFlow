@@ -30,7 +30,7 @@ final class FnKeyMonitor {
             self.onFn(t)
         }
         if let m = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged, handler: flags) { monitors.append(m) }
-        monitors.append(NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { flags($0); return $0 } as Any)
+        if let m = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged, handler: { flags($0); return $0 }) { monitors.append(m) }
         let keys: (NSEvent) -> Void = { [weak self] event in
             guard let self, self.isHUDActive() else { return }
             if event.keyCode == 53 { self.onEscape() } else { self.onAnyKey() }
