@@ -1,8 +1,0 @@
-[
-  { "text": "red",    "startSec": 0.10, "endSec": 0.60 },
-  { "text": "orange", "startSec": 0.70, "endSec": 1.50 },
-  { "text": "yellow", "startSec": 2.10, "endSec": 2.70 },
-  { "text": "green",  "startSec": 3.00, "endSec": 3.80 },
-  { "text": "blue",   "startSec": 4.20, "endSec": 4.70 },
-  { "text": "indigo", "startSec": 4.80, "endSec": 5.60 }
-]

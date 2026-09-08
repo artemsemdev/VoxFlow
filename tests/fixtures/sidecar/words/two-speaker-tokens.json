@@ -1,8 +1,0 @@
-[
-  { "text": "alpha", "startSec": 0.00, "endSec": 0.40 },
-  { "text": "bravo", "startSec": 0.50, "endSec": 0.90 },
-  { "text": "charlie", "startSec": 1.00, "endSec": 1.60 },
-  { "text": "delta", "startSec": 1.70, "endSec": 1.95 },
-  { "text": "echo", "startSec": 2.20, "endSec": 2.60 },
-  { "text": "foxtrot", "startSec": 2.70, "endSec": 3.40 }
-]
