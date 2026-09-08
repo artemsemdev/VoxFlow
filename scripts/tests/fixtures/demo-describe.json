@@ -1,0 +1,12 @@
+{
+  "name": "Demo",
+  "targets": [
+    {"name": "Core", "type": "library", "path": "Sources/Core", "target_dependencies": []},
+    {"name": "A", "type": "library", "path": "Sources/A", "target_dependencies": ["Core"]},
+    {"name": "B", "type": "library", "path": "Sources/B", "target_dependencies": ["A"]},
+    {"name": "Tool", "type": "executable", "path": "Sources/Tool", "target_dependencies": ["B"]},
+    {"name": "CoreTests", "type": "test", "path": "Tests/CoreTests", "target_dependencies": ["Core"]},
+    {"name": "ATests", "type": "test", "path": "Tests/ATests", "target_dependencies": ["A"]},
+    {"name": "BTests", "type": "test", "path": "Tests/BTests", "target_dependencies": ["B"]}
+  ]
+}

@@ -1,153 +1,298 @@
 name: CI
 
-# Run the standard verification pipeline for primary branches and all PRs.
+# Validate VoxFlow (Swift) — see issues #105, #116.
+#
+# Ladder (pull requests): a cheap Ubuntu job buckets the changed files, then
+#   docs only                                   → nothing else runs, `result` is green
+#   scripts/** only                             → Python unit tests for the CI scripts
+#   VoxFlowKit only (modules the app does not link) → swift test for the changed modules and their dependents
+#   app, project.yml, this workflow, the package manifest, a module the app links,
+#   anything else in the repo, or PR label `ci:full`  → full VoxFlow scheme (build + all tests)
+# Pushes to develop/master and manual runs always run the full scheme.
+# Every PR gets a `result` check; branch protection requires only that job.
 on:
   push:
     branches:
-      - main
       - master
+      - develop
   pull_request:
+    # `labeled` so adding `ci:full` to an open PR triggers a full run.
+    types: [opened, synchronize, reopened, labeled]
+  workflow_dispatch:
 
-# Keep command output stable and reduce CI noise across all jobs.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
 env:
-  DOTNET_NOLOGO: true
-  DOTNET_CLI_TELEMETRY_OPTOUT: true
-  CI: true
+  PACKAGE_PATH: VoxFlowKit
 
 jobs:
-  # Validate the shared library and non-desktop hosts on Linux.
-  core-hosts:
-    name: Core, CLI, MCP
+  changes:
+    name: Classify changes
     runs-on: ubuntu-latest
-
+    timeout-minutes: 5
+    outputs:
+      scripts: ${{ steps.filter.outputs.scripts }}
+      package: ${{ steps.filter.outputs.package }}
+      package_files: ${{ steps.filter.outputs.package_files }}
+      full: ${{ steps.mode.outputs.full }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+      # Only pull requests are classified; pushes and manual runs always run everything.
+      - name: Bucket changed files
+        id: filter
+        if: github.event_name == 'pull_request'
+        uses: dorny/paths-filter@v4
         with:
-          dotnet-version: 9.0.x
+          list-files: json
+          # Default quantifier ('some') matches a rule if ANY of its patterns match, so a
+          # negated pattern such as '!**/*.md' does not act as an exclusion once '**'
+          # already matched — 'other' would wrongly catch every *.md file. This makes a
+          # negated pattern a real exclusion.
+          predicate-quantifier: 'some-with-excludes'
+          filters: |
+            docs:
+              - 'docs/**'
+              - 'design/**'
+              - '**/*.md'
+            scripts:
+              - 'scripts/**'
+            package:
+              - 'VoxFlowKit/**'
+            app:
+              - 'VoxFlow/**'
+              - 'VoxFlowTests/**'
+              - 'project.yml'
+            workflow:
+              - '.github/workflows/ci.yml'
+            # Anything else (a new package, an .xcconfig, a Makefile…) runs everything; repository
+            # housekeeping files and the other workflows do not.
+            other:
+              - '**'
+              - '!docs/**'
+              - '!design/**'
+              - '!**/*.md'
+              - '!scripts/**'
+              - '!VoxFlowKit/**'
+              - '!VoxFlow/**'
+              - '!VoxFlowTests/**'
+              - '!project.yml'
+              - '!.github/**'
+              - '!.gitignore'
+              - '!.editorconfig'
+              - '!LICENSE'
 
-      - name: Restore core projects
+      # A package change that touches the manifest or a module the app links must also
+      # build the app, so it escalates to the full run. Linked modules are read from
+      # project.yml (`product:` lines), not maintained by hand.
+      - name: Check whether package changes reach the app
+        id: linked
+        if: github.event_name == 'pull_request' && steps.filter.outputs.package == 'true'
+        env:
+          PACKAGE_FILES: ${{ steps.filter.outputs.package_files }}
         run: |
-          dotnet restore src/VoxFlow.Core/VoxFlow.Core.csproj
-          dotnet restore src/VoxFlow.Cli/VoxFlow.Cli.csproj
-          dotnet restore src/VoxFlow.McpServer/VoxFlow.McpServer.csproj
-          dotnet restore tests/VoxFlow.Core.Tests/VoxFlow.Core.Tests.csproj
-          dotnet restore tests/VoxFlow.Cli.Tests/VoxFlow.Cli.Tests.csproj
-          dotnet restore tests/VoxFlow.McpServer.Tests/VoxFlow.McpServer.Tests.csproj
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, re
+          files = json.loads(os.environ["PACKAGE_FILES"])
+          linked = sorted(set(re.findall(r"^\s*product:\s*(\S+)\s*$", open("project.yml").read(), re.M)))
+          prefixes = tuple(f"VoxFlowKit/Sources/{m}/" for m in linked)
+          reaches_app = any(
+              f.rsplit("/", 1)[-1] in ("Package.swift", "Package.resolved") or f.startswith(prefixes)
+              for f in files
+          )
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"reaches_app={'true' if reaches_app else 'false'}\n")
+          print(f"::notice::App-linked modules: {linked}; package change reaches the app: {reaches_app}")
+          PY
 
-      - name: Build core projects
+      # Full run when: not a PR (push/dispatch), the PR carries `ci:full`, or the change
+      # touches the app, this workflow, an unbucketed path, or a package part the app links.
+      - name: Decide run mode
+        id: mode
+        env:
+          IS_PR: ${{ github.event_name == 'pull_request' }}
+          HAS_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'ci:full') }}
+          APP: ${{ steps.filter.outputs.app }}
+          WORKFLOW: ${{ steps.filter.outputs.workflow }}
+          OTHER: ${{ steps.filter.outputs.other }}
+          REACHES_APP: ${{ steps.linked.outputs.reaches_app }}
         run: |
-          dotnet build src/VoxFlow.Core/VoxFlow.Core.csproj --no-restore
-          dotnet build src/VoxFlow.Cli/VoxFlow.Cli.csproj --no-restore
-          dotnet build src/VoxFlow.McpServer/VoxFlow.McpServer.csproj --no-restore
-
-      # Exclude Category=RequiresPython: these sidecar integration tests need pyannote installed
-      # and a diarization model available, which is out of scope for the default CI image. They
-      # are run on machines with the full Python/pyannote environment as part of the Post-Phase-0
-      # verification checklist in docs/delivery/local-speaker-labeling/.
-      #
-      # Skip-count gate: with the RequiresPython filter every [SkippableFact] in Core is excluded
-      # (not skipped); CLI and MCP have no SkippableFact callsites. The expected Skipped count
-      # for all three Linux projects is 0. Any non-zero value means a Skip.IfNot/Skip.If guard
-      # fired unexpectedly and the SkippableFact's [SKIP] reason in the test output names which
-      # one — silent skips on default CI verbosity used to hide this. See docs/delivery/
-      # local-speaker-labeling/phase-1-manual-verification.md for baselines.
-      - name: Run core tests
-        run: |
-          set -eo pipefail
-          assert_skips() {
-            local label="$1" log="$2" expected="$3"
-            local skipped
-            # `|| true` keeps pipefail from aborting if dotnet test ever stops printing
-            # the "Skipped: N" summary line (older runner glitch); empty → treated as 0.
-            skipped=$(grep -oE "Skipped:[[:space:]]+[0-9]+" "$log" | tail -1 | grep -oE "[0-9]+" || true)
-            if [ "${skipped:-0}" != "$expected" ]; then
-              echo "::error::${label} reported ${skipped} skipped test(s); expected ${expected}. Check the test output above for the [SKIP] reason and the uploaded .trx artifact."
-              exit 1
-            fi
-          }
-
-          core_log=$(mktemp)
-          cli_log=$(mktemp)
-          mcp_log=$(mktemp)
-
-          dotnet test tests/VoxFlow.Core.Tests/VoxFlow.Core.Tests.csproj --no-restore --filter "Category!=RequiresPython" --logger "trx;LogFileName=VoxFlow.Core.Tests.trx" | tee "$core_log"
-          dotnet test tests/VoxFlow.Cli.Tests/VoxFlow.Cli.Tests.csproj --no-restore --logger "trx;LogFileName=VoxFlow.Cli.Tests.trx" | tee "$cli_log"
-          dotnet test tests/VoxFlow.McpServer.Tests/VoxFlow.McpServer.Tests.csproj --no-restore --logger "trx;LogFileName=VoxFlow.McpServer.Tests.trx" | tee "$mcp_log"
-
-          assert_skips "VoxFlow.Core.Tests"      "$core_log" 0
-          assert_skips "VoxFlow.Cli.Tests"       "$cli_log"  0
-          assert_skips "VoxFlow.McpServer.Tests" "$mcp_log"  0
-
-      - name: Upload test results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: core-test-results
-          path: |
-            tests/**/TestResults/*.trx
-
-  # Build the Mac Catalyst desktop app and run the headless desktop test suite on macOS.
-  desktop:
-    name: Desktop
-    runs-on: macos-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 9.0.x
-
-      - name: Install MAUI workload
-        run: dotnet workload install maui-maccatalyst
-
-      - name: Restore desktop projects
-        run: |
-          # Desktop builds the local CLI bridge as part of the Mac Catalyst build, so the CLI project
-          # must be restored here even though this job does not run the standalone CLI test suite.
-          dotnet restore src/VoxFlow.Cli/VoxFlow.Cli.csproj
-          dotnet restore src/VoxFlow.Desktop/VoxFlow.Desktop.csproj
-          dotnet restore tests/VoxFlow.Desktop.Tests/VoxFlow.Desktop.Tests.csproj
-
-      # GitHub's macOS images can lag behind the SDK expected by the current MAUI workload.
-      # Restrict CI to SDK-only linking so the desktop build stays compatible with the runner Xcode.
-      - name: Build desktop app
-        run: dotnet build src/VoxFlow.Desktop/VoxFlow.Desktop.csproj -f net9.0-maccatalyst --no-restore -p:MtouchLink=SdkOnly
-
-      # Real Desktop UI automation is intentionally excluded from default CI because it is slower
-      # and depends on a more specialized interactive macOS environment than the headless suite.
-      #
-      # Skip-count gate: the macOS CI build uses `-p:MtouchLink=SdkOnly` to stay compatible with
-      # the runner Xcode, which produces a Mac Catalyst .app that does NOT run CopyBundledCliBridge,
-      # so the two [SkippableFact] DesktopCliBundleTests both skip ("Mac Catalyst Desktop app bundle
-      # has not been built yet."). Expected Skipped: 2 — see docs/delivery/local-speaker-labeling/
-      # phase-1-manual-verification.md. Until the SdkOnly link is replaced and the bridge runs in CI,
-      # this gate freezes the count at 2 so any drift (1, 3, ...) surfaces a real change.
-      # TODO(#37 follow-up): drive Skipped down to 0 by populating the bundle in CI.
-      - name: Run desktop tests
-        run: |
-          set -eo pipefail
-          desktop_log=$(mktemp)
-          dotnet test tests/VoxFlow.Desktop.Tests/VoxFlow.Desktop.Tests.csproj --no-restore --logger "trx;LogFileName=VoxFlow.Desktop.Tests.trx" | tee "$desktop_log"
-
-          expected_skips=2
-          # `|| true` keeps pipefail from aborting if the summary line is missing.
-          skipped=$(grep -oE "Skipped:[[:space:]]+[0-9]+" "$desktop_log" | tail -1 | grep -oE "[0-9]+" || true)
-          if [ "${skipped:-0}" != "$expected_skips" ]; then
-            echo "::error::VoxFlow.Desktop.Tests reported ${skipped} skipped test(s); expected ${expected_skips}. Check the test output above for the [SKIP] reason and the uploaded .trx artifact, then update phase-1-manual-verification.md and this workflow if the drift is intentional."
-            exit 1
+          set -euo pipefail
+          if [ "$IS_PR" != "true" ] || [ "$HAS_LABEL" = "true" ] || [ "$APP" = "true" ] \
+             || [ "$WORKFLOW" = "true" ] || [ "$OTHER" = "true" ] || [ "$REACHES_APP" = "true" ]; then
+            echo "full=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Run mode: full (pr=$IS_PR label=$HAS_LABEL app=$APP workflow=$WORKFLOW other=$OTHER reaches_app=${REACHES_APP:-false})"
+          else
+            echo "full=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Run mode: selective"
           fi
 
-      - name: Upload test results
+  script-tests:
+    name: CI script tests
+    needs: changes
+    if: needs.changes.outputs.scripts == 'true' || needs.changes.outputs.full == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Run unit tests
+        run: python3 -m unittest discover -s scripts/tests -v
+
+  package-tests:
+    name: Package tests (affected modules)
+    needs: changes
+    if: needs.changes.outputs.full != 'true' && needs.changes.outputs.package == 'true'
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode 26
+        run: |
+          set -euo pipefail
+          XCODE=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1 || true)
+          [ -n "$XCODE" ] || { echo "::error::No Xcode 26.x on this runner image"; exit 1; }
+          sudo xcode-select -s "$XCODE"
+          swift --version
+
+      - name: Cache SPM build
+        uses: actions/cache@v4
+        with:
+          path: VoxFlowKit/.build
+          key: ${{ runner.os }}-spm-build-${{ hashFiles('VoxFlowKit/Package.swift', '**/Package.resolved') }}-${{ github.run_id }}
+          restore-keys: |
+            ${{ runner.os }}-spm-build-${{ hashFiles('VoxFlowKit/Package.swift', '**/Package.resolved') }}-
+            ${{ runner.os }}-spm-build-
+
+      - name: Select affected test targets
+        id: select
+        env:
+          CHANGED_JSON: ${{ needs.changes.outputs.package_files }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$CHANGED_JSON" > changed-files.json
+          FILTER=$(python3 scripts/affected_tests.py --package-path "$PACKAGE_PATH" --format regex --files-json changed-files.json)
+          {
+            echo "filter<<VOXFLOW_EOF"
+            echo "$FILTER"
+            echo "VOXFLOW_EOF"
+          } >> "$GITHUB_OUTPUT"
+          echo "::notice::Test filter: ${FILTER:-<none>}"
+
+      - name: Build package
+        run: swift build --package-path "$PACKAGE_PATH"
+
+      - name: Test affected modules
+        env:
+          FILTER: ${{ steps.select.outputs.filter }}
+        run: |
+          set -euo pipefail
+          if [ -z "$FILTER" ]; then
+            echo "No test target is affected by the changed files."
+          elif [ "$FILTER" = "ALL" ]; then
+            swift test --package-path "$PACKAGE_PATH"
+          else
+            swift test --package-path "$PACKAGE_PATH" --filter "$FILTER" 2>&1 | tee package-test.log
+            # A filter that selects nothing exits 0; treat that as a broken filter, not a pass.
+            if grep -q "Test run with 0 tests" package-test.log; then
+              echo "::error::The filter '$FILTER' selected no tests; target names or the filter format changed."
+              exit 1
+            fi
+          fi
+
+  full:
+    name: Build & test (Swift)
+    needs: changes
+    if: needs.changes.outputs.full == 'true'
+    runs-on: macos-15
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # The image defaults to Xcode 16.x; VoxFlow is developed with Xcode 26.x. Pick the newest 26.
+      - name: Select Xcode 26
+        run: |
+          set -euo pipefail
+          XCODE=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1 || true)
+          [ -n "$XCODE" ] || { echo "::error::No Xcode 26.x on this runner image"; exit 1; }
+          sudo xcode-select -s "$XCODE"
+          xcodebuild -version
+          swift --version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Cache SPM packages and DerivedData
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Developer/Xcode/DerivedData
+            VoxFlowKit/.build
+          key: ${{ runner.os }}-spm-${{ hashFiles('VoxFlowKit/Package.swift', '**/Package.resolved') }}-${{ github.run_id }}
+          restore-keys: |
+            ${{ runner.os }}-spm-${{ hashFiles('VoxFlowKit/Package.swift', '**/Package.resolved') }}-
+            ${{ runner.os }}-spm-
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Build
+        run: |
+          set -o pipefail
+          xcodebuild -scheme VoxFlow -destination 'platform=macOS' build | tee build.log
+
+      - name: Test
+        run: |
+          set -o pipefail
+          xcodebuild -scheme VoxFlow -destination 'platform=macOS' test -resultBundlePath TestResults.xcresult | tee test.log
+
+      - name: Package tests without Xcode project
+        run: swift test
+        working-directory: VoxFlowKit
+
+      - name: Upload logs and results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: desktop-test-results
+          name: test-results
           path: |
-            tests/**/TestResults/*.trx
+            build.log
+            test.log
+            TestResults.xcresult
+          if-no-files-found: ignore
+
+  # The single status check for branch protection: red if any job that ran failed or was
+  # cancelled, green when jobs were skipped by the ladder. `!cancelled()` (not `always()`)
+  # so a run superseded by a newer push posts no result at all instead of a stale red one.
+  result:
+    name: result
+    needs: [changes, script-tests, package-tests, full]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Evaluate
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          echo "$RESULTS" | python3 -c '
+          import json, sys
+          needs = json.load(sys.stdin)
+          bad = {k: v["result"] for k, v in needs.items() if v["result"] in ("failure", "cancelled")}
+          for k, v in needs.items():
+              print(k, ":", v["result"])
+          sys.exit(1 if bad else 0)
+          '

@@ -1,5 +1,0 @@
-[
-  { "text": "hello",   "startSec": 0.00, "endSec": 0.50 },
-  { "text": "world",   "startSec": 0.60, "endSec": 1.20 },
-  { "text": "today",   "startSec": 1.40, "endSec": 2.90 }
-]
