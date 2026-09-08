@@ -350,7 +350,7 @@ struct ModelsViewModelTests {
 
         let task = Task { await model.download(Self.big) }
         await h.downloader.waitUntilBlocked()
-        model.pause(Self.big)
+        await model.pause(Self.big)
         await task.value
 
         #expect(model.alert == nil)

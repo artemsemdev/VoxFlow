@@ -136,7 +136,7 @@ struct ModelsSettingsView: View {
                 .disabled(!row.isAvailable)
                 .help(row.isAvailable ? "" : "Available in a later version")
         case .downloading:
-            Button("Pause") { model.pause(row.model) }
+            Button("Pause") { Task { await model.pause(row.model) } }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
         case .paused:
