@@ -56,6 +56,8 @@ public struct WindowedTranscriber: DictationTranscribing {
             throw error
         } catch is CancellationError {
             throw DictationError.cancelled
+        } catch SpeechEngineError.cancelled {   // consumer was already cancelled when a window started
+            throw DictationError.cancelled
         } catch {
             throw DictationError.engineFailed(String(describing: error))
         }
