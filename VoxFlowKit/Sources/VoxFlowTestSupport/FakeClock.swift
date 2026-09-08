@@ -14,6 +14,7 @@ public final class FakeClock: MonotonicClock, Sendable {
     public var sleeperCount: Int { state.withLock { $0.sleepers.count } }
 
     public func sleep(for seconds: TimeInterval) async throws {
+        try Task.checkCancellation()   // already-cancelled callers must not register a sleeper `advance` would resume
         let id = UUID()
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
