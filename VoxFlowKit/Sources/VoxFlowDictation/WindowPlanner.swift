@@ -12,14 +12,14 @@ public struct WindowPlanner: Sendable, Equatable {
     public var maxWindow: TimeInterval = 10
     public var trailingSilence: TimeInterval = 0.4
     public var minFlush: TimeInterval = 0.3
-    public var voiceRMS: Float = 0.01
+    public var voiceRMS: Float
 
     private var buffer: [Float] = []
     /// Seconds of trailing audio below `voiceRMS`.
     private var silentTail: TimeInterval = 0
     private var consumed: TimeInterval = 0
 
-    public init() {}
+    public init(voiceRMS: Float = DictationDefaults.voiceRMS) { self.voiceRMS = voiceRMS }
 
     public mutating func append(_ chunk: AudioChunk) -> Window? {
         buffer.append(contentsOf: chunk.samples)

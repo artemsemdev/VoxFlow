@@ -25,7 +25,7 @@ public struct Preflight: Sendable, Equatable {
     }
 }
 
-public enum FlowBarTimer: Sendable, Hashable { case hold, doubleTap, silence, cap, takingLonger, processingTimeout, dismiss }
+public enum FlowBarTimer: Sendable, Hashable { case hold, doubleTap, silence, cap, takingLonger, processingTimeout, dismiss, modelLoad }
 
 public enum FlowBarEvent: Sendable, Equatable {
     case fnDown(Preflight), fnUp, escape, anyKey
@@ -134,9 +134,7 @@ public struct FlowBarMachine: Sendable, Equatable {
 
     public init(config: FlowBarConfig = FlowBarConfig()) { self.config = config }
 
-    public static func wordCount(_ text: String) -> Int {
-        text.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).count
-    }
+    public static func wordCount(_ text: String) -> Int { text.wordCount }
 
     public mutating func handle(_ event: FlowBarEvent, now: TimeInterval) -> [FlowBarEffect] {
         switch (state, event) {
@@ -194,19 +192,24 @@ public struct FlowBarMachine: Sendable, Equatable {
             switch p.resolvedMode {
             case .pushToTalk where p.fnIsDown:
                 state = .listening(Listening(mode: .pushToTalk, startedAt: p.downAt, language: nil))
-                return [.startTimer(.cap, seconds: config.maxDuration)]
+                return [.cancelTimer(.modelLoad), .startTimer(.cap, seconds: config.maxDuration)]
             case .pushToTalk:                          // released while loading → straight to processing
-                return startProcessing(now: now, limitReached: false, cancelling: [])
+                return [.cancelTimer(.modelLoad)] + startProcessing(now: now, limitReached: false, cancelling: [])
             case .handsFree:
                 state = .listening(Listening(mode: .handsFree, startedAt: p.downAt, language: nil))
-                return [.startTimer(.cap, seconds: config.maxDuration), .startTimer(.silence, seconds: config.silenceStop)]
+                return [.cancelTimer(.modelLoad), .startTimer(.cap, seconds: config.maxDuration), .startTimer(.silence, seconds: config.silenceStop)]
             case nil:
                 state = .armed(p)
-                return []
+                return [.cancelTimer(.modelLoad)]
             }
-        case (.loadingModel, .modelLoadFailed):
+        case (.loadingModel, .modelLoadFailed), (.loadingModel, .timer(.modelLoad)):
+            // A stalled load times out the same way a reported failure does: the mic must not stay
+            // open indefinitely with no way for the user to escape (I1).
             state = .error("Couldn't load the speech model")
-            return [.cancelTimer(.hold), .cancelTimer(.doubleTap), .abortCapture, .startTimer(.dismiss, seconds: config.dismissError)]
+            return [.cancelTimer(.modelLoad), .cancelTimer(.hold), .cancelTimer(.doubleTap), .abortCapture, .startTimer(.dismiss, seconds: config.dismissError)]
+        case (.loadingModel, .escape):
+            state = .discarded
+            return [.cancelTimer(.hold), .cancelTimer(.doubleTap), .cancelTimer(.modelLoad), .abortCapture, .startTimer(.dismiss, seconds: config.dismissDiscarded)]
         case (.armed, .fnDown), (.loadingModel, .fnDown), (.tapped, .fnUp):
             return []
 
@@ -300,7 +303,7 @@ public struct FlowBarMachine: Sendable, Equatable {
                 return prefix + [.startCapture, .startTimer(.hold, seconds: config.holdThreshold)]
             }
             state = .loadingModel(pending)
-            return prefix + [.startCapture, .loadModel, .startTimer(.hold, seconds: config.holdThreshold)]
+            return prefix + [.startCapture, .loadModel, .startTimer(.modelLoad, seconds: config.modelLoadTimeout), .startTimer(.hold, seconds: config.holdThreshold)]
         }
         return prefix + [.startTimer(.dismiss, seconds: config.dismissError)]
     }

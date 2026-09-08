@@ -9,6 +9,12 @@ struct WindowPlannerTests {
         AudioChunk(samples: Array(repeating: rms, count: Int(seconds * AudioSamples.sampleRate)))
     }
 
+    @Test("the silence-stop threshold and the window-cut threshold never drift apart (I4)")
+    func sharedVoiceThreshold() {
+        #expect(FlowBarConfig().voiceRMS == WindowPlanner().voiceRMS)
+        #expect(WindowPlanner().voiceRMS == DictationDefaults.voiceRMS)
+    }
+
     @Test("closes a window after ≥ 3 s when the last 0.4 s are silent; reports its start offset")
     func silenceCut() {
         var planner = WindowPlanner()

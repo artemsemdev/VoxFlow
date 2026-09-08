@@ -144,11 +144,11 @@ struct FlowBarMachineTests {
     func loadingModel() {
         let cold = Preflight(excludedApp: nil, secureInput: false, microphone: .granted, model: .installedNotLoaded)
         var m = FlowBarMachine()
-        #expect(m.handle(.fnDown(cold), now: 0) == [.startCapture, .loadModel, .startTimer(.hold, seconds: 0.25)])
+        #expect(m.handle(.fnDown(cold), now: 0) == [.startCapture, .loadModel, .startTimer(.modelLoad, seconds: 30), .startTimer(.hold, seconds: 0.25)])
         #expect(m.state == .loadingModel(Pending(downAt: 0, fnIsDown: true, resolvedMode: nil)))
         #expect(m.handle(.timer(.hold), now: 0.25).isEmpty)
         #expect(m.state == .loadingModel(Pending(downAt: 0, fnIsDown: true, resolvedMode: .pushToTalk)))
-        #expect(m.handle(.modelLoaded, now: 1.5) == [.startTimer(.cap, seconds: 900)])
+        #expect(m.handle(.modelLoaded, now: 1.5) == [.cancelTimer(.modelLoad), .startTimer(.cap, seconds: 900)])
         #expect(m.state == .listening(Listening(mode: .pushToTalk, startedAt: 0, language: nil)))
 
         var early = FlowBarMachine()
@@ -161,13 +161,36 @@ struct FlowBarMachineTests {
         _ = released.handle(.fnDown(cold), now: 0)
         _ = released.handle(.timer(.hold), now: 0.25)
         #expect(released.handle(.fnUp, now: 0.9).isEmpty)   // released before the model is ready: remembered
-        #expect(released.handle(.modelLoaded, now: 1.5) == [.finishCapture, .startTimer(.takingLonger, seconds: 8), .startTimer(.processingTimeout, seconds: 20)])
+        #expect(released.handle(.modelLoaded, now: 1.5) == [.cancelTimer(.modelLoad), .finishCapture, .startTimer(.takingLonger, seconds: 8), .startTimer(.processingTimeout, seconds: 20)])
         #expect(released.state.isProcessing)
 
         var failed = FlowBarMachine()
         _ = failed.handle(.fnDown(cold), now: 0)
-        #expect(failed.handle(.modelLoadFailed("bad file"), now: 1) == [.cancelTimer(.hold), .cancelTimer(.doubleTap), .abortCapture, .startTimer(.dismiss, seconds: 4)])
+        #expect(failed.handle(.modelLoadFailed("bad file"), now: 1) ==
+                [.cancelTimer(.modelLoad), .cancelTimer(.hold), .cancelTimer(.doubleTap), .abortCapture, .startTimer(.dismiss, seconds: 4)])
         #expect(failed.state == .error("Couldn't load the speech model"))
+    }
+
+    @Test("esc while loadingModel discards and tears down capture, same as esc while listening (I1)")
+    func escapeWhileLoadingModel() {
+        let cold = Preflight(excludedApp: nil, secureInput: false, microphone: .granted, model: .installedNotLoaded)
+        var m = FlowBarMachine()
+        _ = m.handle(.fnDown(cold), now: 0)
+        #expect(m.handle(.escape, now: 1) ==
+                [.cancelTimer(.hold), .cancelTimer(.doubleTap), .cancelTimer(.modelLoad), .abortCapture, .startTimer(.dismiss, seconds: 0.8)])
+        #expect(m.state == .discarded)
+    }
+
+    @Test("model-load timeout behaves like a reported load failure: mic doesn't stay open forever (I1)")
+    func modelLoadTimeout() {
+        let cold = Preflight(excludedApp: nil, secureInput: false, microphone: .granted, model: .installedNotLoaded)
+        var m = FlowBarMachine()
+        _ = m.handle(.fnDown(cold), now: 0)
+        #expect(m.handle(.timer(.modelLoad), now: 30) ==
+                [.cancelTimer(.modelLoad), .cancelTimer(.hold), .cancelTimer(.doubleTap), .abortCapture, .startTimer(.dismiss, seconds: 4)])
+        #expect(m.state == .error("Couldn't load the speech model"))
+        // a modelLoaded that arrives after the timeout has nothing left to do with
+        #expect(m.handle(.modelLoaded, now: 31).isEmpty)
     }
 
     @Test("microphone failure while listening → mic unavailable; language detection updates the chip")
