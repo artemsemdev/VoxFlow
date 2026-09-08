@@ -7,16 +7,19 @@ import VoxFlowModels
 import VoxFlowTestSupport
 @testable import VoxFlow
 
-/// Deterministic, lock-guarded clock: each call returns the current value, then advances by `step`.
-/// Used to control the view model's `now:` closure so the once-per-second render throttle (design
-/// 3d) can be exercised without depending on real wall-clock timing — the throttle only ever reads
-/// consecutive `now()` calls, so a clock that advances by a fixed amount *per call* (not per second
-/// of real time) drives it deterministically regardless of how the surrounding async work schedules.
+/// Deterministic, lock-guarded clock for the view model's injected `now:` closure. Time only moves
+/// when a test says so:
+/// - `advance(by:)` is the explicit, test-driven way to make time pass — used directly by
+///   `etaThrottle` so the once-per-second render throttle (design 3d) can be exercised without
+///   depending on real wall-clock timing or counting how many times `now()` happens to be called.
+/// - `step` (opt-in, defaults to 0 — i.e. frozen) additionally advances the clock on every `now()`
+///   read; the harness uses a small non-zero default so ordinary tests that just want "progress is
+///   never throttled" (e.g. `stopRule`) don't have to reason about the throttle at all.
 final class TestClock: Sendable {
     private let state: Mutex<Date>
     private let step: TimeInterval
 
-    init(start: Date = Date(timeIntervalSince1970: 0), step: TimeInterval) {
+    init(start: Date = Date(timeIntervalSince1970: 0), step: TimeInterval = 0) {
         state = Mutex(start)
         self.step = step
     }
@@ -24,9 +27,15 @@ final class TestClock: Sendable {
     func now() -> Date {
         state.withLock { date in
             let current = date
-            date.addTimeInterval(step)
+            if step != 0 { date.addTimeInterval(step) }
             return current
         }
+    }
+
+    /// Moves the clock forward (or, with a negative value, backward) by `seconds`, independent of
+    /// `step`. This is the mechanism `etaThrottle` uses to drive time explicitly.
+    func advance(by seconds: TimeInterval) {
+        state.withLock { $0.addTimeInterval(seconds) }
     }
 }
 
@@ -54,8 +63,12 @@ struct FilesViewModelTests {
 
         /// `clockStep` defaults to 2 s per `now()` call, comfortably above the 1 s render throttle
         /// so ordinary tests always see the latest progress in `items`; `etaThrottle` overrides it
-        /// with a small step to exercise the throttle itself.
-        init(durations: [URL: TimeInterval] = [a: 2892, b: 724], installedModel: Bool = true, clockStep: TimeInterval = 2) async throws {
+        /// (to 0, i.e. frozen) and drives time explicitly via `clock.advance(by:)` instead.
+        /// `preSeed` adds URLs to the queue *before* the view model — and therefore its subscription
+        /// and seed read — exist, so the row can only ever reach `items` via the initial seed.
+        /// `exportDirectory` overrides the auto-export destination (default: a fresh subdirectory).
+        init(durations: [URL: TimeInterval] = [a: 2892, b: 724], installedModel: Bool = true, clockStep: TimeInterval = 2,
+             preSeed: [URL] = [], exportDirectory: URL? = nil) async throws {
             self.durations = FakeAudioDuration(durations)
             let downloader = FakeModelDownloader()
             let payload = Data(repeating: 1, count: 100)
@@ -69,7 +82,8 @@ struct FilesViewModelTests {
             }
             queue = FileQueue(transcriber: transcriber, durations: self.durations, supportedExtensions: SupportedAudio.extensions,
                               options: { TranscriptionOptions() })
-            let exportDir = dir.file("Transcripts")
+            if !preSeed.isEmpty { await queue.add(preSeed) }
+            let exportDir = exportDirectory ?? dir.file("Transcripts")
             clock = TestClock(step: clockStep)
             viewModel = FilesViewModel(queue: queue, settings: settings, modelStore: store, durations: self.durations,
                                        exporter: { TranscriptExporter(directory: exportDir) }, now: clock.now)
@@ -89,6 +103,31 @@ struct FilesViewModelTests {
             await transcriber.waitUntilHeld(url)
             for _ in 0..<50 { await Task.yield() }
         }
+    }
+
+    // MARK: Lifecycle / seeding
+
+    @Test("the view model deallocates once nothing else holds it — no retain cycle through the event task")
+    func deallocatesWhenReleased() async throws {
+        weak var weakViewModel: FilesViewModel?
+        do {
+            let h = try await Harness()
+            weakViewModel = h.viewModel
+            #expect(weakViewModel != nil)
+        }
+        // `h` (and its last strong reference to the view model) is out of scope now; give the
+        // runtime a bounded number of turns to actually run the deallocation — ARC release itself
+        // is synchronous, but this keeps the check honest about not asserting on the same line.
+        for _ in 0..<50 { await Task.yield() }
+        #expect(weakViewModel == nil)
+    }
+
+    @Test("seeding from queue.items doesn't double-count a row that already existed before construction")
+    func seedDoesNotDuplicate() async throws {
+        let h = try await Harness(preSeed: [Self.a])
+        await h.settle()
+        #expect(h.viewModel.items.count == 1)
+        #expect(h.viewModel.items.first?.url == Self.a)
     }
 
     // MARK: 1 — long audio confirmation (3e)
@@ -191,6 +230,23 @@ struct FilesViewModelTests {
         #expect(low.viewModel.items.first?.status == .cancelled)
     }
 
+    @Test("requestStop consults live queue progress even when the caller's item snapshot is stale")
+    func requestStopUsesLiveProgress() async throws {
+        let h = try await Harness()
+        await h.transcriber.hold(Self.a)
+        await h.transcriber.script(Self.a, .document(Self.doc(Self.a)))
+        await h.viewModel.addFiles([Self.a])
+        await h.settle()
+        let staleItem = try #require(h.viewModel.items.first)   // captured while still `.queued`
+        #expect(staleItem.status == .queued)
+
+        await h.viewModel.transcribeAll()
+        await h.drainHeld(Self.a)   // the live queue is now at 0.75; `staleItem` still says `.queued`
+
+        await h.viewModel.requestStop(staleItem)
+        #expect(h.viewModel.confirmation == .stop(staleItem, progress: 0.75))
+    }
+
     // MARK: 5 — auto-export and open (MW-06r)
 
     @Test("finishing a job auto-exports in the configured format; open/closeResult drive the result view")
@@ -217,15 +273,62 @@ struct FilesViewModelTests {
         #expect(h.viewModel.selected == nil)
     }
 
+    @Test("a failed export surfaces via exportError(for:) after .finished")
+    func exportErrorSurfaces() async throws {
+        let outerDir = TemporaryDirectory()
+        let blockedPath = outerDir.file("Transcripts")
+        try Data("not a directory".utf8).write(to: blockedPath)   // a plain file where the exporter needs a directory
+        let h = try await Harness(exportDirectory: blockedPath)
+        await h.transcriber.script(Self.a, .document(Self.doc(Self.a)))
+        await h.viewModel.addFiles([Self.a])
+        await h.settle()
+        await h.viewModel.transcribeAll()
+        await h.settle()
+
+        let item = try #require(h.viewModel.items.first)
+        guard case .done = item.status else { Issue.record("expected the job to be done"); return }
+        #expect(h.viewModel.exported(for: item) == nil)
+        #expect(h.viewModel.exportError(for: item) != nil)
+    }
+
+    @Test("retry refreshes model state first and won't start the queue when no model is installed")
+    func retryGuardsOnNeedsModel() async throws {
+        let h = try await Harness(installedModel: false)
+        await h.transcriber.script(Self.a, .failure(.decodeFailed("corrupt")))
+        await h.viewModel.addFiles([Self.a])
+        await h.settle()
+        await h.queue.start()   // bypass the view model's own needsModel guard to get a failed row
+        await h.settle()
+        let item = try #require(h.viewModel.items.first)
+        #expect(item.status == .failed(.decodeFailed("corrupt")))
+
+        await h.viewModel.retry(item)
+        await h.settle()
+        #expect(h.viewModel.needsModel == true)
+        #expect(await h.queue.isRunning == false)
+        #expect(h.viewModel.items.first?.status == .queued)   // re-queued by retry, but never started
+    }
+
+    @Test("headerSubtitle omits the duration clause once it rounds down to 0 min")
+    func headerSubtitleOmitsNegligibleDuration() async throws {
+        let h = try await Harness(durations: [Self.a: 10])   // 10 s rounds to 0 min
+        await h.viewModel.addFiles([Self.a])
+        await h.settle()
+        #expect(h.viewModel.headerSubtitle == "")
+    }
+
     // MARK: 6 — ETA throttle (design 3d)
 
     @Test("running progress renders at most once per second; etaText reflects the throttled rate")
     func etaThrottle() async throws {
-        // Two running events inside the same throttle window: the estimator records both, but the
-        // second never passes the once-per-second render gate, so etaText stays nil.
-        // 0.3125 (5/16) is exactly representable in binary floating point, so the accumulated
-        // "logical" timestamps below are exact — no rounding drift near the throttle boundary.
-        let throttled = try await Harness(clockStep: 0.3125)
+        // Throttled case: a frozen clock (`clockStep: 0`) means the second running event reads the
+        // *exact same* "now" as the first, so it can never look like a second has elapsed — that
+        // holds regardless of how many of the two events the drain below has actually applied by
+        // the time we check, which is what makes this deterministic without racing the drain.
+        // `advance(by:)` — not a per-call step, and not real time — is what moves this clock at all;
+        // the call below just establishes an arbitrary non-zero starting point to prove it's used.
+        let throttled = try await Harness(clockStep: 0)
+        throttled.clock.advance(by: 5)
         await throttled.transcriber.hold(Self.a)
         await throttled.transcriber.setProgressSteps([0.25])
         await throttled.transcriber.script(Self.a, .document(Self.doc(Self.a)))
@@ -234,13 +337,26 @@ struct FilesViewModelTests {
         await throttled.viewModel.transcribeAll()
         await throttled.drainHeld(Self.a)
         let item1 = try #require(throttled.viewModel.items.first)
+        // The throttled 0.25 update never reached `items` — proof, not just an assumption, that it
+        // really was throttled and not merely "hasn't happened yet".
+        #expect(item1.status == .running(progress: 0))
         #expect(throttled.viewModel.etaText(for: item1) == nil)
         await throttled.transcriber.release(Self.a)
         await throttled.settle()
 
-        // A third running event, once enough logical time has passed, clears the throttle and the
-        // estimator now has a rate to report.
-        let rendered = try await Harness(clockStep: 0.3125)
+        // Renders case: `FakeFileTranscriber.hold` offers exactly one pause point per job — after
+        // every scripted progress step, right before the result returns — so there is no seam to
+        // call `clock.advance(by:)` strictly *between* two of this single job's progress reports
+        // without racing the drain that applies them. `clockStep` (time passing on every `now()`
+        // read) stands in for that here; `apply` reads the clock exactly once per `.changed` event,
+        // so with step `s` the three running events land at t=0, t=s, t=2s. 0.875 (7/8) is exactly
+        // representable in binary floating point, so those timestamps (0, 0.875, 1.75) are exact —
+        // no rounding drift near the throttle boundary. This still verifies end to end: the second
+        // event (t=0.875, < 1 s since the first) stays throttled, and the third (t=1.75, ≥ 1 s since
+        // the first, since the second's throttled render never moved that baseline) both clears the
+        // throttle *and* its reported rate reflects all three recorded samples (0 at t=0, 0.25 at
+        // t=0.875, 0.5 at t=1.75 → rate 2/7 progress/s → 1.75 s remaining → "about 2 s left").
+        let rendered = try await Harness(clockStep: 0.875)
         await rendered.transcriber.hold(Self.a)
         await rendered.transcriber.setProgressSteps([0.25, 0.5])
         await rendered.transcriber.script(Self.a, .document(Self.doc(Self.a)))

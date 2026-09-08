@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import VoxFlowCore
 import VoxFlowFiles
 import VoxFlowModels
@@ -42,7 +43,10 @@ final class FilesViewModel {
     private let now: () -> Date
     private var estimators: [UUID: ETAEstimator] = [:]
     private var lastRender: [UUID: Date] = [:]
-    private var eventTask: Task<Void, Never>?
+    /// Boxed outside MainActor isolation so `deinit` (which is `nonisolated` and may run on any
+    /// thread) can cancel it without an isolation assertion. Never touched from `apply`/actions —
+    /// only set once in `init` and read in `deinit`.
+    private nonisolated let eventTask = Mutex<Task<Void, Never>?>(nil)
 
     init(queue: FileQueue, settings: FilesSettings, modelStore: ModelStore, durations: any AudioDurationProviding,
          exporter: @escaping () -> TranscriptExporter, now: @escaping () -> Date = { Date() }) {
@@ -52,22 +56,28 @@ final class FilesViewModel {
         self.durations = durations
         self.makeExporter = exporter
         self.now = now
-        eventTask = Task { [weak self] in
-            guard let self else { return }
+        // `[weak self]` only helps if nothing downstream re-establishes a *strong* reference across
+        // a suspension point. `guard let self else { return }` at the top of an async closure does
+        // exactly that — it shadows `self` with a strong local for the rest of the closure body, so
+        // the still-running `for await` loop below would keep the view model alive forever (its own
+        // subscription never lets the loop return on its own). Every touch of `self` here is instead
+        // scoped to a single `if`/`guard` so the strong reference never survives a suspension: the
+        // loop re-checks `self` fresh on every iteration and lets the object deallocate — and the
+        // loop then observes cancellation on the *next* iteration — the moment nothing else holds it.
+        let task = Task { [weak self] in
             let stream = await queue.subscribe()
-            self.items = await queue.items
+            let seeded = await queue.items
+            if let self { self.items = seeded }
             for await event in stream {
-                guard !Task.isCancelled else { break }
+                guard let self else { break }
                 self.apply(event)
             }
         }
+        eventTask.withLock { $0 = task }
     }
 
-    /// `deinit` runs off the main actor by default; every access this class makes happens on
-    /// MainActor (the only place a `FilesViewModel` is ever created, used or released), so this
-    /// assertion is safe — it lets deinit still cancel the event task instead of leaking it.
     deinit {
-        MainActor.assumeIsolated { eventTask?.cancel() }
+        eventTask.withLock { $0?.cancel() }
     }
 
     // MARK: Derived text (design 1c / MW-06x)
@@ -79,7 +89,9 @@ final class FilesViewModel {
     var headerSubtitle: String {
         var parts: [String] = []
         let total = items.compactMap(\.duration).reduce(0, +)
-        if total > 0 { parts.append("\(Self.hoursMinutes(total)) of audio") }
+        // Skip the duration clause entirely once it would round down to "0 min" — a near-silent
+        // drop shouldn't claim "0 min of audio" in the header.
+        if Int((total / 60).rounded()) > 0 { parts.append("\(Self.hoursMinutes(total)) of audio") }
         let done = items.filter { if case .done = $0.status { true } else { false } }.count
         let running = items.filter { if case .running = $0.status { true } else { false } }.count
         let failed = items.filter { if case .failed = $0.status { true } else { false } }.count
@@ -138,7 +150,12 @@ final class FilesViewModel {
     }
 
     func requestStop(_ item: QueueItem) async {
-        if case .running(let progress) = item.status, progress > Self.stopConfirmationThreshold {
+        // The caller's `item` can be stale (the view's own `items` render is throttled to once a
+        // second); ask the queue for the live progress first and only fall back to the snapshot's
+        // status if the row isn't running there any more (already finished/removed).
+        var progress = await queue.progress(of: item.id)
+        if progress == nil, case .running(let snapshotProgress) = item.status { progress = snapshotProgress }
+        if let progress, progress > Self.stopConfirmationThreshold {
             confirmation = .stop(item, progress: progress)
         } else {
             await queue.cancel(id: item.id)
@@ -152,7 +169,13 @@ final class FilesViewModel {
     }
 
     func remove(_ item: QueueItem) async { await queue.remove(id: item.id) }
-    func retry(_ item: QueueItem) async { await queue.retry(id: item.id); await queue.start() }
+
+    func retry(_ item: QueueItem) async {
+        await queue.retry(id: item.id)
+        await refreshModelState()
+        guard !needsModel else { return }
+        await queue.start()
+    }
 
     func open(_ item: QueueItem) {
         guard case .done(let document) = item.status else { return }
@@ -161,6 +184,7 @@ final class FilesViewModel {
 
     func closeResult() { selected = nil }
     func exported(for item: QueueItem) -> URL? { exportedURLs[item.id] }
+    func exportError(for item: QueueItem) -> String? { exportErrors[item.id] }
 
     /// "about 3 min left" for a running row, throttled to one update per second (design 3d).
     func etaText(for item: QueueItem) -> String? {
@@ -178,16 +202,21 @@ final class FilesViewModel {
     private func apply(_ event: FileQueueEvent) {
         switch event {
         case .added(let item):
+            // The view model seeds `items` from `queue.items` *and* subscribes before that read
+            // completes suspending; an `.added` published in the gap between subscribing and the
+            // seed read would otherwise land in both the seed and the stream, duplicating the row.
+            guard !items.contains(where: { $0.id == item.id }) else { return }
             items.append(item)
         case .changed(let item):
             guard let index = items.firstIndex(where: { $0.id == item.id }) else { return }
             if case .running(let progress) = item.status {
+                let timestamp = now()   // one read per event — record and the throttle gate must agree on "now"
                 var estimator = estimators[item.id] ?? ETAEstimator()
-                estimator.record(progress: progress, at: now().timeIntervalSince1970)
+                estimator.record(progress: progress, at: timestamp.timeIntervalSince1970)
                 estimators[item.id] = estimator
                 let last = lastRender[item.id] ?? .distantPast
-                guard now().timeIntervalSince(last) >= Self.uiRefreshInterval || progress >= 1 else { return }
-                lastRender[item.id] = now()
+                guard timestamp.timeIntervalSince(last) >= Self.uiRefreshInterval || progress >= 1 else { return }
+                lastRender[item.id] = timestamp
                 etaSeconds[item.id] = estimator.secondsRemaining
             } else {
                 estimators[item.id] = nil

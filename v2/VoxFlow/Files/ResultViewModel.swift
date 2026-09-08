@@ -42,16 +42,24 @@ final class ResultViewModel {
     }
 
     /// "1:32:10 · 13,842 words · EN (auto) · whisper-large-v3-turbo · took 4 min 12 s on this Mac"
+    /// When the language is unknown (nil) under auto-detect, the language field is just "AUTO" —
+    /// not "AUTO (auto)", which the code+suffix would otherwise produce.
     var metaLine: String {
         let words = Self.wordCountFormatter.string(from: NSNumber(value: document.wordCount)) ?? "\(document.wordCount)"
-        let language = (document.transcript.language ?? "auto").uppercased() + (autoDetectedLanguage ? " (auto)" : "")
+        let language: String
+        if let code = document.transcript.language {
+            language = code.uppercased() + (autoDetectedLanguage ? " (auto)" : "")
+        } else {
+            language = "AUTO"
+        }
         return "\(TimeCode.short(document.audioDuration)) · \(words) words · \(language) · \(document.modelID) · took \(Self.took(document.processingTime)) on this Mac"
     }
 
-    /// A fixed `en_US_POSIX`-style grouping ("13,842") regardless of the system locale — the design
+    /// A fixed `en_US_POSIX` grouping ("13,842") regardless of the system locale — the design
     /// specifies this exact formatting, not whatever separator the user's region uses.
     private static let wordCountFormatter: NumberFormatter = {
         let formatter = NumberFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.numberStyle = .decimal
         formatter.usesGroupingSeparator = true
         formatter.groupingSeparator = ","
@@ -81,6 +89,11 @@ final class ResultViewModel {
 
     static func abbreviate(_ url: URL) -> String {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
-        return url.path.hasPrefix(home) ? "~" + url.path.dropFirst(home.count) : url.path
+        let path = url.path
+        if path == home { return "~" }
+        // Compare against "home + /" so a sibling directory that merely shares `home` as a string
+        // prefix (e.g. "/Users/artemsemenov2") isn't mistaken for a subdirectory of it.
+        let prefix = home + "/"
+        return path.hasPrefix(prefix) ? "~" + path.dropFirst(home.count) : path
     }
 }

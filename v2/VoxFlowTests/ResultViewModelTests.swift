@@ -92,6 +92,24 @@ struct ResultViewModelTests {
         #expect(vm.metaLine == "0:10 · 1 words · DE · m · took 12 s on this Mac")
     }
 
+    @Test("metaLine shows AUTO (not 'AUTO (auto)') when the language itself is unknown under auto-detect")
+    func metaLineUnknownLanguageAutoDetect() {
+        let document = TranscriptDocument(sourceURL: URL(fileURLWithPath: "/tmp/a.m4a"),
+                                          transcript: Transcript(segments: [TranscriptSegment(start: 0, end: 10, text: "hi")!], language: nil),
+                                          modelID: "m", audioDuration: 10, processingTime: 12, createdAt: Date(timeIntervalSince1970: 0))
+        let vm = Self.makeVM(document: document, autoDetectedLanguage: true)
+        #expect(vm.metaLine == "0:10 · 1 words · AUTO · m · took 12 s on this Mac")
+    }
+
+    @Test("abbreviate replaces the home directory itself with ~, and only an actual subdirectory of it — not a sibling that merely shares the prefix")
+    func abbreviateHomePrefix() {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        #expect(ResultViewModel.abbreviate(URL(fileURLWithPath: home)) == "~")
+        #expect(ResultViewModel.abbreviate(URL(fileURLWithPath: home + "/Transcripts/lecture-04.srt")) == "~/Transcripts/lecture-04.srt")
+        let siblingPath = home + "2/Transcripts/lecture-04.srt"   // shares `home` as a string prefix, but isn't under it
+        #expect(ResultViewModel.abbreviate(URL(fileURLWithPath: siblingPath)) == siblingPath)
+    }
+
     @Test("exportAlso writes a file into the exporter's directory and sets exportMessage")
     func exportAlsoWritesFile() throws {
         let dir = TemporaryDirectory()
