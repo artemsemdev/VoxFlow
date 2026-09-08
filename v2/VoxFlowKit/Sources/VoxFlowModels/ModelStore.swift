@@ -170,6 +170,15 @@ public actor ModelStore {
         }
     }
 
+    /// ST-03o "Cancel download": deletes the `.partial` file outright (unlike a plain cancel of
+    /// `install`, which keeps it so a later `install` resumes). Refuses while an install is actually
+    /// running — the caller should cancel that first.
+    public func discardDownload(id: String) throws {
+        guard let model = descriptor(id) else { throw ModelStoreError.unknownModel(id) }
+        guard inProgress[id] == nil else { throw ModelStoreError.alreadyInProgress(id) }
+        try? fileManager.removeItem(at: partialURL(model))
+    }
+
     // MARK: Helpers
 
     private static func defaultKey(_ role: ModelRole) -> String { "models.default.\(role.rawValue)" }

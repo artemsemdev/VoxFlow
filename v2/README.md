@@ -7,6 +7,14 @@ This directory is the v2 rewrite growing on the `develop` branch until promotion
 issue #105 and `docs/superpowers/specs/2026-09-07-voxflow-v2-design.md`). The .NET v1
 code at the repository root is frozen and will be removed at promotion.
 
+## What works today
+
+Drop (or open) an audio or video file — the Dock icon, Finder's Open With, the Files page's own
+drop zone, or File › Open (⌘O) all work the same way — and VoxFlow transcribes it entirely
+on-device and writes the transcript to `~/Transcripts/` in your chosen format (TXT, SRT, VTT,
+JSON or MD), whether or not the Files page happens to be showing at the time. Settings › Models
+lets you download the turbo or small speech model to get started.
+
 ## Layout
 
 | Path | What |

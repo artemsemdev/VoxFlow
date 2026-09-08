@@ -31,6 +31,14 @@ targets:
     dependencies:
       - package: VoxFlowKit
         product: VoxFlowCore
+      - package: VoxFlowKit
+        product: VoxFlowAudio
+      - package: VoxFlowKit
+        product: VoxFlowSpeech
+      - package: VoxFlowKit
+        product: VoxFlowModels
+      - package: VoxFlowKit
+        product: VoxFlowFiles
     info:
       path: VoxFlow/Info.plist
       properties:
@@ -39,6 +47,13 @@ targets:
         NSHumanReadableCopyright: "© 2026 Artem Semenov"
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: Audio or video
+            LSItemContentTypes:
+              - public.audio
+              - public.movie
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Alternate
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.artemsem.voxflow
@@ -50,6 +65,18 @@ targets:
       - path: VoxFlowTests
     dependencies:
       - target: VoxFlow
+      - package: VoxFlowKit
+        product: VoxFlowCore
+      - package: VoxFlowKit
+        product: VoxFlowAudio
+      - package: VoxFlowKit
+        product: VoxFlowSpeech
+      - package: VoxFlowKit
+        product: VoxFlowModels
+      - package: VoxFlowKit
+        product: VoxFlowFiles
+      - package: VoxFlowKit
+        product: VoxFlowTestSupport
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES

@@ -101,6 +101,23 @@ struct ModelStoreTests {
         #expect(calls.map(\.resumedFrom) == [0, 131_072])
     }
 
+    @Test("discardDownload removes a partial left by an offline interruption (ST-03o Cancel download)")
+    func discardDownloadRemovesPartial() async throws {
+        let h = Harness()
+        await h.serveAll()
+        await h.downloader.setFailAfterBytes(131_072)
+        let store = h.store()
+        await #expect(throws: ModelStoreError.downloadInterrupted(bytesWritten: 131_072)) {
+            _ = try await Self.drain(await store.install(id: "big"))
+        }
+        #expect(await store.state(of: "big") == .paused(bytesWritten: 131_072, total: 300_000))
+
+        try await store.discardDownload(id: "big")
+
+        #expect(await store.state(of: "big") == .notInstalled)
+        #expect(!FileManager.default.fileExists(atPath: h.dir.file("big.bin.partial").path))
+    }
+
     @Test("checksum mismatch deletes the file and reports failure (ST-03v)")
     func checksumMismatch() async throws {
         let h = Harness()

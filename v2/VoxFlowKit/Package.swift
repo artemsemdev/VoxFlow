@@ -16,6 +16,7 @@ let package = Package(
         .library(name: "VoxFlowStorage", targets: ["VoxFlowStorage"]),
         .library(name: "VoxFlowStyling", targets: ["VoxFlowStyling"]),
         .library(name: "VoxFlowMCP", targets: ["VoxFlowMCP"]),
+        .library(name: "VoxFlowTestSupport", targets: ["VoxFlowTestSupport"]),
     ],
     targets: [
         .target(name: "VoxFlowCore"),
