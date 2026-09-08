@@ -36,8 +36,8 @@ any app, style cleanup with a local LLM and an MCP server follow in 2.x (see the
 | — | Signed and notarized releases | [#115](https://github.com/artemsemdev/VoxFlow/issues/115) |
 
 Dictation's logic half (capture, Flow Bar state machine, windowed transcription, encrypted
-history) has landed on `feature/110-phase3a-dictation-logic`; the HUD, hotkey monitor and
-Accessibility insertion that make it usable follow next.
+history) is on `develop` (unreleased); the HUD, hotkey monitor and Accessibility
+insertion that make it usable follow next.
 
 Tracking issue: [#105](https://github.com/artemsemdev/VoxFlow/issues/105). The product design is the
 Claude Design canvas checked in at [design/](design/).
