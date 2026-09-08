@@ -61,3 +61,19 @@ All three answers are honest "not observed" outcomes from this non-interactive r
 task brief — no permissions were requested or granted by this agent, and no output was
 fabricated. The owner should re-run per `README.md` in an interactive session to get real
 readings for all three questions.
+
+## Additional run (controller, same session, TextEdit frontmost via `open -a TextEdit`)
+
+```
+Accessibility trusted: true; Input Monitoring preflight: true
+Secure input enabled now: false
+global monitor installed — press fn a few times
+Inserting into the focused element of the frontmost app…
+AX set result: 0 (0 = success) role=AXList frontmost=TextEdit
+```
+
+Reading: with Accessibility (and Input Monitoring) already granted to the terminal, the global `flagsChanged`
+monitor installs and `AXUIElementSetAttributeValue(kAXSelectedTextAttribute)` returns success — but the focused
+element was TextEdit's document-picker list (`AXList`, no text view had focus because `make new document` over
+AppleEvents timed out), so this proves the AX call path, not text insertion into a text view. Question 2 stays
+"not observed" until the owner runs it with a text view focused. Question 1 still needs a physical fn press.
