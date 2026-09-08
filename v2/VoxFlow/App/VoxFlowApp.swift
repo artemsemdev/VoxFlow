@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct VoxFlowApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var navigation = Navigation()
 
     var body: some Scene {

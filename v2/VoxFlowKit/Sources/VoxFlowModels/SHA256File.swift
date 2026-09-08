@@ -12,4 +12,9 @@ public enum SHA256File {
         }
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
+
+    /// Hex digest of in-memory bytes (test fixtures; production streams from disk above).
+    public static func hexDigest(of data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
 }
