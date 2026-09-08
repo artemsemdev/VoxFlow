@@ -25,16 +25,21 @@ public struct TranscriptionOptions: Sendable, Equatable {
     public var threadCount: Int?
     /// Segments whose no-speech probability exceeds this are dropped.
     public var noSpeechThreshold: Double
+    /// Tail of the text recognized so far, so whisper conditions the next window on it (phase 3 windows).
+    public var promptContext: String?
 
-    public init(language: String? = nil, vocabulary: [String] = [], threadCount: Int? = nil, noSpeechThreshold: Double = 0.6) {
+    public init(language: String? = nil, vocabulary: [String] = [], threadCount: Int? = nil,
+                noSpeechThreshold: Double = 0.6, promptContext: String? = nil) {
         self.language = language
         self.vocabulary = vocabulary
         self.threadCount = threadCount
         self.noSpeechThreshold = noSpeechThreshold
+        self.promptContext = promptContext
     }
 
     public var initialPrompt: String? {
-        vocabulary.isEmpty ? nil : vocabulary.joined(separator: ", ")
+        let parts = [vocabulary.isEmpty ? nil : vocabulary.joined(separator: ", "), promptContext].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: "\n")
     }
 }
 
