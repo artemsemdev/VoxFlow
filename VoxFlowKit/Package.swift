@@ -18,6 +18,9 @@ let package = Package(
         .library(name: "VoxFlowMCP", targets: ["VoxFlowMCP"]),
         .library(name: "VoxFlowTestSupport", targets: ["VoxFlowTestSupport"]),
     ],
+    dependencies: [
+        .package(url: "https://github.com/groue/GRDB.swift.git", from: "7.11.1"),
+    ],
     targets: [
         .target(name: "VoxFlowCore"),
         .target(name: "VoxFlowAudio", dependencies: ["VoxFlowCore"]),
@@ -26,7 +29,7 @@ let package = Package(
         .target(name: "VoxFlowModels", dependencies: ["VoxFlowCore"]),
         .target(name: "VoxFlowFiles", dependencies: ["VoxFlowCore"]),
         .target(name: "VoxFlowDictation", dependencies: ["VoxFlowCore"]),
-        .target(name: "VoxFlowStorage", dependencies: ["VoxFlowCore"]),
+        .target(name: "VoxFlowStorage", dependencies: ["VoxFlowCore", .product(name: "GRDB", package: "GRDB.swift")]),
         .target(name: "VoxFlowStyling", dependencies: ["VoxFlowCore"]),
         .target(name: "VoxFlowMCP", dependencies: ["VoxFlowCore"]),
 
@@ -39,12 +42,12 @@ let package = Package(
         .testTarget(name: "VoxFlowCoreTests", dependencies: ["VoxFlowCore", "VoxFlowTestSupport"]),
         .testTarget(name: "VoxFlowAudioTests", dependencies: ["VoxFlowAudio", "VoxFlowTestSupport"],
                     resources: [.copy("Fixtures")]),
-        .testTarget(name: "VoxFlowSpeechTests", dependencies: ["VoxFlowSpeech", "VoxFlowAudio", "VoxFlowTestSupport"],
+        .testTarget(name: "VoxFlowSpeechTests", dependencies: ["VoxFlowSpeech", "VoxFlowAudio", "VoxFlowTestSupport", "VoxFlowDictation"],
                     resources: [.copy("Fixtures")]),
         .testTarget(name: "VoxFlowModelsTests", dependencies: ["VoxFlowModels", "VoxFlowTestSupport"]),
         .testTarget(name: "VoxFlowFilesTests", dependencies: ["VoxFlowFiles", "VoxFlowTestSupport"]),
         .testTarget(name: "VoxFlowDictationTests", dependencies: ["VoxFlowDictation", "VoxFlowTestSupport"]),
-        .testTarget(name: "VoxFlowStorageTests", dependencies: ["VoxFlowStorage", "VoxFlowTestSupport"]),
+        .testTarget(name: "VoxFlowStorageTests", dependencies: ["VoxFlowStorage", "VoxFlowCore", "VoxFlowTestSupport"]),
         .testTarget(name: "VoxFlowStylingTests", dependencies: ["VoxFlowStyling", "VoxFlowTestSupport"]),
         .testTarget(name: "VoxFlowMCPTests", dependencies: ["VoxFlowMCP", "VoxFlowTestSupport"]),
     ],
