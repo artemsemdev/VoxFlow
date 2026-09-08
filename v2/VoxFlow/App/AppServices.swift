@@ -33,10 +33,11 @@ final class AppServices {
         let filesSettings = FilesSettings(store: settingsStore)
         let snapshot = filesSettings.optionsSnapshot
         let transcriber = LazyModelFileTranscriber(store: modelStore, engine: engine, decoder: AudioDecoder())
-        let queue = FileQueue(transcriber: transcriber, durations: AudioDurationReader(),
+        let durations = AudioDurationReader()
+        let queue = FileQueue(transcriber: transcriber, durations: durations,
                               supportedExtensions: SupportedAudio.extensions,
                               options: { snapshot.current })
-        return AppServices(modelStore: modelStore, engine: engine, queue: queue, filesSettings: filesSettings, durations: AudioDurationReader())
+        return AppServices(modelStore: modelStore, engine: engine, queue: queue, filesSettings: filesSettings, durations: durations)
     }
 
     var exporter: TranscriptExporter { TranscriptExporter(directory: filesSettings.outputFolder) }
