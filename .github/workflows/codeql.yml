@@ -1,23 +1,32 @@
 name: CodeQL
 
-# v1 (.NET) only: the v2 Swift rewrite under v2/ is analyzed by codeql-v2.yml (see issue #105).
+# CodeQL for VoxFlow (Swift) — see issue #105.
+# CodeQL supports Swift only on macOS runners, hence macos-15 rather than ubuntu-latest.
+# Runs on pushes to develop/master, weekly, and on demand — not on every PR (a full Swift analysis takes ~25 minutes).
 on:
   push:
     branches:
-      - main
       - master
-    paths-ignore:
-      - 'v2/**'
-  pull_request:
-    paths-ignore:
-      - 'v2/**'
+      - develop
+    paths:
+      - 'VoxFlow/**'
+      - 'VoxFlowKit/**'
+      - 'VoxFlowTests/**'
+      - 'project.yml'
+      - '.github/workflows/codeql.yml'
   schedule:
     - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   analyze:
-    name: Analyze C#
-    runs-on: ubuntu-latest
+    name: Analyze Swift
+    runs-on: macos-15
+    timeout-minutes: 45
 
     permissions:
       security-events: write
@@ -27,32 +36,53 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: ['csharp']
+        language: ['swift']
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 9.0.x
+      # Defensive: skip on a ref without Swift sources (e.g. the archived v1 branch).
+      - name: Probe for Swift sources
+        id: probe
+        run: |
+          if [ -n "$(find VoxFlow VoxFlowKit -name '*.swift' -print -quit 2>/dev/null)" ]; then
+            echo "has_swift=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_swift=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No Swift sources on this ref; skipping CodeQL Swift analysis."
+          fi
+
+      - name: Select Xcode 26
+        if: steps.probe.outputs.has_swift == 'true'
+        run: |
+          set -euo pipefail
+          XCODE=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1 || true)
+          [ -n "$XCODE" ] || { echo "::error::No Xcode 26.x on this runner image"; exit 1; }
+          sudo xcode-select -s "$XCODE"
+          xcodebuild -version
+          swift --version
+
+      - name: Install XcodeGen
+        if: steps.probe.outputs.has_swift == 'true'
+        run: brew install xcodegen
 
       - name: Initialize CodeQL
+        if: steps.probe.outputs.has_swift == 'true'
         uses: github/codeql-action/init@v3
         with:
           languages: ${{ matrix.language }}
 
       - name: Build
+        if: steps.probe.outputs.has_swift == 'true'
         run: |
-          dotnet restore src/VoxFlow.Core/VoxFlow.Core.csproj
-          dotnet restore src/VoxFlow.Cli/VoxFlow.Cli.csproj
-          dotnet restore src/VoxFlow.McpServer/VoxFlow.McpServer.csproj
-          dotnet build src/VoxFlow.Core/VoxFlow.Core.csproj --no-restore
-          dotnet build src/VoxFlow.Cli/VoxFlow.Cli.csproj --no-restore
-          dotnet build src/VoxFlow.McpServer/VoxFlow.McpServer.csproj --no-restore
+          xcodegen generate
+          xcodebuild -scheme VoxFlow -destination 'platform=macOS' build
+          # The app links only VoxFlowCore; build the whole package so CodeQL traces all nine modules.
+          swift build --package-path VoxFlowKit
 
       - name: Perform CodeQL Analysis
+        if: steps.probe.outputs.has_swift == 'true'
         uses: github/codeql-action/analyze@v3
         with:
           category: '/language:${{ matrix.language }}'

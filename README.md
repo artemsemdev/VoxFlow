@@ -3,109 +3,108 @@
 [![CI](https://github.com/artemsemdev/VoxFlow/actions/workflows/ci.yml/badge.svg)](https://github.com/artemsemdev/VoxFlow/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/artemsemdev/VoxFlow/actions/workflows/codeql.yml/badge.svg)](https://github.com/artemsemdev/VoxFlow/actions/workflows/codeql.yml)
 
-> **v2 in progress: native Swift rewrite.** VoxFlow is being rewritten from scratch as a native
-> macOS (Apple Silicon) application. The new code grows in [`v2/`](v2/) and is tracked in
-> [issue #105](https://github.com/artemsemdev/VoxFlow/issues/105). The .NET/MAUI code below is
-> v1: it is frozen at tag `v1.0.0-final` and archived on the [`v1`](https://github.com/artemsemdev/VoxFlow/tree/v1)
-> branch. Speaker labeling, Intel Macs, and Mac Catalyst are out of scope for v2.
+Native macOS transcription that never leaves your Mac. Swift 6, SwiftUI, whisper.cpp on Metal.
+macOS 15+, Apple Silicon.
 
-## Executive Summary
+VoxFlow 2.0 is a from-scratch rewrite. Version 2.0.0 ships **file transcription**; dictation into
+any app, style cleanup with a local LLM and an MCP server follow in 2.x (see the roadmap).
 
-VoxFlow is a fully local, privacy-first audio transcription system that converts speech recordings into timestamped text transcripts without sending data to any external service. It ships as a shared .NET 9 transcription core with three hosts: CLI, macOS Desktop, and MCP. By default, transcription runs entirely on-device via the local Whisper Base model through Whisper.net, and the Desktop app can fall back to the same local CLI pipeline on Intel Mac Catalyst when the in-process Whisper runtime is not viable.
+## What works today (2.0.0)
 
-## Demo
+- Drop audio or video files on the window or the Dock icon, use Finder's Open With, or File › Open.
+  MP3, WAV, M4A/AAC, FLAC, AIFF, CAF, MP4, MOV are accepted; anything else is rejected on drop.
+- A queue with progress and an ETA, Stop with a confirmation above 10 %, a confirmation for drops
+  over four hours, failed rows that never stall the queue, a "2×" badge for duplicate drops.
+- Transcripts saved to `~/Transcripts` in the format you chose — TXT, SRT, VTT, JSON or Markdown —
+  and re-exported to any other format instantly, without re-processing. Spec: [docs/formats.md](docs/formats.md).
+- A result view with the transcript's segments, search, Copy, Save as… and Reveal in Finder.
+- Settings › Models: download Whisper large-v3-turbo (default, 1.6 GB) or Whisper small (480 MB),
+  pause and resume, checksum verification before a model counts as installed, remove.
+- Everything on this Mac: audio is processed in memory and discarded; the only network action is a
+  model download you start. No account, no analytics.
 
-![VoxFlow demo](docs/assets/voxflow-demo.gif)
+## Roadmap
 
-## The Problem & The Solution
-
-**Problem:** Transcribing audio recordings manually is time-consuming and error-prone. Cloud-based transcription services raise privacy and compliance concerns, especially for sensitive recordings such as interviews, meetings, or legal proceedings.
-
-**Solution:** This utility runs the entire transcription pipeline locally on the user's machine. Audio files are preprocessed, noise-filtered, and transcribed using a local Whisper model, with Whisper Base configured by default. The result is a clean, timestamped transcript file ready for review or downstream processing.
-
-## Target Audience
-
-- Professionals who need transcripts of meetings, interviews, or recorded calls
-- Teams operating under data-privacy or compliance constraints that prohibit cloud transcription
-- Developers and researchers who want a scriptable, configuration-driven transcription tool
-
-## Supported Input Formats
-
-VoxFlow accepts the following audio and video formats as input. All formats are converted to WAV via ffmpeg before transcription.
-
-| Format | Extension |
-|---|---|
-| MPEG-4 Audio | `.m4a` |
-| Waveform Audio | `.wav` |
-| MP3 | `.mp3` |
-| Advanced Audio Coding | `.aac` |
-| Free Lossless Audio Codec | `.flac` |
-| Ogg Vorbis | `.ogg` |
-| Audio Interchange File Format | `.aif`, `.aiff` |
-| MPEG-4 Video (audio track) | `.mp4` |
-
-## Key Business Capabilities
-
-- **Single-file transcription** -- point the tool at one audio file and get a timestamped transcript
-- **Batch processing** -- point the tool at a directory and transcribe all matching files in one run, with a completion summary report
-- **Configurable output formats** -- choose from TXT (default), SRT, VTT, JSON, or Markdown output via the `resultFormat` setting
-- **Multi-language support** -- configure one or more candidate languages; the tool auto-selects the best match when multiple are provided
-- **Audio preprocessing** -- built-in noise reduction and silence removal improve transcript quality before the model runs
-- **Configurable quality controls** -- fine-tune segment filtering, hallucination suppression, and confidence thresholds to match your audio characteristics
-- **Startup validation** -- a preflight check verifies all paths, dependencies, and model availability before processing begins
-- **MCP server integration** -- expose transcription capabilities to AI clients (Claude, ChatGPT, GitHub Copilot, VS Code) via the Model Context Protocol
-- **Speaker labeling (local, opt-in)** -- attach `Speaker A` / `Speaker B` labels to the transcript by running a local [pyannote.audio](https://github.com/pyannote/pyannote-audio) diarization sidecar. Off by default, enabled per-run from any host (Desktop toggle, CLI `--speakers`, MCP `enableSpeakers`). No audio, transcript, or speaker data leaves the machine. See the [speaker labeling runbook](docs/runbooks/speaker-labeling.md) for setup and troubleshooting.
-- **Fully offline** -- no network calls, no API keys, no data leaves the machine after models are cached
-
-## Output Formats
-
-VoxFlow supports multiple transcript output formats. The default is `txt` for backward compatibility.
-
-| Format | Extension | Description |
+| Version | Phase | Issue |
 |---|---|---|
-| `txt` | `.txt` | Legacy timestamped text (default). Preserves the original `{start}->{end}: {text}` format. |
-| `srt` | `.srt` | SubRip subtitle format with numbered cues and `HH:mm:ss,mmm` timestamps. |
-| `vtt` | `.vtt` | WebVTT subtitle format with `WEBVTT` header and `HH:mm:ss.mmm` timestamps. |
-| `json` | `.json` | Structured JSON with metadata (language, segment counts, warnings) and transcript segments. |
-| `md` | `.md` | Human-readable Markdown with metadata header and timestamped transcript entries. |
+| 2.1 | Dictation: fn push-to-talk / hands-free, Flow Bar, insertion into any app, onboarding, History | [#110](https://github.com/artemsemdev/VoxFlow/issues/110) |
+| 2.2 | Main window and Settings complete, menu bar, notifications, rule-based styles | [#111](https://github.com/artemsemdev/VoxFlow/issues/111) |
+| 2.3 | Style cleanup with a local LLM (Qwen2.5 3B via llama.cpp) | [#112](https://github.com/artemsemdev/VoxFlow/issues/112) |
+| 2.4 | MCP server on localhost | [#113](https://github.com/artemsemdev/VoxFlow/issues/113) |
+| — | Signed and notarized releases | [#115](https://github.com/artemsemdev/VoxFlow/issues/115) |
 
-## High-Level Architecture
+Tracking issue: [#105](https://github.com/artemsemdev/VoxFlow/issues/105). The product design is the
+Claude Design canvas checked in at [design/](design/).
 
-VoxFlow is a .NET 9 solution with one shared processing library and three hosts:
+## Requirements
 
-- `VoxFlow.Core` -- shared configuration, validation, transcription, batch processing, and output pipeline
-- `VoxFlow.Cli` -- thin command-line host over `VoxFlow.Core`
-- `VoxFlow.Desktop` -- macOS MAUI Blazor Hybrid desktop host for single-file transcription workflow; on Intel Mac Catalyst it delegates transcription to a local CLI bridge
-- `VoxFlow.McpServer` -- stdio MCP host exposing transcription tools to AI clients
+- macOS 15 or later on Apple Silicon (Intel Macs are not supported).
+- To build: Xcode 26.x and [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`).
+- Models are downloaded on demand into `~/Library/Application Support/VoxFlow/Models`.
 
-The shared pipeline remains configuration loading, startup validation, ffmpeg-based audio conversion, local Whisper Base inference via Whisper.net 1.9.0 by default, post-processing filters, and file output.
+There are no signed binaries yet; build from source (see [SETUP.md](SETUP.md)).
 
-## Current Repository Status
+## Build and test
 
-- CLI, Core, and MCP all run against the shared `VoxFlow.Core` pipeline and are covered by dedicated test projects.
-- Desktop is a macOS MAUI Blazor Hybrid single-file transcription app with four runtime states: `Ready`, `Running`, `Failed`, and `Complete`.
-- Desktop has both headless component tests in `tests/VoxFlow.Desktop.Tests` and real macOS UI automation in `tests/VoxFlow.Desktop.UiTests`.
-- The real Desktop happy path is green end-to-end: app launch, `Browse Files`, running state, transcript completion, and result actions are exercised against the actual `.app`.
-- On Intel Mac Catalyst, Desktop routes transcription through the local `VoxFlow.Cli` host so the UI uses the same working transcription pipeline as CLI while keeping all processing on-device.
-- Desktop Phase 1 stabilization is complete: Ready-screen copy is accurate (multi-format, local-only, single-file), file intake is guarded by validation state, drag-and-drop works through the visible drop zone, dropped files are staged locally without exposing internal temp names in the UI, transient state is cleared on new runs and cancellation, progress shows numeric percent with human-readable stage labels and progressbar accessibility, transcript copy sends the full file (not preview), action errors are surfaced non-fatally, and non-blocking startup warnings are visible.
+```bash
+xcodegen generate                       # creates VoxFlow.xcodeproj (gitignored)
+xcodebuild -scheme VoxFlow -destination 'platform=macOS' build test
+```
 
-## Project Documentation
+Package-only tests, no Xcode project needed:
 
-| Document | Purpose |
+```bash
+cd VoxFlowKit && swift test
+```
+
+Open `VoxFlow.xcodeproj` in Xcode to run the app (scheme `VoxFlow`). `VoxFlow/Info.plist` is
+generated by XcodeGen from `project.yml` (`info.properties`) and is not committed: add usage strings
+such as `NSMicrophoneUsageDescription` to `project.yml`. Integration tests that need a Whisper model
+look in `~/Library/Application Support/VoxFlow/Models` and skip with a reason when none is installed.
+
+## Layout
+
+| Path | What |
 |---|---|
-| [Developer Setup](docs/developer/setup.md) | Prerequisites, build, run, test, and configuration |
-| [Desktop developer setup](docs/developer/desktop-setup.md) | macOS / Xcode / MAUI workload, local signing, first-run errors, Desktop test suites |
-| [Architecture](docs/architecture/) | C4 views, component details, runtime sequences, quality attributes |
-| [Architecture Decisions](docs/adr/README.md) | ADR index and decision log |
-| [Architecture Overview](ARCHITECTURE.md) | High-level architecture summary |
-| [Deployment](docs/deployment/macos-packaging.md) | macOS packaging and distribution |
-| [MCP server security model](docs/deployment/mcp-server-security.md) | Threat model, `PathPolicy` semantics, per-option reference, deployment gaps |
-| [Runbooks](docs/runbooks/) | Smoke tests, troubleshooting, Desktop UI automation |
-| [Error catalog](docs/runbooks/error-catalog.md) | Every user-facing error with root cause, remediation, and source-line link |
-| [PRD](docs/product/PRD.md) | Product requirements document |
-| [Contributing](CONTRIBUTING.md) | Contribution workflow, quality bar, and review expectations |
-| [Code of Conduct](CODE_OF_CONDUCT.md) | Community behavior expectations and enforcement model |
-| [Security](SECURITY.md) | Vulnerability reporting and supported-version policy |
-| [License](LICENSE) | MIT license for source and documentation |
+| `project.yml` | XcodeGen definition of the app target and the `VoxFlow` scheme |
+| `VoxFlow/` | SwiftUI app shell: App, MainWindow, Files, Settings, Design (per-screen folders appear with their phase) |
+| `VoxFlowTests/` | App-layer tests (view models, navigation) |
+| `VoxFlowKit/` | SwiftPM package with all logic: Core, Audio, Speech, Models, Files, Dictation, Storage, Styling, MCP |
+| `design/` | The Claude Design canvas that is the product spec |
+| `docs/adr/` | Architecture decision records |
+| `docs/formats.md` | Transcript output format specification |
+| `docs/superpowers/` | Design specs and implementation plans (pre-2.0 documents refer to the old `v2/` prefix) |
+| `scripts/` | CI helpers (`affected_tests.py`) |
+| `spikes/` | Throwaway benchmarks (not built in CI) |
 
-For technical setup, local development, and operations, start with the [Developer Setup Guide](docs/developer/setup.md).
+## CI
+
+`.github/workflows/ci.yml` runs a ladder so a small change does not pay for a full macOS build:
+
+| Changed files (PR) | What runs |
+|---|---|
+| only `docs/**`, `design/**`, `*.md` | nothing on macOS; `result` is green |
+| `scripts/**` | Python unit tests for the CI scripts (Ubuntu) |
+| `VoxFlowKit/**`, modules the app does not link | `swift test` for the changed modules and their dependents, derived from `swift package describe` by `scripts/affected_tests.py` |
+| `VoxFlow/**`, `VoxFlowTests/**`, `project.yml`, `Package.swift`/`Package.resolved`, a module the app links (per `product:` in `project.yml`), any other path in the repository, the workflow itself, or PR label `ci:full` | full `VoxFlow` scheme: build + all tests |
+
+Every pull request runs the classify job and `result` (seconds on Ubuntu) so the required check
+always exists. Adding the `ci:full` label to an open PR starts a full run. Pushes to `develop`/`master`
+and manual runs always run the full scheme. Branch protection needs only the `CI / result` check.
+`codeql.yml` runs CodeQL for Swift on pushes to `develop`/`master`, weekly, and on demand.
+
+## Branching
+
+GitFlow: `master` holds released, tagged versions; `develop` is the integration branch;
+`feature/<issue>-<slug>` branches open pull requests into `develop`; `release/x.y.z` branches merge
+to `master` with a tag and back into `develop`. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## VoxFlow 1.x
+
+The previous implementation (.NET 9, Mac Catalyst, pyannote speaker labeling) is archived on the
+[`v1`](https://github.com/artemsemdev/VoxFlow/tree/v1) branch and tag `v1.0.0-final`. It is not
+maintained; speaker labeling, Intel Macs and Mac Catalyst are out of scope for 2.x.
+
+## License
+
+See [LICENSE](LICENSE).

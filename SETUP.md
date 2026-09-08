@@ -1,14 +1,40 @@
-# Setup Guide
+# Setting up VoxFlow for development
 
-This document has been reorganized into focused guides under `docs/`. Start with the one that matches your goal.
+## Prerequisites
 
-| Guide | Location | What it covers |
-|---|---|---|
-| **Developer Setup** | [docs/developer/setup.md](docs/developer/setup.md) | Prerequisites, bootstrap, configuration, build, run, and test |
-| **Desktop Developer Setup** | [docs/developer/desktop-setup.md](docs/developer/desktop-setup.md) | macOS / Xcode / MAUI workload, local signing, first-run errors, Desktop test suites |
-| **macOS Packaging** | [docs/deployment/macos-packaging.md](docs/deployment/macos-packaging.md) | Building and packaging VoxFlow Desktop for macOS |
-| **Smoke Tests** | [docs/runbooks/smoke-tests.md](docs/runbooks/smoke-tests.md) | Per-host verification routines |
-| **Troubleshooting** | [docs/runbooks/troubleshooting.md](docs/runbooks/troubleshooting.md) | Common issues and resolutions |
-| **Desktop UI Automation** | [docs/runbooks/desktop-ui-automation.md](docs/runbooks/desktop-ui-automation.md) | Running the real macOS UI test suite |
-| **Release Process** | [docs/delivery/release-process.md](docs/delivery/release-process.md) | Current release and delivery workflows |
-| **Architecture Decisions** | [docs/adr/README.md](docs/adr/README.md) | ADR index and pointers to the decision log |
+- macOS 15 or later on Apple Silicon.
+- Xcode 26.x (`xcode-select --install` is not enough; the full Xcode is required for SwiftUI and the whisper.cpp XCFramework).
+- XcodeGen: `brew install xcodegen`.
+
+## First build
+
+```bash
+git clone https://github.com/artemsemdev/VoxFlow.git
+cd VoxFlow
+xcodegen generate
+xcodebuild -scheme VoxFlow -destination 'platform=macOS' build test
+```
+
+The first build downloads the pinned whisper.cpp XCFramework (~51 MB) into the SwiftPM cache.
+
+## Running the app
+
+Open `VoxFlow.xcodeproj`, select the `VoxFlow` scheme and run. On first launch go to
+Settings › Models and download a speech model (large-v3-turbo is recommended on Macs with 16 GB or
+more; small on 8 GB). Then drop an audio file on the window or the Dock icon.
+
+Models live in `~/Library/Application Support/VoxFlow/Models`; transcripts in `~/Transcripts` by
+default (change it in Files › Save to).
+
+## Tests
+
+- Package logic, fast: `cd VoxFlowKit && swift test`
+- Everything, as CI runs it: `xcodebuild -scheme VoxFlow -destination 'platform=macOS' build test`
+- Integration tests that need a real model run only when one is installed and skip otherwise.
+
+## Notes
+
+- `VoxFlow.xcodeproj` and `VoxFlow/Info.plist` are generated; edit `project.yml` instead.
+- Warnings are errors (`SWIFT_TREAT_WARNINGS_AS_ERRORS`), strict concurrency is complete.
+- Local builds are ad-hoc signed. macOS ties Accessibility and Microphone permissions to the signing
+  identity, so dictation development (2.1) will need a stable local certificate; see ADR-001.
