@@ -30,6 +30,17 @@ struct FilesPage: View {
         } message: { confirmation in
             Text(alertMessage(confirmation))
         }
+        // At the outermost container (not scoped to `queueBody`) so File › Open
+        // (`Navigation.requestFileImport`) always has somewhere to present from, even when it fires
+        // while the result view is showing — the command itself closes the result first, but the two
+        // state changes land in the same view update, and only the outer container is guaranteed to
+        // still be part of the tree either way.
+        .fileImporter(isPresented: requestFileImportBinding, allowedContentTypes: [.audio, .movie], allowsMultipleSelection: true) { result in
+            if case .success(let urls) = result {
+                Task { await model.addFiles(urls) }
+            }
+            navigation.requestFileImport = false
+        }
     }
 
     private func updateResultModel() {
@@ -79,12 +90,6 @@ struct FilesPage: View {
         // way). `allowsHitTesting(false)` keeps it from stealing the drop itself.
         .overlay {
             if model.isDragOver { dragOverOverlay }
-        }
-        .fileImporter(isPresented: requestFileImportBinding, allowedContentTypes: [.audio, .movie], allowsMultipleSelection: true) { result in
-            if case .success(let urls) = result {
-                Task { await model.addFiles(urls) }
-            }
-            navigation.requestFileImport = false
         }
     }
 

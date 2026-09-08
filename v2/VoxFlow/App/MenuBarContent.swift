@@ -11,7 +11,6 @@ struct MenuBarContent: View {
         }
         Divider()
         Button("Open VoxFlow") { openWindow(id: MainWindowID.main) }
-            .keyboardShortcut("o")
         Divider()
         Button("Quit VoxFlow") { NSApplication.shared.terminate(nil) }
             .keyboardShortcut("q")

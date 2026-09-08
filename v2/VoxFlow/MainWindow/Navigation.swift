@@ -11,4 +11,8 @@ final class Navigation {
     /// appear) — `FilesPage` binds its `.fileImporter(isPresented:)` to this and resets it once the
     /// importer closes; `MainWindow` navigates to `.files` when this becomes true from elsewhere.
     var requestFileImport = false
+    /// Set by `AppDelegate.application(_:open:)` when the Dock/Finder "Open With" path finds no
+    /// visible main window — `VoxFlowApp` observes this and calls `openWindow(id: MainWindowID.main)`,
+    /// since `AppDelegate` itself has no `@Environment(\.openWindow)` to call directly.
+    var requestMainWindow = false
 }
