@@ -123,6 +123,15 @@ struct FlowBarMachineTests {
         #expect(p.handle(.escape, now: 1) == [.cancelTimer(.takingLonger), .cancelTimer(.processingTimeout), .abortCapture, .startTimer(.dismiss, seconds: 0.8)])
         var i = FlowBarMachine()
         #expect(i.handle(.escape, now: 0).isEmpty)
+        var armed = FlowBarMachine()
+        _ = armed.handle(.fnDown(ok), now: 0)
+        #expect(armed.handle(.escape, now: 0.1) == [.cancelTimer(.hold), .cancelTimer(.doubleTap), .abortCapture, .startTimer(.dismiss, seconds: 0.8)])
+        #expect(armed.state == .discarded)
+        var tapped = FlowBarMachine()
+        _ = tapped.handle(.fnDown(ok), now: 0)
+        _ = tapped.handle(.fnUp, now: 0.1)
+        _ = tapped.handle(.escape, now: 0.2)
+        #expect(tapped.state == .discarded)
     }
 
     @Test("preflight gates: excluded app, secure input, mic denied / no device, model missing", arguments: [

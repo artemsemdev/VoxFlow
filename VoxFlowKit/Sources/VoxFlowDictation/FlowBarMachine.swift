@@ -232,6 +232,9 @@ public struct FlowBarMachine: Sendable, Equatable {
         case (.listening, .escape):
             state = .discarded
             return [.cancelTimer(.cap), .cancelTimer(.silence), .abortCapture, .startTimer(.dismiss, seconds: config.dismissDiscarded)]
+        case (.armed, .escape), (.tapped, .escape):      // esc before the hold/tap decision: nothing to keep
+            state = .discarded
+            return [.cancelTimer(.hold), .cancelTimer(.doubleTap), .abortCapture, .startTimer(.dismiss, seconds: config.dismissDiscarded)]
         case (.listening, .microphoneFailed(let e)), (.armed, .microphoneFailed(let e)), (.loadingModel, .microphoneFailed(let e)), (.tapped, .microphoneFailed(let e)):
             state = .micUnavailable(Self.access(for: e))
             return [.cancelTimer(.cap), .cancelTimer(.silence), .abortCapture, .startTimer(.dismiss, seconds: config.dismissError)]
