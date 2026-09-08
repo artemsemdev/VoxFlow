@@ -24,4 +24,8 @@ public enum StorageError: Error, Equatable, Sendable {
     case corruptRow
     case keychain(OSStatus)
     case secureEnclaveUnavailable
+    /// The key provider reports a freshly-generated key, but the database already has encrypted
+    /// rows: the original key material is gone (Keychain reset, re-signing, SE→Keychain provider
+    /// switch), so decrypting them would silently fail rather than the key silently regenerating.
+    case keyLost
 }

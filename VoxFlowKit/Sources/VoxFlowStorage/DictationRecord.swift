@@ -1,4 +1,5 @@
 import Foundation
+import VoxFlowCore
 
 /// What the Flow Bar hands to storage after an insertion (design MW-02 row fields; audio is never stored).
 public struct DictationDraft: Sendable, Equatable {
@@ -31,8 +32,12 @@ public struct DictationRecord: Sendable, Equatable, Identifiable {
     public var duration: TimeInterval
     public var words: Int
     public var createdAt: Date
+    /// True when this row could not be decoded (encrypted with no cipher available, or decryption
+    /// failed) — `text`/`rawText` are empty; the History page renders it as "Encrypted — turn on
+    /// 'Encrypt history at rest' to read" rather than the row disappearing or the whole list failing.
+    public var isUnreadable: Bool
 
-    public init(id: Int64, text: String, rawText: String, appName: String?, style: String?, language: String?, duration: TimeInterval, words: Int, createdAt: Date) {
+    public init(id: Int64, text: String, rawText: String, appName: String?, style: String?, language: String?, duration: TimeInterval, words: Int, createdAt: Date, isUnreadable: Bool = false) {
         self.id = id
         self.text = text
         self.rawText = rawText
@@ -42,7 +47,8 @@ public struct DictationRecord: Sendable, Equatable, Identifiable {
         self.duration = duration
         self.words = words
         self.createdAt = createdAt
+        self.isUnreadable = isUnreadable
     }
 
-    public static func wordCount(_ text: String) -> Int { text.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).count }
+    public static func wordCount(_ text: String) -> Int { text.wordCount }
 }

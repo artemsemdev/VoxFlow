@@ -2,9 +2,20 @@ import CryptoKit
 import Foundation
 import Security
 
+/// A key handed back by `HistoryKeyProviding`, plus whether this call is the one that generated
+/// and stored it — the signal `DictationStore.init` uses to tell "first run" from "the key vanished".
+public struct HistoryKey: Sendable {
+    public let key: SymmetricKey
+    public let isNewlyCreated: Bool
+    public init(key: SymmetricKey, isNewlyCreated: Bool) {
+        self.key = key
+        self.isNewlyCreated = isNewlyCreated
+    }
+}
+
 /// Hands out the symmetric key that encrypts history rows (design ST-05 "Key stored in the Secure Enclave").
 public protocol HistoryKeyProviding: Sendable {
-    func historyKey() throws -> SymmetricKey
+    func historyKey() throws -> HistoryKey
 }
 
 public enum HistoryKeyProviders {
@@ -29,11 +40,17 @@ public struct KeychainKeyProvider: HistoryKeyProviding {
         self.account = account
     }
 
-    public func historyKey() throws -> SymmetricKey {
-        if let data = try KeychainItem.read(service: service, account: account) { return SymmetricKey(data: data) }
-        let key = SymmetricKey(size: .bits256)
-        let stored = try KeychainItem.writeOrRead(key.withUnsafeBytes { Data($0) }, service: service, account: account)
-        return SymmetricKey(data: stored)
+    public func historyKey() throws -> HistoryKey {
+        if let data = try KeychainItem.read(service: service, account: account) {
+            return HistoryKey(key: SymmetricKey(data: data), isNewlyCreated: false)
+        }
+        let generated = SymmetricKey(size: .bits256)
+        let generatedData = generated.withUnsafeBytes { Data($0) }
+        // `writeOrRead` can lose a race to another caller and hand back someone else's already-stored
+        // bytes instead of ours (`errSecDuplicateItem`) — only a byte-for-byte match means *this* call
+        // is the one that actually created the key.
+        let stored = try KeychainItem.writeOrRead(generatedData, service: service, account: account)
+        return HistoryKey(key: SymmetricKey(data: stored), isNewlyCreated: stored == generatedData)
     }
 
     func deleteForTesting() throws { try KeychainItem.delete(service: service, account: account) }
@@ -58,9 +75,10 @@ public struct SecureEnclaveKeyProvider: HistoryKeyProviding {
         self.account = account
     }
 
-    public func historyKey() throws -> SymmetricKey {
+    public func historyKey() throws -> HistoryKey {
         guard SecureEnclave.isAvailable else { throw StorageError.secureEnclaveUnavailable }
         let pair: SecureEnclaveKeyPair
+        var isNewlyCreated = false
         if let blob = try KeychainItem.read(service: service, account: account + ".se") {
             pair = try JSONDecoder().decode(SecureEnclaveKeyPair.self, from: blob)
         } else {
@@ -69,13 +87,19 @@ public struct SecureEnclaveKeyProvider: HistoryKeyProviding {
             let newPrivateKey = try SecureEnclave.P256.KeyAgreement.PrivateKey()
             let newSaltPublic = P256.KeyAgreement.PrivateKey().publicKey      // private half discarded on purpose
             let generated = SecureEnclaveKeyPair(se: newPrivateKey.dataRepresentation, salt: newSaltPublic.rawRepresentation)
-            let stored = try KeychainItem.writeOrRead(JSONEncoder().encode(generated), service: service, account: account + ".se")
+            let generatedData = try JSONEncoder().encode(generated)
+            // As with the Keychain provider: only a byte-for-byte match on the stored blob means this
+            // call actually won the write (vs. losing an `errSecDuplicateItem` race and reading back
+            // another caller's pair).
+            let stored = try KeychainItem.writeOrRead(generatedData, service: service, account: account + ".se")
+            isNewlyCreated = stored == generatedData
             pair = try JSONDecoder().decode(SecureEnclaveKeyPair.self, from: stored)
         }
         let privateKey = try SecureEnclave.P256.KeyAgreement.PrivateKey(dataRepresentation: pair.se)
         let saltPublic = try P256.KeyAgreement.PublicKey(rawRepresentation: pair.salt)
         let shared = try privateKey.sharedSecretFromKeyAgreement(with: saltPublic)
-        return shared.hkdfDerivedSymmetricKey(using: SHA256.self, salt: Data("VoxFlow history".utf8), sharedInfo: Data(), outputByteCount: 32)
+        let key = shared.hkdfDerivedSymmetricKey(using: SHA256.self, salt: Data("VoxFlow history".utf8), sharedInfo: Data(), outputByteCount: 32)
+        return HistoryKey(key: key, isNewlyCreated: isNewlyCreated)
     }
 }
 

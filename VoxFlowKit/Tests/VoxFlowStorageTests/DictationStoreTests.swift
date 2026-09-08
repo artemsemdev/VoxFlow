@@ -4,8 +4,13 @@ import Testing
 @testable import VoxFlowStorage
 
 struct FakeKeyProvider: HistoryKeyProviding {
-    let key = SymmetricKey(size: .bits256)
-    func historyKey() throws -> SymmetricKey { key }
+    let key: SymmetricKey
+    var isNew: Bool
+    init(key: SymmetricKey = SymmetricKey(size: .bits256), isNew: Bool = false) {
+        self.key = key
+        self.isNew = isNew
+    }
+    func historyKey() throws -> HistoryKey { HistoryKey(key: key, isNewlyCreated: isNew) }
 }
 
 @Suite("DictationStore")
@@ -67,5 +72,51 @@ struct DictationStoreTests {
         let url = dir.appendingPathComponent("voxflow.sqlite")
         _ = try DictationStore(databaseURL: url, keyProvider: nil).insert(draft("kept", at: Date()))
         #expect(try DictationStore(databaseURL: url, keyProvider: nil).fetch(limit: 1).first?.text == "kept")
+    }
+
+    @Test("fetch never fails on an unreadable row: reopening without the key flags encrypted rows, plaintext still reads")
+    func unreadableRowsDoNotBreakFetch() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("voxflow.sqlite")
+
+        let keyed = try DictationStore(databaseURL: url, keyProvider: FakeKeyProvider())
+        _ = try keyed.insert(draft("first secret", at: Date(timeIntervalSince1970: 1)))
+        _ = try keyed.insert(draft("second secret", at: Date(timeIntervalSince1970: 2)))
+
+        let reopened = try DictationStore(databaseURL: url, keyProvider: nil)
+        let all = try reopened.fetch(limit: 10)
+        #expect(all.count == 2)
+        #expect(all.allSatisfy { $0.isUnreadable })
+        #expect(all.allSatisfy { $0.text.isEmpty && $0.rawText.isEmpty })
+        #expect(try reopened.search("secret").isEmpty)   // unreadable rows never surface in search
+
+        _ = try reopened.insert(draft("plain text after", at: Date(timeIntervalSince1970: 3)))
+        let afterInsert = try reopened.fetch(limit: 10)
+        #expect(afterInsert.count == 3)
+        #expect(afterInsert.filter(\.isUnreadable).count == 2)
+        let readable = afterInsert.first { !$0.isUnreadable }
+        #expect(readable?.text == "plain text after")
+        #expect(try reopened.search("plain").map(\.text) == ["plain text after"])
+    }
+
+    @Test("a key provider reporting a freshly-created key over an already-encrypted database throws keyLost; the existing key still works")
+    func lostKeyIsDetected() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("voxflow.sqlite")
+        let sharedKey = SymmetricKey(size: .bits256)
+
+        _ = try DictationStore(databaseURL: url, keyProvider: FakeKeyProvider(key: sharedKey)).insert(draft("secret", at: Date()))
+
+        #expect(throws: StorageError.keyLost) {
+            _ = try DictationStore(databaseURL: url, keyProvider: FakeKeyProvider(key: SymmetricKey(size: .bits256), isNew: true))
+        }
+
+        let reopened = try DictationStore(databaseURL: url, keyProvider: FakeKeyProvider(key: sharedKey, isNew: false))
+        #expect(try reopened.count() == 1)
+        #expect(try reopened.fetch(limit: 1).first?.text == "secret")
     }
 }
