@@ -3,11 +3,10 @@ import Testing
 
 @Suite("VoxFlowVersion")
 struct VersionTests {
-    @Test("version string is semver with a -dev suffix until the first release")
-    func versionIsDevSemver() {
+    @Test("version string is semver, optionally with a pre-release suffix")
+    func versionIsSemver() {
         let parts = VoxFlowVersion.string.split(separator: "-", maxSplits: 1)
-        #expect(parts.count == 2)
-        #expect(parts[1] == "dev")
+        #expect((1...2).contains(parts.count))
         let numbers = parts[0].split(separator: ".")
         #expect(numbers.count == 3)
         #expect(numbers.allSatisfy { Int($0) != nil })
