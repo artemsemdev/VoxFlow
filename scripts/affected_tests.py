@@ -6,7 +6,7 @@ Reads the package graph from `swift package describe --type json` (or a saved co
 changed. Prints "ALL" when the change cannot be mapped safely (manifest edits, unknown
 paths, files outside the package) and an empty line when nothing is affected.
 
-Used by .github/workflows/ci-v2.yml to run `swift test --filter` on package-only PRs.
+Used by .github/workflows/ci.yml to run `swift test --filter` on package-only PRs.
 """
 from __future__ import annotations
 
@@ -45,7 +45,7 @@ def _target_for(path: str, targets: list[dict]) -> dict | None:
 # Only `target_dependencies` (in-package targets) are walked. `product_dependencies`
 # (products of other packages) are ignored on purpose: VoxFlowKit is a single package
 # with no local sibling packages, and Package.resolved changes already select ALL.
-# Revisit if a second local package appears under v2/.
+# Revisit if a second local package appears in the repository.
 def _dependents(targets: list[dict]) -> dict[str, set[str]]:
     """name -> names of targets that depend on it directly."""
     graph: dict[str, set[str]] = {t["name"]: set() for t in targets}
@@ -90,7 +90,7 @@ def _strip_package_prefix(path: str, package_path: str) -> str | None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
-    parser.add_argument("--package-path", required=True, help="package directory, e.g. v2/VoxFlowKit")
+    parser.add_argument("--package-path", required=True, help="package directory, e.g. VoxFlowKit")
     parser.add_argument("--describe-json", help="saved output of `swift package describe --type json`")
     parser.add_argument("--format", choices=("names", "regex"), default="names")
     parser.add_argument("files", nargs="*", help="changed files, paths relative to the repository root")

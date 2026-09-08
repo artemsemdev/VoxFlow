@@ -1,6 +1,6 @@
-name: CodeQL v2
+name: CodeQL
 
-# CodeQL for the v2 Swift rewrite under v2/ (see issue #105).
+# CodeQL for VoxFlow (Swift) — see issue #105.
 # CodeQL supports Swift only on macOS runners, hence macos-15 rather than ubuntu-latest.
 # Runs on pushes to develop/master, weekly, and on demand — not on every PR (a full Swift analysis takes ~25 minutes).
 on:
@@ -9,14 +9,17 @@ on:
       - master
       - develop
     paths:
-      - 'v2/**'
-      - '.github/workflows/codeql-v2.yml'
+      - 'VoxFlow/**'
+      - 'VoxFlowKit/**'
+      - 'VoxFlowTests/**'
+      - 'project.yml'
+      - '.github/workflows/codeql.yml'
   schedule:
     - cron: '0 6 * * 1'
   workflow_dispatch:
 
 concurrency:
-  group: codeql-v2-${{ github.ref }}
+  group: codeql-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -39,15 +42,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # The weekly schedule fires on master, which has no v2/ until promotion; skip until it does.
+      # Defensive: skip on a ref without Swift sources (e.g. the archived v1 branch).
       - name: Probe for Swift sources
         id: probe
         run: |
-          if [ -n "$(find v2 -name '*.swift' -print -quit 2>/dev/null)" ]; then
+          if [ -n "$(find VoxFlow VoxFlowKit -name '*.swift' -print -quit 2>/dev/null)" ]; then
             echo "has_swift=true" >> "$GITHUB_OUTPUT"
           else
             echo "has_swift=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::No Swift sources under v2/ on this ref; skipping CodeQL Swift analysis."
+            echo "::notice::No Swift sources on this ref; skipping CodeQL Swift analysis."
           fi
 
       - name: Select Xcode 26
@@ -72,7 +75,6 @@ jobs:
 
       - name: Build
         if: steps.probe.outputs.has_swift == 'true'
-        working-directory: v2
         run: |
           xcodegen generate
           xcodebuild -scheme VoxFlow -destination 'platform=macOS' build

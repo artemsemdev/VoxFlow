@@ -1,13 +1,13 @@
-name: CI v2
+name: CI
 
-# Validate the v2 native Swift rewrite under v2/ (see issues #105, #116).
+# Validate VoxFlow (Swift) — see issues #105, #116.
 #
 # Ladder (pull requests): a cheap Ubuntu job buckets the changed files, then
 #   docs only                                   → nothing else runs, `result` is green
-#   v2/scripts/** only                          → Python unit tests for the CI scripts
+#   scripts/** only                             → Python unit tests for the CI scripts
 #   VoxFlowKit only (modules the app does not link) → swift test for the changed modules and their dependents
 #   app, project.yml, this workflow, the package manifest, a module the app links,
-#   anything else under v2/, or PR label `ci:full`   → full VoxFlow scheme (build + all tests)
+#   anything else in the repo, or PR label `ci:full`  → full VoxFlow scheme (build + all tests)
 # Pushes to develop/master and manual runs always run the full scheme.
 # Every PR gets a `result` check; branch protection requires only that job.
 on:
@@ -15,16 +15,13 @@ on:
     branches:
       - master
       - develop
-    paths:
-      - 'v2/**'
-      - '.github/workflows/ci-v2.yml'
   pull_request:
     # `labeled` so adding `ci:full` to an open PR triggers a full run.
     types: [opened, synchronize, reopened, labeled]
   workflow_dispatch:
 
 concurrency:
-  group: ci-v2-${{ github.ref }}
+  group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -32,7 +29,7 @@ permissions:
   pull-requests: read
 
 env:
-  PACKAGE_PATH: v2/VoxFlowKit
+  PACKAGE_PATH: VoxFlowKit
 
 jobs:
   changes:
@@ -56,36 +53,41 @@ jobs:
         with:
           list-files: json
           # Default quantifier ('some') matches a rule if ANY of its patterns match, so a
-          # negated pattern such as '!v2/**/*.md' does not act as an exclusion once 'v2/**'
-          # already matched — 'other' would wrongly catch every v2/*.md file. This makes a
+          # negated pattern such as '!**/*.md' does not act as an exclusion once '**'
+          # already matched — 'other' would wrongly catch every *.md file. This makes a
           # negated pattern a real exclusion.
           predicate-quantifier: 'some-with-excludes'
           filters: |
             docs:
-              - 'v2/docs/**'
-              - 'v2/design/**'
-              - 'v2/**/*.md'
+              - 'docs/**'
+              - 'design/**'
+              - '**/*.md'
             scripts:
-              - 'v2/scripts/**'
+              - 'scripts/**'
             package:
-              - 'v2/VoxFlowKit/**'
+              - 'VoxFlowKit/**'
             app:
-              - 'v2/VoxFlow/**'
-              - 'v2/VoxFlowTests/**'
-              - 'v2/project.yml'
+              - 'VoxFlow/**'
+              - 'VoxFlowTests/**'
+              - 'project.yml'
             workflow:
-              - '.github/workflows/ci-v2.yml'
-            # Anything else under v2/ (a new package, an .xcconfig, a Makefile…) runs everything.
+              - '.github/workflows/ci.yml'
+            # Anything else (a new package, an .xcconfig, a Makefile…) runs everything; repository
+            # housekeeping files and the other workflows do not.
             other:
-              - 'v2/**'
-              - '!v2/docs/**'
-              - '!v2/design/**'
-              - '!v2/**/*.md'
-              - '!v2/scripts/**'
-              - '!v2/VoxFlowKit/**'
-              - '!v2/VoxFlow/**'
-              - '!v2/VoxFlowTests/**'
-              - '!v2/project.yml'
+              - '**'
+              - '!docs/**'
+              - '!design/**'
+              - '!**/*.md'
+              - '!scripts/**'
+              - '!VoxFlowKit/**'
+              - '!VoxFlow/**'
+              - '!VoxFlowTests/**'
+              - '!project.yml'
+              - '!.github/**'
+              - '!.gitignore'
+              - '!.editorconfig'
+              - '!LICENSE'
 
       # A package change that touches the manifest or a module the app links must also
       # build the app, so it escalates to the full run. Linked modules are read from
@@ -100,8 +102,8 @@ jobs:
           python3 - <<'PY'
           import json, os, re
           files = json.loads(os.environ["PACKAGE_FILES"])
-          linked = sorted(set(re.findall(r"^\s*product:\s*(\S+)\s*$", open("v2/project.yml").read(), re.M)))
-          prefixes = tuple(f"v2/VoxFlowKit/Sources/{m}/" for m in linked)
+          linked = sorted(set(re.findall(r"^\s*product:\s*(\S+)\s*$", open("project.yml").read(), re.M)))
+          prefixes = tuple(f"VoxFlowKit/Sources/{m}/" for m in linked)
           reaches_app = any(
               f.rsplit("/", 1)[-1] in ("Package.swift", "Package.resolved") or f.startswith(prefixes)
               for f in files
@@ -112,7 +114,7 @@ jobs:
           PY
 
       # Full run when: not a PR (push/dispatch), the PR carries `ci:full`, or the change
-      # touches the app, this workflow, an unbucketed v2 path, or a package part the app links.
+      # touches the app, this workflow, an unbucketed path, or a package part the app links.
       - name: Decide run mode
         id: mode
         env:
@@ -143,7 +145,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Run unit tests
-        run: python3 -m unittest discover -s v2/scripts/tests -v
+        run: python3 -m unittest discover -s scripts/tests -v
 
   package-tests:
     name: Package tests (affected modules)
@@ -166,10 +168,10 @@ jobs:
       - name: Cache SPM build
         uses: actions/cache@v4
         with:
-          path: v2/VoxFlowKit/.build
-          key: ${{ runner.os }}-spm-build-${{ hashFiles('v2/VoxFlowKit/Package.swift', 'v2/**/Package.resolved') }}-${{ github.run_id }}
+          path: VoxFlowKit/.build
+          key: ${{ runner.os }}-spm-build-${{ hashFiles('VoxFlowKit/Package.swift', '**/Package.resolved') }}-${{ github.run_id }}
           restore-keys: |
-            ${{ runner.os }}-spm-build-${{ hashFiles('v2/VoxFlowKit/Package.swift', 'v2/**/Package.resolved') }}-
+            ${{ runner.os }}-spm-build-${{ hashFiles('VoxFlowKit/Package.swift', '**/Package.resolved') }}-
             ${{ runner.os }}-spm-build-
 
       - name: Select affected test targets
@@ -179,7 +181,7 @@ jobs:
         run: |
           set -euo pipefail
           printf '%s' "$CHANGED_JSON" > changed-files.json
-          FILTER=$(python3 v2/scripts/affected_tests.py --package-path "$PACKAGE_PATH" --format regex --files-json changed-files.json)
+          FILTER=$(python3 scripts/affected_tests.py --package-path "$PACKAGE_PATH" --format regex --files-json changed-files.json)
           {
             echo "filter<<VOXFLOW_EOF"
             echo "$FILTER"
@@ -215,15 +217,11 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 30
 
-    defaults:
-      run:
-        working-directory: v2
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # The image defaults to Xcode 16.x; v2 is developed with Xcode 26.x. Pick the newest 26.
+      # The image defaults to Xcode 16.x; VoxFlow is developed with Xcode 26.x. Pick the newest 26.
       - name: Select Xcode 26
         run: |
           set -euo pipefail
@@ -241,10 +239,10 @@ jobs:
         with:
           path: |
             ~/Library/Developer/Xcode/DerivedData
-            v2/VoxFlowKit/.build
-          key: ${{ runner.os }}-spm-${{ hashFiles('v2/VoxFlowKit/Package.swift', 'v2/**/Package.resolved') }}-${{ github.run_id }}
+            VoxFlowKit/.build
+          key: ${{ runner.os }}-spm-${{ hashFiles('VoxFlowKit/Package.swift', '**/Package.resolved') }}-${{ github.run_id }}
           restore-keys: |
-            ${{ runner.os }}-spm-${{ hashFiles('v2/VoxFlowKit/Package.swift', 'v2/**/Package.resolved') }}-
+            ${{ runner.os }}-spm-${{ hashFiles('VoxFlowKit/Package.swift', '**/Package.resolved') }}-
             ${{ runner.os }}-spm-
 
       - name: Generate Xcode project
@@ -262,17 +260,17 @@ jobs:
 
       - name: Package tests without Xcode project
         run: swift test
-        working-directory: v2/VoxFlowKit
+        working-directory: VoxFlowKit
 
       - name: Upload logs and results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: v2-test-results
+          name: test-results
           path: |
-            v2/build.log
-            v2/test.log
-            v2/TestResults.xcresult
+            build.log
+            test.log
+            TestResults.xcresult
           if-no-files-found: ignore
 
   # The single status check for branch protection: red if any job that ran failed or was

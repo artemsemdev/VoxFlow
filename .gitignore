@@ -59,7 +59,14 @@ AuthKey_*.p8
 *.local.json
 ExportOptions.local.plist
 
-# ── Tooling ─────────────────────────────────────────────────────────────────
+# ── Tooling and local agent workspaces ──────────────────────────────────────
+.superpowers/
+.worktrees/
+.claude/
+# leftovers from v1 (.NET) builds on developer machines
+bin/
+obj/
+artifacts/
 .idea/
 .vscode/
 *.swp

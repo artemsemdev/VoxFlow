@@ -55,22 +55,22 @@ class AffectedTestTargets(unittest.TestCase):
 
 class Cli(unittest.TestCase):
     def run_cli(self, *args):
-        cmd = [sys.executable, str(SCRIPTS / "affected_tests.py"), "--package-path", "v2/VoxFlowKit",
+        cmd = [sys.executable, str(SCRIPTS / "affected_tests.py"), "--package-path", "VoxFlowKit",
                "--describe-json", str(FIXTURE), *args]
         return subprocess.run(cmd, capture_output=True, text=True, check=True).stdout.strip()
 
     def test_strips_package_prefix_and_prints_names(self):
-        self.assertEqual(self.run_cli("v2/VoxFlowKit/Sources/B/Foo.swift"), "BTests")
+        self.assertEqual(self.run_cli("VoxFlowKit/Sources/B/Foo.swift"), "BTests")
 
     def test_regex_format(self):
-        self.assertEqual(self.run_cli("--format", "regex", "v2/VoxFlowKit/Sources/A/Bar.swift"),
+        self.assertEqual(self.run_cli("--format", "regex", "VoxFlowKit/Sources/A/Bar.swift"),
                          r"^(ATests|BTests)\.")
 
     def test_all_is_printed_verbatim(self):
-        self.assertEqual(self.run_cli("v2/VoxFlowKit/Package.swift"), "ALL")
+        self.assertEqual(self.run_cli("VoxFlowKit/Package.swift"), "ALL")
 
     def test_file_outside_package_selects_all(self):
-        self.assertEqual(self.run_cli("v2/VoxFlow/App/VoxFlowApp.swift"), "ALL")
+        self.assertEqual(self.run_cli("VoxFlow/App/VoxFlowApp.swift"), "ALL")
 
     def test_empty_input_prints_empty_line(self):
         self.assertEqual(self.run_cli(), "")
@@ -78,9 +78,9 @@ class Cli(unittest.TestCase):
     def test_files_json_is_read_and_merged(self):
         import tempfile
         with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as fh:
-            json.dump(["v2/VoxFlowKit/Sources/B/Foo.swift"], fh)
+            json.dump(["VoxFlowKit/Sources/B/Foo.swift"], fh)
         try:
-            self.assertEqual(self.run_cli("--files-json", fh.name, "v2/VoxFlowKit/Tests/CoreTests/T.swift"),
+            self.assertEqual(self.run_cli("--files-json", fh.name, "VoxFlowKit/Tests/CoreTests/T.swift"),
                              "BTests CoreTests")
         finally:
             pathlib.Path(fh.name).unlink()
