@@ -3,7 +3,7 @@ import SwiftUI
 @main
 struct VoxFlowApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @State private var navigation = Navigation()
+    private var navigation: Navigation { AppServices.shared.navigation }
 
     var body: some Scene {
         Window("VoxFlow", id: MainWindowID.main) {
@@ -19,6 +19,13 @@ struct VoxFlowApp: App {
                     Button(page.title) { navigation.page = page }
                         .keyboardShortcut(page.keyEquivalent, modifiers: .command)
                 }
+            }
+            CommandGroup(replacing: .newItem) {
+                Button("Open…") {
+                    navigation.requestFileImport = true
+                    navigation.page = .files
+                }
+                .keyboardShortcut("o")
             }
         }
 

@@ -17,5 +17,8 @@ struct MainWindow: View {
             }
         }
         .frame(minWidth: 900, minHeight: 600)
+        .onChange(of: navigation.requestFileImport) { _, requested in
+            if requested { navigation.page = .files }
+        }
     }
 }

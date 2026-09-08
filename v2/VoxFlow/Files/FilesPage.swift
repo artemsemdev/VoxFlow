@@ -8,13 +8,12 @@ import VoxFlowFiles
 struct FilesPage: View {
     @Environment(Navigation.self) private var navigation
     @State private var model: FilesViewModel
-    @State private var isFileImporterPresented = false
 
     init() {
         let services = AppServices.shared
         _model = State(wrappedValue: FilesViewModel(
             queue: services.queue, settings: services.filesSettings, modelStore: services.modelStore,
-            durations: services.durations, exporter: { services.exporter }))
+            durations: services.durations, exports: services.exports))
     }
 
     var body: some View {
@@ -45,7 +44,7 @@ struct FilesPage: View {
             ScrollView {
                 Group {
                     if model.items.isEmpty {
-                        DropZoneView(isFileImporterPresented: $isFileImporterPresented)
+                        DropZoneView(isFileImporterPresented: requestFileImportBinding)
                     } else {
                         QueueListView(model: model)
                     }
@@ -67,11 +66,18 @@ struct FilesPage: View {
         .overlay {
             if model.isDragOver { dragOverOverlay }
         }
-        .fileImporter(isPresented: $isFileImporterPresented, allowedContentTypes: [.audio, .movie], allowsMultipleSelection: true) { result in
+        .fileImporter(isPresented: requestFileImportBinding, allowedContentTypes: [.audio, .movie], allowsMultipleSelection: true) { result in
             if case .success(let urls) = result {
                 Task { await model.addFiles(urls) }
             }
+            navigation.requestFileImport = false
         }
+    }
+
+    /// Backs both the drop zone's "Choose Files…" button and File › Open (`Navigation.requestFileImport`)
+    /// with the same presentation, so either entry point opens the same panel and resets the same flag.
+    private var requestFileImportBinding: Binding<Bool> {
+        Binding(get: { navigation.requestFileImport }, set: { navigation.requestFileImport = $0 })
     }
 
     private var dragOverOverlay: some View {
