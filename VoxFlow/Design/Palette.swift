@@ -19,4 +19,17 @@ enum Palette {
         case .graphite: Color(red: 110 / 255, green: 110 / 255, blue: 115 / 255) // #6e6e73
         }
     }
+
+    // MARK: - Flow Bar HUD (design 1a/2a: dark floating pill material)
+
+    /// The pill's dark HUD material — near-black, slightly translucent.
+    static let hudBackground = Color(white: 0.11).opacity(0.92)
+    /// Title text on the pill.
+    static let hudText = Color.white
+    /// Dimmed subtitle/timer/chip text on the pill.
+    static let hudSecondary = Color.white.opacity(0.6)
+    /// The recording dot and error dot (FB-02, FB-07).
+    static let recording = Color(red: 1, green: 69 / 255, blue: 58 / 255)   // #ff453a
+    /// The warning dot (FB-05, FB-08).
+    static let amber = Color(red: 1, green: 214 / 255, blue: 10 / 255)      // #ffd60a
 }
