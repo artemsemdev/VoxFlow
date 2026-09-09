@@ -43,8 +43,10 @@ final class HistoryService {
     let storeBox = HistoryStoreBox()
     /// Fired after any write that changes what's on disk — `delete`/`deleteAll`/`reinsert` below call
     /// it directly; `HistoryWriter`'s own insert path (which saves through `storeBox` rather than
-    /// this service) is expected to call `notifyChanged()` too once wired (`AppServices`, Task 5).
-    /// `StatsService.refresh()` is the intended subscriber so Home's numbers stay live.
+    /// this service) calls it too, via its `onSaved` hook wired in `AppServices.live()`
+    /// (`HistorySavedSink`, review C1). `StatsService.refresh()` is the intended subscriber so
+    /// Home's/the menu bar's numbers stay live after every dictation, not just after a History
+    /// delete/undo.
     var onChange: (() -> Void)?
 
     private let url: URL

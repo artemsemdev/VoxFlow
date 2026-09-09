@@ -44,6 +44,23 @@ private final class DictationLevelSink: Sendable {
     }
 }
 
+/// Sendable pipe from `HistoryWriter.save`'s `onSaved` (called off the main actor, inside a
+/// detached insert task) into `HistoryService.notifyChanged()` — same `Mutex`-boxed weak-attach
+/// pattern as `DictationLevelSink`/`NotificationRouteSink` above, needed because `HistoryWriter`
+/// itself is `Sendable` and can't capture the main-actor `HistoryService` directly in its
+/// `@Sendable` `onSaved` closure (C1). `notify()` is `async` (unlike the fire-and-forget siblings
+/// above) and awaits the hop, so `HistoryWriter.save` only returns once `notifyChanged()` has
+/// actually run — what makes "a save through the writer bumps `StatsService.today.words`"
+/// deterministically testable.
+private final class HistorySavedSink: Sendable {
+    private struct WeakBox { weak var service: HistoryService? }
+    private let box = Mutex(WeakBox(service: nil))
+    func attach(_ service: HistoryService) { box.withLock { $0.service = service } }
+    func notify() async {
+        await Task { @MainActor in self.box.withLock { $0.service }?.notifyChanged() }.value
+    }
+}
+
 /// Composition root: the real engine, decoder, model store and queue, built once per app run.
 @MainActor
 @Observable
@@ -217,8 +234,14 @@ final class AppServices {
         let historyService = HistoryService(url: DictationStore.defaultURL, settings: dictationSettings,
                                             keyProvider: { HistoryKeyProviders.default() }, clock: SystemMonotonicClock())
 
+        // C1: `historySavedSink` bridges a successful `HistoryWriter.save` (running off the main
+        // actor) back into `historyService.notifyChanged()`, so `StatsService` (the one subscriber
+        // to `onChange`) refreshes after every dictation, not just after a History
+        // delete/deleteAll/reinsert.
+        let historySavedSink = HistorySavedSink()
+        historySavedSink.attach(historyService)
         let historyWriter = HistoryWriter(storeBox: historyService.storeBox, settings: dictationSettings.box, now: Date.init,
-                                          ready: { await historyService.ready() })
+                                          ready: { await historyService.ready() }, onSaved: { await historySavedSink.notify() })
 
         // Styles/Dictionary/Snippets content (design MW-03/04/05) — `ContentService` builds its three
         // stores from `historyService`'s shared database once that opens; `StyledTranscriber` reads

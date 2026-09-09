@@ -1,10 +1,24 @@
 import CryptoKit
 import Foundation
+import Synchronization
 import Testing
 import VoxFlowCore
+import VoxFlowDictation
 import VoxFlowStorage
 import VoxFlowTestSupport
 @testable import VoxFlow
+
+/// Mirrors `AppServices`' `HistorySavedSink` — the `Mutex`-boxed weak-attach pattern
+/// `HistoryWriter.save`'s `@Sendable` `onSaved` needs to safely reach the main-actor
+/// `HistoryService` from its detached insert task (see C1).
+private final class TestHistorySavedSink: Sendable {
+    private struct WeakBox { weak var service: HistoryService? }
+    private let box = Mutex(WeakBox(service: nil))
+    func attach(_ service: HistoryService) { box.withLock { $0.service = service } }
+    func notify() async {
+        await Task { @MainActor in self.box.withLock { $0.service }?.notifyChanged() }.value
+    }
+}
 
 private struct FakeHistoryKeyProvider: HistoryKeyProviding {
     let key: SymmetricKey
@@ -156,5 +170,30 @@ struct StatsServiceTests {
         await waitUntil { stats.today.dictations == 2 }
         #expect(stats.today.dictations == 2)
         #expect(Set(stats.recent.map(\.id)) == Set([keep.id, restored.id]))
+    }
+
+    @Test("a save through HistoryWriter, wired the way AppServices wires onSaved to notifyChanged(), bumps StatsService.today.words without any explicit refresh() call (C1)")
+    func historyWriterSaveRefreshesStats() async throws {
+        let dir = TemporaryDirectory()
+        let history = makeHistory(dir: dir)
+        await history.ready()
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        let stats = StatsService(history: history, now: { now })
+        await stats.refresh()
+        #expect(stats.today.words == 0)
+
+        let sink = TestHistorySavedSink()
+        sink.attach(history)
+        let settings = DictationSettingsBox(DictationSettingsSnapshot(excludedBundleIDs: [], keepHistory: true, options: TranscriptionOptions()))
+        let writer = HistoryWriter(storeBox: history.storeBox, settings: settings, now: { now },
+                                   ready: { await history.ready() }, onSaved: { await sink.notify() })
+        let result = DictationResult(text: "one two three four five", rawText: "one two three four five", segments: [],
+                                     language: LanguageDetection(code: "en", confidence: 0.9), duration: 3, lowConfidence: false)
+
+        await writer.save(result, appName: "Mail")
+
+        await waitUntil { stats.today.words == 5 }
+        #expect(stats.today.words == 5)
+        #expect(stats.today.dictations == 1)
     }
 }

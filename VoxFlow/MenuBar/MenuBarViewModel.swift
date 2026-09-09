@@ -57,8 +57,12 @@ final class MenuBarViewModel {
         self.terminate = terminate
     }
 
+    /// C1: also re-reads `stats` — `StatsService` normally stays live on its own (subscribed to
+    /// `HistoryService.onChange`), but re-reading it here too means opening the dropdown always
+    /// shows the true current numbers even if a refresh is somehow still in flight.
     func refresh() async {
         modelsOnDisk = await modelsOnDiskProvider()
+        await stats.refresh()
     }
 
     // MARK: Status (header)
@@ -79,7 +83,7 @@ final class MenuBarViewModel {
 
     /// "10:41" — the wall-clock time `pause(for:)` ends, `nil` outside `.paused`. Computed from
     /// `now()` (this view model's injected wall clock, test-controllable) plus the coordinator's own
-    /// monotonic `pausedUntil`/`now()` pair, rather than `dictation.pausedUntilDate` directly, so
+    /// monotonic `pausedUntil`/`now()` pair, rather than a projection owned by the coordinator, so
     /// `MenuBarViewModelTests` can pin the exact "10:41" text deterministically.
     var pausedUntilText: String? {
         guard let until = dictation.pausedUntil else { return nil }

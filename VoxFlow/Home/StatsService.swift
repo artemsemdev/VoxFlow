@@ -54,8 +54,9 @@ enum Greeting {
 /// Home page + menu bar numbers (design MW-01, ruling 1), computed from `DictationStore`'s aggregate
 /// queries. Subscribes itself to `history.onChange` so a dictation, a History delete/undo, or a
 /// retention purge all keep these numbers live without any caller having to remember to ask again —
-/// `AppServices` (Task 5) still owns constructing this once and triggering the very first `refresh()`
-/// at launch, since that's composition-root wiring this task doesn't touch.
+/// `AppServices` builds this once, and `AppDelegate` (non-test launch path, review C1) triggers the
+/// very first `refresh()` right after `historyService.ready()` resolves, so Home and the menu bar
+/// show real numbers without anyone having to navigate to Home first.
 @Observable @MainActor
 final class StatsService {
     static let weekDays = 7

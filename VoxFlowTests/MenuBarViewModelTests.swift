@@ -170,6 +170,33 @@ struct MenuBarViewModelTests {
         #expect(vm.minutesSavedText == "18 min saved")
     }
 
+    @Test("refresh() also re-reads stats, so the dropdown never shows a stale word count (C1)")
+    func refreshUpdatesStats() async throws {
+        let dir = TemporaryDirectory()
+        let settings = DictationSettings(store: InMemoryKeyValueStore())
+        settings.retentionDays = 0
+        settings.encryptHistory = false
+        let history = HistoryService(url: dir.file("voxflow.sqlite"), settings: settings,
+                                     keyProvider: { FakeHistoryKeyProvider() }, clock: FakeClock())
+        await history.ready()
+        let store = try #require(history.store)
+        let stats = StatsService(history: history)
+        await stats.refresh()
+
+        let vm = try await makeViewModel(dir: dir, coordinator: makeCoordinator(clock: FakeClock()), stats: stats)
+        #expect(vm.wordsTodayText == "0 words today")
+
+        // Inserted directly on the store — bypassing `HistoryService.notifyChanged()`/`onChange` —
+        // so only an explicit `stats.refresh()` (the one `MenuBarViewModel.refresh()` must now
+        // perform) picks it up.
+        _ = try store.insert(DictationDraft(text: "one two three four five", rawText: "one two three four five", appName: "Mail",
+                                            style: nil, language: "en", duration: 5, createdAt: Date()))
+        #expect(vm.wordsTodayText == "0 words today")   // stale until refresh() runs
+
+        await vm.refresh()
+        #expect(vm.wordsTodayText == "5 words today")
+    }
+
     @Test("footer: 'No network connections · N models on disk · {mode}', modelsOnDisk from refresh()")
     func footerText() async throws {
         let settings = DictationSettings(store: InMemoryKeyValueStore())

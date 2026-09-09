@@ -26,8 +26,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             AppServices.shared.notifications.start()
             // `HistoryService` opens lazily (Keychain access deferred to first use) — run that open
             // once here at a real launch so retention (design §5) runs at launch as the spec says,
-            // rather than waiting for the first History read/write to trigger it implicitly.
-            Task { await AppServices.shared.historyService.ready() }
+            // rather than waiting for the first History read/write to trigger it implicitly. C1:
+            // chained straight into `statsService.refresh()` so Home/the menu bar show real numbers
+            // the moment the store's open resolves, instead of only after someone navigates to Home.
+            Task {
+                await AppServices.shared.historyService.ready()
+                await AppServices.shared.statsService.refresh()
+            }
             // C1: `ContentService` also opens lazily, and was previously only ever opened by a
             // Dictionary/Snippets/Styles page (or by `noteUses` *after* the first dictation) —
             // meaning the first dictation of every cold launch ignored the dictionary, snippets and
