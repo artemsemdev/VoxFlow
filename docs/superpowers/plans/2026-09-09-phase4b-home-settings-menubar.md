@@ -65,7 +65,15 @@
 
 **Files:** `VoxFlow/Notifications/{NotificationPosting,NotificationCoordinator,UserNotifications+Posting}.swift`, `VoxFlow/App/{AppServices,AppDelegate,VoxFlowApp}.swift` (commands ⌘O/⌥⌘H/⌘,), `README.md`, `CHANGELOG.md`, `docs/adr/006-menu-bar-and-notifications.md` (why window-style MenuBarExtra, MB-00 approximation, notification rules), plan Task 5 owner checklist; tests.
 - `NotificationCoordinator(posting:, frontmost: () -> Bool, navigation:)` subscribes to `ModelStore` install completions (via `ModelsViewModel`/store events) and `FileQueue.finished`; posts only when not frontmost; click routing; tests with fakes (frontmost true → nothing; false → one post with the exact copy; click routes).
-- Owner checklist: Home stats after two dictations; first-run card with a permission revoked; General toggles (login, appearance, position, sounds); MCP token copy/regenerate; menu bar dropdown items and pause/resume (pill after 3 s); a model download notification while the window is in the background; a file transcription notification.
+- [x] Tests → implementation → commits `feat(app): completion notifications for model installs and file transcriptions`, `refactor(app): fold phase 4b services into AppServices; apply appearance and Flow Bar position at launch`, `fix(app): File › Open… on ⇧⌘O; wire token copy and the first-run hint`, `docs: ADR-006 menu bar and notifications; README/CHANGELOG; phase 4b checklist` — `NotificationCoordinatorTests` (9 tests: frontmost posts nothing for both kinds, backgrounded posts the exact MB-03/MB-04 copy, a failed transcription never posts, an already-installed model never fires spuriously, both routes click correctly, `durationText` formatting) plus the full `VoxFlowTests`/`swift test`/`scripts/tests` suites (see task report for counts) all green.
+- Owner checklist (manual, run once in the built app before opening the PR):
+  - [ ] Home stats change after two real dictations
+  - [ ] the first-run Setup card reappears on Home after revoking a granted permission
+  - [ ] Settings › General: login/appearance/position/sounds toggles apply live; login snaps back if `SMAppService` registration is denied
+  - [ ] Settings › MCP Server: endpoint Copy, token Copy, Regenerate (with its confirmation) all work
+  - [ ] menu bar dropdown: every item navigates correctly; "Pause dictation for 1 hour" → the Flow Bar pill reads "Paused · N min left" and hides itself after 3 s; Resume (from the pill or the dropdown) clears it
+  - [ ] with the main window backgrounded, a model finishing its download shows a system notification reading "{model} installed. Ready to use offline.", and clicking it opens Settings › Models
+  - [ ] with the main window backgrounded, a file finishing transcription shows a system notification reading "{file} transcribed · {duration} · {FORMAT} saved to ~/Transcripts", and clicking it opens that file's Files result
 - PR into `develop`: `Closes #111` after ticking the criteria the tests + checklist confirm.
 
 ## Self-review
