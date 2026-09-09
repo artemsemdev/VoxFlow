@@ -64,6 +64,13 @@ final class AppServices {
     /// Drives the History page (design MW-02) — built once here so navigating away and back keeps
     /// its search/expanded/undo state, same reasoning as `filesViewModel`.
     let historyViewModel: HistoryViewModel
+    /// Home's numbers (design MW-01, ruling 1) — built once here (not per-view `@State`, same
+    /// reasoning as `historyViewModel`) so `StatsService.onChange`'s subscription and this run's
+    /// numbers survive navigating away from and back to Home.
+    let statsService: StatsService
+    /// Drives the Home page (design MW-01, MW-01e) — built once here so its Setup-row state
+    /// survives navigating away and back, same reasoning as `historyViewModel`.
+    let homeViewModel: HomeViewModel
     /// The default style plus fillers/auto-punctuate/snippet-prefix/learn-from-contacts toggles
     /// (design MW-05 Styles page) — read by `StyledTranscriber` via `stylingSettings.box`.
     let stylingSettings: StylingSettings
@@ -98,6 +105,7 @@ final class AppServices {
                  filesViewModel: FilesViewModel, modelsViewModel: ModelsViewModel, audioViewModel: AudioViewModel,
                  privacyViewModel: PrivacyViewModel, dictationSettings: DictationSettings,
                  modelLoader: ModelLoader, historyService: HistoryService, historyViewModel: HistoryViewModel,
+                 statsService: StatsService, homeViewModel: HomeViewModel,
                  stylingSettings: StylingSettings, contentService: ContentService, dictionaryViewModel: DictionaryViewModel,
                  snippetsViewModel: SnippetsViewModel, stylesViewModel: StylesViewModel,
                  inserter: AccessibilityTextInserter, ephemeralScope: EphemeralScope, dictationController: DictationController,
@@ -118,6 +126,8 @@ final class AppServices {
         self.modelLoader = modelLoader
         self.historyService = historyService
         self.historyViewModel = historyViewModel
+        self.statsService = statsService
+        self.homeViewModel = homeViewModel
         self.stylingSettings = stylingSettings
         self.contentService = contentService
         self.dictionaryViewModel = dictionaryViewModel
@@ -231,6 +241,17 @@ final class AppServices {
         let historyViewModel = HistoryViewModel(service: historyService, settings: dictationSettings, navigation: navigation,
                                                 clock: SystemMonotonicClock(), pasteboard: SystemPasteboard())
 
+        // Home's numbers (design MW-01, ruling 1) — subscribes itself to `historyService.onChange`
+        // (see its own doc comment), so a dictation/delete/undo anywhere keeps these live.
+        let statsService = StatsService(history: historyService)
+        // `ModelLoader.readiness()` alone doesn't carry the model's display name (ruling 9); paired
+        // here with `modelStore.defaultModel(role:)` for the Setup card's "Speech model" row.
+        let homeViewModel = HomeViewModel(
+            stats: statsService, settings: dictationSettings, permissions: permissions,
+            modelStatus: { HomeModelStatus(readiness: await modelLoader.readiness(),
+                                           displayName: await modelStore.defaultModel(role: .speech)?.displayName) },
+            navigation: navigation, ephemeralScope: ephemeralScope)
+
         // Live settings: a silence-stop change reaches the running controller without waiting for
         // the next dictation to start it fresh; an encryption/retention change reopens the store.
         dictationSettings.onConfigChange = { config in Task { await dictationController.updateConfig(config) } }
@@ -269,6 +290,7 @@ final class AppServices {
                            modelsViewModel: modelsViewModel, audioViewModel: audioViewModel, privacyViewModel: privacyViewModel,
                            dictationSettings: dictationSettings, modelLoader: modelLoader,
                            historyService: historyService, historyViewModel: historyViewModel,
+                           statsService: statsService, homeViewModel: homeViewModel,
                            stylingSettings: stylingSettings, contentService: contentService, dictionaryViewModel: dictionaryViewModel,
                            snippetsViewModel: snippetsViewModel, stylesViewModel: stylesViewModel,
                            inserter: inserter,
