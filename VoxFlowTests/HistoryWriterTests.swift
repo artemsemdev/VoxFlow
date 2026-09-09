@@ -36,4 +36,19 @@ struct HistoryWriterTests {
         await HistoryWriter(storeBox: storeBox, settings: on, now: { Date() }).save(result, appName: "Mail")
         // Nothing to assert on directly (no store to query) — this just must not crash or hang.
     }
+
+    @Test("suppressNext() skips exactly the next save, not the one after it")
+    func suppressNextSkipsOneSave() async throws {
+        let store = try DictationStore(inMemoryWith: nil)
+        let storeBox = HistoryStoreBox(store)
+        let on = DictationSettingsBox(DictationSettingsSnapshot(excludedBundleIDs: [], keepHistory: true, options: TranscriptionOptions()))
+        let writer = HistoryWriter(storeBox: storeBox, settings: on, now: { Date() })
+
+        writer.suppressNext()
+        await writer.save(result, appName: "Mail")
+        #expect(try store.count() == 0)
+
+        await writer.save(result, appName: "Mail")
+        #expect(try store.count() == 1)
+    }
 }

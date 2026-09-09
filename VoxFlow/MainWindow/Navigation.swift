@@ -15,4 +15,8 @@ final class Navigation {
     /// visible main window — `VoxFlowApp` observes this and calls `openWindow(id: MainWindowID.main)`,
     /// since `AppDelegate` itself has no `@Environment(\.openWindow)` to call directly.
     var requestMainWindow = false
+    /// Set by `AppDelegate.applicationDidFinishLaunching` when onboarding hasn't been completed yet
+    /// — `VoxFlowApp` observes this and calls `openWindow(id: OnboardingWindowID.onboarding)`, since
+    /// `AppDelegate` itself has no `@Environment(\.openWindow)` to call directly.
+    var requestOnboarding = false
 }

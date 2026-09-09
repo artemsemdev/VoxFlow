@@ -60,13 +60,18 @@ final class AppServices {
     let dictation: DictationCoordinator
     let flowBar: FlowBarPresenter
     let fnMonitor: FnKeyMonitor
+    /// Persisted onboarding progress (design ONB-01…05) — `AppDelegate` checks `.completed` on first
+    /// launch to decide whether to show the onboarding window instead of the main one.
+    let onboardingState: OnboardingState
+    let onboardingViewModel: OnboardingViewModel
 
     private init(modelStore: ModelStore, engine: WhisperCppEngine, queue: FileQueue, filesSettings: FilesSettings,
                  durations: AudioDurationReader, exports: ExportCoordinator, navigation: Navigation,
                  filesViewModel: FilesViewModel, modelsViewModel: ModelsViewModel, dictationSettings: DictationSettings,
                  modelLoader: ModelLoader, historyService: HistoryService,
                  inserter: AccessibilityTextInserter, dictationController: DictationController,
-                 dictation: DictationCoordinator, flowBar: FlowBarPresenter, fnMonitor: FnKeyMonitor) {
+                 dictation: DictationCoordinator, flowBar: FlowBarPresenter, fnMonitor: FnKeyMonitor,
+                 onboardingState: OnboardingState, onboardingViewModel: OnboardingViewModel) {
         self.modelStore = modelStore
         self.engine = engine
         self.queue = queue
@@ -84,6 +89,8 @@ final class AppServices {
         self.dictation = dictation
         self.flowBar = flowBar
         self.fnMonitor = fnMonitor
+        self.onboardingState = onboardingState
+        self.onboardingViewModel = onboardingViewModel
     }
 
     static func live() -> AppServices {
@@ -165,11 +172,17 @@ final class AppServices {
             isHUDActive: { dictation.isHUDActive }
         )
 
+        let onboardingState = OnboardingState(store: settingsStore)
+        let onboardingViewModel = OnboardingViewModel(state: onboardingState, permissions: permissions, settings: dictationSettings,
+                                                       models: modelsViewModel, dictation: dictation, historyWriter: historyWriter,
+                                                       navigation: navigation, clock: SystemMonotonicClock())
+
         return AppServices(modelStore: modelStore, engine: engine, queue: queue, filesSettings: filesSettings,
                            durations: durations, exports: exports, navigation: navigation, filesViewModel: filesViewModel,
                            modelsViewModel: modelsViewModel, dictationSettings: dictationSettings, modelLoader: modelLoader,
                            historyService: historyService, inserter: inserter,
-                           dictationController: dictationController, dictation: dictation, flowBar: flowBar, fnMonitor: fnMonitor)
+                           dictationController: dictationController, dictation: dictation, flowBar: flowBar, fnMonitor: fnMonitor,
+                           onboardingState: onboardingState, onboardingViewModel: onboardingViewModel)
     }
 
     var exporter: TranscriptExporter { TranscriptExporter(directory: filesSettings.outputFolder) }

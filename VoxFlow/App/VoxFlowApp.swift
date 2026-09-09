@@ -18,6 +18,11 @@ struct VoxFlowApp: App {
             navigation.requestMainWindow = false
             openWindow(id: MainWindowID.main)
         }
+        .onChange(of: navigation.requestOnboarding) { _, requested in
+            guard requested else { return }
+            navigation.requestOnboarding = false
+            openWindow(id: OnboardingWindowID.onboarding)
+        }
         .commands {
             SidebarCommands()
             CommandGroup(after: .sidebar) {
@@ -43,5 +48,11 @@ struct VoxFlowApp: App {
         MenuBarExtra("VoxFlow", systemImage: "waveform") {
             MenuBarContent()
         }
+
+        Window("Welcome to VoxFlow", id: OnboardingWindowID.onboarding) {
+            OnboardingWindow()
+                .environment(AppServices.shared)
+        }
+        .windowResizability(.contentSize)
     }
 }

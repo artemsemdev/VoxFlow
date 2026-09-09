@@ -10,6 +10,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AppServices.shared.dictation.start()
         AppServices.shared.flowBar.bind(to: AppServices.shared.dictation)
         AppServices.shared.fnMonitor.start()
+
+        // First launch (or onboarding never finished): show it instead of the main window — closing
+        // whatever SwiftUI already opened for `MainWindowID.main` so the two don't both appear.
+        if !AppServices.shared.onboardingState.completed {
+            AppServices.shared.navigation.requestOnboarding = true
+            NSApp.windows.first { $0.identifier?.rawValue == MainWindowID.main }?.close()
+        }
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
