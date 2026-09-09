@@ -140,19 +140,18 @@ struct ContentServiceTests {
 
     // MARK: - Unavailable database
 
-    @Test("operations are no-ops returning empty results when the database never became available")
-    func noOpsWhenDatabaseUnavailable() async throws {
+    @Test("operations are no-ops returning empty results when the database file itself can never open")
+    func noOpsWhenDatabaseFileUnopenable() async throws {
+        // A path inside a location that doesn't exist and can't be created (a file, not a directory,
+        // sits where a parent directory is needed) — `VoxFlowDatabase.init(url:)` itself fails, so
+        // `HistoryService.database` never becomes non-nil for `ContentService` to build stores on.
         let dir = TemporaryDirectory()
-        let url = dir.file("voxflow.sqlite")
-        // Seed an encrypted row, then point history at a key provider that reports a freshly
-        // generated key over that already-encrypted database — `HistoryService` disables itself
-        // (`.keyLost`) and never sets `database`.
-        let sharedKey = SymmetricKey(size: .bits256)
-        let seedStore = try DictationStore(databaseURL: url, keyProvider: SharedKeyProvider(key: sharedKey, isNew: false))
-        try seedStore.insert(DictationDraft(text: "secret", rawText: "secret", appName: nil, style: nil, language: nil, duration: 1, createdAt: Date()))
+        let blocker = dir.file("blocker")
+        try Data().write(to: blocker)
+        let url = blocker.appendingPathComponent("nested").appendingPathComponent("voxflow.sqlite")
+
         let settings = DictationSettings(store: InMemoryKeyValueStore())
-        let history = HistoryService(url: url, settings: settings,
-                                     keyProvider: { SharedKeyProvider(key: SymmetricKey(size: .bits256), isNew: true) }, clock: FakeClock())
+        let history = HistoryService(url: url, settings: settings, keyProvider: { DummyKeyProvider() }, clock: FakeClock())
         let content = ContentService(history: history)
 
         await content.ready()
@@ -164,6 +163,31 @@ struct ContentServiceTests {
         #expect(await content.snippets.all().isEmpty)
         #expect(await content.overrides.all().isEmpty)
         await content.noteUses(words: ["hello"], snippets: ["/sig"])   // must not crash or hang
+    }
+
+    @Test("content stays available when history alone is disabled (key lost) — dictionary/snippets/styles aren't encrypted")
+    func contentWorksWhileHistoryDisabled() async throws {
+        let dir = TemporaryDirectory()
+        let url = dir.file("voxflow.sqlite")
+        // Seed an encrypted row, then point history at a key provider that reports a freshly
+        // generated key over that already-encrypted database — `HistoryService` disables itself
+        // (`.keyLost`) but its `database` stays open (this task's fix).
+        let sharedKey = SymmetricKey(size: .bits256)
+        let seedStore = try DictationStore(databaseURL: url, keyProvider: SharedKeyProvider(key: sharedKey, isNew: false))
+        try seedStore.insert(DictationDraft(text: "secret", rawText: "secret", appName: nil, style: nil, language: nil, duration: 1, createdAt: Date()))
+        let settings = DictationSettings(store: InMemoryKeyValueStore())
+        let history = HistoryService(url: url, settings: settings,
+                                     keyProvider: { SharedKeyProvider(key: SymmetricKey(size: .bits256), isNew: true) }, clock: FakeClock())
+        let content = ContentService(history: history)
+
+        await content.ready()
+        #expect(history.status == .disabled(reason: "history key lost"))
+        #expect(history.store == nil)
+        #expect(content.status == .ready)
+
+        let entry = try await content.dictionary.insert(word: "Kubernetes", soundsLike: nil, type: .term, fixTyping: false)
+        #expect(entry?.word == "Kubernetes")
+        #expect(content.vocabularyBox.current.contains("Kubernetes"))
     }
 }
 
