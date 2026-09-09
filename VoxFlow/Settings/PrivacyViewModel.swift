@@ -73,6 +73,16 @@ final class PrivacyViewModel {
         settings.excludedBundleIDs.map { id in (id, apps.name(forBundleID: id) ?? id) }
     }
 
+    /// I-4: a one-line status shown under the header when `HistoryService.status == .disabled` (e.g.
+    /// the Keychain lost the encryption key) — nil while history is working, and nil for the
+    /// service's own transient "not opened yet" startup placeholder, which isn't a real failure.
+    /// `HistoryViewModel.EmptyState.unavailable` surfaces the same underlying reason on the History
+    /// page; `readableReason` is shared so the two can't disagree.
+    var historyUnavailableStatus: String? {
+        guard case .disabled(let reason) = history.status, reason != HistoryService.notOpenedYetReason else { return nil }
+        return "History storage unavailable this session — \(HistoryViewModel.readableReason(reason))"
+    }
+
     /// ST-05 "Encrypt history at rest" subtitle — mirrors `HistoryService`'s own choice of key
     /// provider (`HistoryKeyProviders.select`), so the two can never disagree.
     var encryptionSubtitle: String {

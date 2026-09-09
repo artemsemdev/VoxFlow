@@ -24,6 +24,11 @@ struct PrivacySettingsBody: View {
         @Bindable var settings = privacy.settings
         VStack(alignment: .leading, spacing: 18) {
             header
+            if let status = privacy.historyUnavailableStatus {
+                Text(status)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
 
             VStack(spacing: 0) {
                 keepHistoryRow(settings: settings)

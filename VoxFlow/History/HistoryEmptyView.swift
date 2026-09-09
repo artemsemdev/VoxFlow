@@ -22,6 +22,12 @@ struct HistoryEmptyView: View {
             }
         case .noResults(let query):
             noResults(query: query)
+        case .unavailable(let reason):
+            // I-4: no action here — unlike `.historyOff` there's no toggle that fixes a lost
+            // encryption key, and unlike `.noDictations` a scratchpad capture still wouldn't save.
+            iconState(title: "History is unavailable", body: "\(reason). Dictations are not being saved this session.") {
+                EmptyView()
+            }
         }
     }
 

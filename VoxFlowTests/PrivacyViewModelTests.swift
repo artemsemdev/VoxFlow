@@ -132,4 +132,44 @@ struct PrivacyViewModelTests {
         let keychainModel = PrivacyViewModel(settings: settings, history: service, apps: FakeInstalledApps(), secureEnclaveAvailable: { false })
         #expect(keychainModel.encryptionSubtitle == "Key stored in the Keychain")
     }
+
+    // MARK: I-4 — history-unavailable status
+
+    @Test("historyUnavailableStatus is nil while the history service is ready")
+    func historyUnavailableStatusNilWhenReady() async throws {
+        let dir = TemporaryDirectory()
+        let settings = DictationSettings(store: InMemoryKeyValueStore())
+        let service = makeService(dir: dir, settings: settings)
+        _ = await service.count()   // force the open to finish
+        #expect(service.status == .ready)
+        let model = PrivacyViewModel(settings: settings, history: service, apps: FakeInstalledApps())
+
+        #expect(model.historyUnavailableStatus == nil)
+    }
+
+    @Test("historyUnavailableStatus reads the human-readable reason once the service is disabled")
+    func historyUnavailableStatusWhenDisabled() async throws {
+        let dir = TemporaryDirectory()
+        let url = dir.file("voxflow.sqlite")
+        // Populates an already-encrypted database synchronously, the same way
+        // `HistoryServiceTests.keyLostDisablesHistory` and `HistoryViewModelTests`'s I-4 test do —
+        // opening the same path from two independently-lazy `HistoryService`s instead is flaky here
+        // (the second's deferred open can race the first's, briefly reporting `.ready`).
+        _ = try DictationStore(databaseURL: url, keyProvider: FakeHistoryKeyProvider())
+            .insert(DictationDraft(text: "secret", rawText: "secret", appName: "Mail", style: nil, language: "en", duration: 1, createdAt: Date()))
+
+        let settings = DictationSettings(store: InMemoryKeyValueStore())
+        // `FakeHistoryKeyProvider` always reports `isNewlyCreated: true` with a fresh random key —
+        // opening the *already-encrypted* database above with it is exactly `StorageError.keyLost`.
+        let brokenService = HistoryService(url: url, settings: settings, keyProvider: { FakeHistoryKeyProvider() }, clock: FakeClock())
+        _ = await brokenService.count()
+        #expect(brokenService.status == .disabled(reason: "history key lost"))
+        let model = PrivacyViewModel(settings: settings, history: brokenService, apps: FakeInstalledApps())
+
+        #expect(model.historyUnavailableStatus == "History storage unavailable this session — The history key could not be found in your Keychain")
+        // `dir` backs the sqlite file for the whole test — without a later use, ARC could release it
+        // (running its `deinit`'s `removeItem`) as soon as `url` is captured above, unlinking the file
+        // out from under the still-`await`-suspended open.
+        withExtendedLifetime(dir) {}
+    }
 }

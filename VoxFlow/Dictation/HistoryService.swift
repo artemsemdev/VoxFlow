@@ -24,8 +24,13 @@ final class HistoryService {
         case disabled(reason: String)
     }
 
+    /// `status`'s reason before the first open ever runs — not a real failure (I-4's
+    /// `HistoryViewModel.emptyState`/`PrivacyViewModel` both skip surfacing this one specifically),
+    /// just "no one has touched history yet this launch".
+    static let notOpenedYetReason = "not opened yet"
+
     private(set) var store: DictationStore?
-    private(set) var status: Status = .disabled(reason: "not opened yet")
+    private(set) var status: Status = .disabled(reason: HistoryService.notOpenedYetReason)
     let storeBox = HistoryStoreBox()
 
     private let url: URL
@@ -101,18 +106,27 @@ final class HistoryService {
         return await Task.detached(priority: .userInitiated) { (try? store.search(query)) ?? [] }.value
     }
 
+    /// M-9: logged (not just `try?`-swallowed) — a failed delete leaves the row gone from the UI but
+    /// still on disk until the next refresh, and that's worth a trace even though it's not surfaced
+    /// to the user.
     func delete(id: Int64) async {
         ensureOpened()
         await openTask?.value
         guard let store else { return }
-        await Task.detached(priority: .userInitiated) { try? store.delete(id: id) }.value
+        let log = Self.log   // `Logger` is a `Sendable` value type — read here (MainActor) for the detached task below.
+        await Task.detached(priority: .userInitiated) {
+            do { try store.delete(id: id) } catch { log.error("history delete failed: \(String(describing: error))") }
+        }.value
     }
 
     func deleteAll() async {
         ensureOpened()
         await openTask?.value
         guard let store else { return }
-        await Task.detached(priority: .userInitiated) { try? store.deleteAll() }.value
+        let log = Self.log
+        await Task.detached(priority: .userInitiated) {
+            do { try store.deleteAll() } catch { log.error("history deleteAll failed: \(String(describing: error))") }
+        }.value
     }
 
     func count() async -> Int {
@@ -131,7 +145,11 @@ final class HistoryService {
         guard let store else { return nil }
         let draft = DictationDraft(text: record.text, rawText: record.rawText, appName: record.appName, style: record.style,
                                    language: record.language, duration: record.duration, createdAt: record.createdAt)
-        return await Task.detached(priority: .userInitiated) { try? store.insert(draft) }.value
+        let log = Self.log
+        return await Task.detached(priority: .userInitiated) {
+            do { return try store.insert(draft) }
+            catch { log.error("history reinsert failed: \(String(describing: error))"); return nil }
+        }.value
     }
 
     private func performOpen() async {
