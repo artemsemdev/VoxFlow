@@ -24,6 +24,8 @@ struct FlowBarRenderTests {
         /// Wide enough for every normal state (40 pt pill, generous margin); a couple of cases
         /// widen this to see the full 560 pt pill cap (N7) without the canvas itself clipping first.
         var canvasWidth: CGFloat = 420
+        /// `FlowBarContent.make(now:)` — only `.paused` reads this (its "N min left" countdown).
+        var now: TimeInterval = 0
     }
 
     private static let cases: [RenderCase] = [
@@ -50,6 +52,9 @@ struct FlowBarRenderTests {
         RenderCase(name: "loading", state: .loadingModel(Pending(downAt: 0, fnIsDown: true, resolvedMode: nil)), elapsed: 0, mode: .pushToTalk),
         RenderCase(name: "error", state: .error("Couldn't load the speech model"), elapsed: 0, mode: .pushToTalk),
         RenderCase(name: "armed", state: .armed(Pending(downAt: 0, fnIsDown: true, resolvedMode: nil)), elapsed: 0, mode: .pushToTalk),
+        // FB-09 (design page 8): "Paused · 58 min left" + "Resume" — `now: 120` puts this 58 min
+        // before `until: 3600` (2 min already elapsed since `pause(for:)` was called).
+        RenderCase(name: "paused", state: .paused(until: 3600), elapsed: 0, mode: .pushToTalk, now: 120),
         // N7: an app name with no length the model can bound — must truncate the title (and cap the
         // pill at 560 pt) rather than grow forever or (like the D2 chip bug) collapse to nothing.
         RenderCase(name: "excluded-long-app-name",
@@ -63,7 +68,7 @@ struct FlowBarRenderTests {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 
         for (index, testCase) in Self.cases.enumerated() {
-            let content = FlowBarContent.make(state: testCase.state, elapsed: testCase.elapsed, mode: testCase.mode)
+            let content = FlowBarContent.make(state: testCase.state, elapsed: testCase.elapsed, mode: testCase.mode, now: testCase.now)
             let renderer = ImageRenderer(content: RenderCanvas(content: content, levels: Self.levels, width: testCase.canvasWidth))
             renderer.scale = 2
             guard let image = renderer.nsImage else {

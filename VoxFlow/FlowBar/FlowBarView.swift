@@ -39,7 +39,8 @@ struct FlowBarView: View {
     private var content: FlowBarContent {
         switch source {
         case .fixed(let content, levels: _): content
-        case .coordinator(let coordinator): FlowBarContent.make(state: coordinator.state, elapsed: coordinator.elapsed, mode: coordinator.hotkeyMode)
+        case .coordinator(let coordinator):
+            FlowBarContent.make(state: coordinator.state, elapsed: coordinator.elapsed, mode: coordinator.hotkeyMode, now: coordinator.now())
         }
     }
 

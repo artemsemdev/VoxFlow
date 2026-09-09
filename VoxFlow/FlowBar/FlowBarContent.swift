@@ -41,7 +41,7 @@ struct FlowBarContent: Hashable {
     }
 
     static func make(state: FlowBarState, elapsed: TimeInterval, mode: HotkeyMode,
-                      config: FlowBarConfig = FlowBarConfig()) -> FlowBarContent {
+                      config: FlowBarConfig = FlowBarConfig(), now: TimeInterval = 0) -> FlowBarContent {
         switch state {
         case .idle:
             return FlowBarContent(leading: .dot(.idle), title: state.hint(mode: mode) ?? "", subtitle: nil,
@@ -109,9 +109,10 @@ struct FlowBarContent: Hashable {
                                    timer: nil, timerIsAmber: false, trailing: .button(.openSettings))
 
         case .paused(let until):
-            // FB-09 "Paused · 58 min left · Resume". `until` and `elapsed` share the controller's monotonic
-            // clock: the caller passes `now` as `elapsed` for this state (phase 4b Task 4 wires it).
-            let minutesLeft = max(0, Int(((until - elapsed) / 60).rounded(.up)))
+            // FB-09 "Paused · 58 min left · Resume". `until` and `now` share the controller's monotonic
+            // clock (`DictationCoordinator.now()` in production) — deliberately *not* `elapsed`, which
+            // this state doesn't populate (it isn't `.listening`/`.processing`) and would read as 0.
+            let minutesLeft = max(0, Int(((until - now) / 60).rounded(.up)))
             return FlowBarContent(leading: .dot(.warning), title: "Paused", subtitle: "\(minutesLeft) min left",
                                    showsWaveform: false, timer: nil, timerIsAmber: false, trailing: .button(.resume))
         }

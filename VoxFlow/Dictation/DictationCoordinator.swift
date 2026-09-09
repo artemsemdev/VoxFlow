@@ -18,6 +18,11 @@ final class DictationCoordinator {
     private let settings: DictationSettings
     private let permissions: any PermissionChecking
     private let navigation: Navigation
+    /// The coordinator's own "now" (`now()`, below) — ideally the same instance the controller's
+    /// clock uses (production wiring lives in `AppServices.swift`, outside this task's file scope),
+    /// so `pausedUntilDate` projects `pausedUntil`'s monotonic timeline onto a wall-clock `Date`
+    /// consistently. Defaulted so every existing call site keeps compiling unchanged.
+    private let clock: any MonotonicClock
     /// Boxed outside main-actor isolation so `deinit` (nonisolated, may run on any thread) can cancel
     /// it without an isolation assertion — same pattern as `FilesViewModel.eventTask`.
     private nonisolated let mirror = Mutex<Task<Void, Never>?>(nil)
@@ -38,11 +43,13 @@ final class DictationCoordinator {
     var hotkeyMode: HotkeyMode { settings.hotkeyMode }
     var isHUDActive: Bool { state != .idle }
 
-    init(controller: DictationController, settings: DictationSettings, permissions: any PermissionChecking, navigation: Navigation) {
+    init(controller: DictationController, settings: DictationSettings, permissions: any PermissionChecking, navigation: Navigation,
+         clock: any MonotonicClock = SystemMonotonicClock()) {
         self.controller = controller
         self.settings = settings
         self.permissions = permissions
         self.navigation = navigation
+        self.clock = clock
         (commandStream, commands) = AsyncStream<Command>.makeStream()
     }
 
@@ -133,6 +140,19 @@ final class DictationCoordinator {
     /// bar/pill's job (Task 4), not this coordinator's.
     var pausedUntil: TimeInterval? {
         if case .paused(let until) = state { until } else { nil }
+    }
+
+    /// This coordinator's own monotonic "now" (`clock.now()`) — what `FlowBarView` passes as
+    /// `FlowBarContent.make(now:)` for the `.paused` pill's "N min left" countdown (Task 4).
+    func now() -> TimeInterval { clock.now() }
+
+    /// Wall-clock projection of `pausedUntil` for the menu bar's "Paused until 10:41" (design MB-02)
+    /// — `nil` outside `.paused`. `pausedUntil` and `now()` share this coordinator's monotonic
+    /// timeline, so `pausedUntil - now()` is "seconds from this instant", added onto the real
+    /// wall-clock `Date()` to get the wall-clock moment the pause ends.
+    var pausedUntilDate: Date? {
+        guard let pausedUntil else { return nil }
+        return Date().addingTimeInterval(pausedUntil - now())
     }
 
     /// Called from `MeteredMicrophone.onLevel` (wrapped in `Task { @MainActor in }` by the caller).

@@ -50,11 +50,41 @@ struct VoxFlowApp: App {
                 }
                 .keyboardShortcut("o")
             }
+            // Ruling 9: the menu bar dropdown's own items ("Open VoxFlow ⌘O", "History ⌥⌘H",
+            // "Settings… ⌘,") declared app-wide too, so they work whether or not the dropdown is
+            // open. "Quit VoxFlow ⌘Q" needs no separate declaration — every macOS app already gets
+            // that for free in its own App menu.
+            //
+            // Known residual: "Open VoxFlow" ⌘O sits in a different `CommandGroup` than File ›
+            // "Open…" (also ⌘O, above) — the two are genuinely different actions sharing one
+            // keystroke; see the task report.
+            CommandGroup(after: .appInfo) {
+                Button("Open VoxFlow") { navigation.requestMainWindow = true }
+                    .keyboardShortcut("o", modifiers: .command)
+                Button("History") {
+                    navigation.page = .history
+                    navigation.requestMainWindow = true
+                }
+                .keyboardShortcut("h", modifiers: [.command, .option])
+            }
+            CommandGroup(after: .appSettings) {
+                Button("Settings…") {
+                    navigation.page = .settings
+                    navigation.requestMainWindow = true
+                }
+                .keyboardShortcut(",", modifiers: .command)
+            }
         }
 
-        MenuBarExtra("VoxFlow", systemImage: "waveform", isInserted: showInMenuBar) {
+        // MB-01/MB-02 (design page 11/8): a `.window`-style dropdown (`MenuBarContent` →
+        // `MenuBarView`) instead of a plain `Menu`, behind a code-drawn template glyph
+        // (`MenuBarGlyph` — ruling 6: "until #141 ships the icon asset").
+        MenuBarExtra(isInserted: showInMenuBar) {
             MenuBarContent()
+        } label: {
+            Image(nsImage: MenuBarGlyph.image)
         }
+        .menuBarExtraStyle(.window)
 
         Window("Welcome to VoxFlow", id: OnboardingWindowID.onboarding) {
             OnboardingWindow()
