@@ -6,28 +6,25 @@ import VoxFlowStorage
 struct HistoryDetailView: View {
     let record: DictationRecord
 
-    private var insertedHeader: String {
-        guard let style = record.style, !style.isEmpty else { return "INSERTED" }
-        return "INSERTED · \(style.uppercased())"
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 24) {
-                column(title: "WHAT YOU SAID", text: displayRawText)
+                column(title: "WHAT YOU SAID", text: HistoryViewModel.displayRawText(for: record))
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
-                        Text(insertedHeader)
+                        Text(HistoryViewModel.detailHeader(for: record))
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
                         Spacer()
+                        // Disabled (Edit is a future phase) — `.secondary` instead of the default tint
+                        // so the dimming actually reads as disabled rather than as a live link.
                         Button("Edit") {}
                             .buttonStyle(.plain)
                             .font(.caption)
-                            .foregroundStyle(.tint)
+                            .foregroundStyle(.secondary)
                             .disabled(true)
                     }
-                    Text(displayText)
+                    Text(HistoryViewModel.displayText(for: record))
                         .font(.callout)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -41,9 +38,6 @@ struct HistoryDetailView: View {
         .padding(.horizontal, 16)
         .padding(.bottom, 12)
     }
-
-    private var displayRawText: String { record.isUnreadable ? HistoryViewModel.unreadableMessage : record.rawText }
-    private var displayText: String { record.isUnreadable ? HistoryViewModel.unreadableMessage : record.text }
 
     private func column(title: String, text: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {

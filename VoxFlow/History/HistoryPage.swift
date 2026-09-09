@@ -1,35 +1,53 @@
 import SwiftUI
 
-/// The History page (design MW-02, MW-02d/e/n, T-01): search, per-dictation rows with inline
-/// detail, delete-with-undo, and the History-off / no-dictations / no-results empty states.
+/// The History page (design MW-02, MW-02d/e/n, T-01): thin `AppServices` wrapper around
+/// `HistoryPageBody`, which holds the actual layout so `HistoryRenderTests` can render exactly the
+/// same view instead of a hand-copied approximation.
 struct HistoryPage: View {
     @Environment(AppServices.self) private var services
     private var model: HistoryViewModel { services.historyViewModel }
 
     var body: some View {
+        HistoryPageBody(viewModel: model)
+            .navigationTitle("History")
+            // `.task` re-runs on every navigation back to History — `refresh()` (not `load()`)
+            // respects an in-progress search so it doesn't clobber a filtered list with the
+            // unfiltered one while the search field still shows a query (M9).
+            .task { await model.refresh() }
+    }
+}
+
+/// The page content below the navigation chrome: search bar, per-dictation rows with inline detail
+/// (or an empty state), footer, the delete-undo toast, and the scratchpad sheet.
+struct HistoryPageBody: View {
+    let viewModel: HistoryViewModel
+
+    var body: some View {
         VStack(spacing: 0) {
             searchBar
             Group {
-                if let emptyState = model.emptyState {
-                    HistoryEmptyView(state: emptyState, model: model)
+                if let emptyState = viewModel.emptyState {
+                    HistoryEmptyView(state: emptyState, model: viewModel)
                 } else {
                     list
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            Divider()
-            Text(model.footerText)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 20)
-                .padding(.vertical, 10)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            // History-off already says so front and centre — a retention/encryption footer under it
+            // would read as contradicting itself (M10).
+            if viewModel.emptyState != .historyOff {
+                Divider()
+                Text(viewModel.footerText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
-        .navigationTitle("History")
-        .task { await model.load() }
         .overlay(alignment: .bottom) {
-            if model.toastVisible {
-                UndoToastView(onUndo: model.undo)
+            if viewModel.toastVisible {
+                UndoToastView(onUndo: viewModel.undo)
                     .padding(.bottom, 16)
             }
         }
@@ -39,15 +57,15 @@ struct HistoryPage: View {
     }
 
     private var scratchpadBinding: Binding<Bool> {
-        Binding(get: { model.isScratchpadPresented }, set: { model.isScratchpadPresented = $0 })
+        Binding(get: { viewModel.isScratchpadPresented }, set: { viewModel.isScratchpadPresented = $0 })
     }
 
     private var scratchpadTextBinding: Binding<String> {
-        Binding(get: { model.scratchpadText }, set: { model.scratchpadText = $0 })
+        Binding(get: { viewModel.scratchpadText }, set: { viewModel.scratchpadText = $0 })
     }
 
     private var queryBinding: Binding<String> {
-        Binding(get: { model.query }, set: { model.query = $0 })
+        Binding(get: { viewModel.query }, set: { viewModel.query = $0 })
     }
 
     private var searchBar: some View {
@@ -56,8 +74,8 @@ struct HistoryPage: View {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                 TextField("Search your dictations", text: queryBinding)
                     .textFieldStyle(.plain)
-                if !model.query.isEmpty {
-                    Button { model.clearSearch() } label: {
+                if !viewModel.query.isEmpty {
+                    Button { viewModel.clearSearch() } label: {
                         Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
@@ -69,17 +87,40 @@ struct HistoryPage: View {
             .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Color.secondary.opacity(0.25)))
 
             // Phase 4 filters — rendered so the layout matches the design, disabled until then.
-            disabledChip("All apps")
-            disabledChip("This week")
+            HistorySearchChips()
+            Spacer(minLength: 0)
         }
         .padding(20)
     }
 
-    private func disabledChip(_ title: String) -> some View {
-        HStack(spacing: 4) {
-            Text(title)
-            Image(systemName: "chevron.up.chevron.down").font(.caption2)
+    private var list: some View {
+        ScrollView { HistoryRowList(viewModel: viewModel) }
+    }
+}
+
+/// The two disabled phase-4 filter chips ("All apps ⇅" / "This week ⇅"). Factored out (not just
+/// inlined in `HistoryPageBody`) so `HistoryRenderTests`' preview chrome shares this exact view
+/// instead of a hand-copied one (M3) — real `Button`s render fine under `ImageRenderer`; only a live
+/// `TextField`/`ScrollView` do not (see that file).
+struct HistorySearchChips: View {
+    var body: some View {
+        HStack(spacing: 8) {
+            chip("All apps")
+            chip("This week")
         }
+    }
+
+    /// A real (disabled) `Button`, not a plain `HStack` with `.disabled(true)` tacked on — the
+    /// modifier is a no-op on a non-control view, so an `HStack` would render identically whether or
+    /// not it's "disabled" (M7). Matches how "Re-style" and "Search all time" are done.
+    private func chip(_ title: String) -> some View {
+        Button {} label: {
+            HStack(spacing: 4) {
+                Text(title)
+                Image(systemName: "chevron.up.chevron.down").font(.caption2)
+            }
+        }
+        .buttonStyle(.plain)
         .font(.callout)
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
@@ -87,22 +128,28 @@ struct HistoryPage: View {
         .foregroundStyle(.secondary)
         .disabled(true)
     }
+}
 
-    private var list: some View {
-        ScrollView {
-            VStack(spacing: 0) {
-                ForEach(model.records) { record in
-                    VStack(spacing: 0) {
-                        HistoryRowView(record: record, model: model)
-                        if model.expandedID == record.id {
-                            HistoryDetailView(record: record)
-                        }
-                        Divider()
+/// The row list's content: one `HistoryRowView` per record, its `HistoryDetailView` inline when
+/// expanded, hairline dividers between. Factored out of `HistoryPageBody.list` (which wraps this in a
+/// `ScrollView`) so `HistoryRenderTests` can host the exact same rows/detail wiring without a
+/// `ScrollView` (M3) — a live `ScrollView` renders blank under `ImageRenderer` in this environment.
+struct HistoryRowList: View {
+    let viewModel: HistoryViewModel
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ForEach(viewModel.records) { record in
+                VStack(spacing: 0) {
+                    HistoryRowView(record: record, model: viewModel)
+                    if viewModel.expandedID == record.id {
+                        HistoryDetailView(record: record)
                     }
+                    Divider()
                 }
             }
-            .padding(.horizontal, 20)
         }
+        .padding(.horizontal, 20)
     }
 }
 

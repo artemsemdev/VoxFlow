@@ -31,7 +31,15 @@ final class HistoryViewModel {
     /// (design 2d) — starts tracking `dictation.state` while it's up so an armed capture there
     /// doesn't leave a real history entry (ONB-05's `HistoryWriter.suppressNext()` pattern).
     var isScratchpadPresented = false {
-        didSet { if isScratchpadPresented { trackDictation() } }
+        didSet {
+            if isScratchpadPresented {
+                trackDictation()
+            } else {
+                // Dismissing without ever reaching `.inserted` (armed-then-cancelled, or never armed
+                // at all) must not leave a stale suppression armed for the next *real* dictation.
+                historyWriter?.clearSuppression()
+            }
+        }
     }
     var scratchpadText = ""
 
@@ -85,6 +93,13 @@ final class HistoryViewModel {
         records = await service.fetch(limit: Self.fetchLimit)
     }
 
+    /// Re-fetches respecting whatever `query` currently holds — used by the page's `.task` (fires on
+    /// every navigation back to History) so it doesn't clobber an in-progress search with the
+    /// unfiltered list while the search field still shows a query.
+    func refresh() async {
+        if query.isEmpty { await load() } else { await search() }
+    }
+
     func toggleExpanded(id: Int64) {
         expandedID = expandedID == id ? nil : id
     }
@@ -133,8 +148,14 @@ final class HistoryViewModel {
         searchTask.withLock { $0?.cancel() }
         let task = Task { [weak self] in
             guard let self else { return }
-            do { try await self.clock.sleep(for: Self.debounceInterval) } catch { return }
-            guard !Task.isCancelled else { return }
+            // An empty query (typed all the way back to nothing, or "Clear search") skips the debounce
+            // entirely — waiting 150 ms here would show the wrong empty state in between: `records`
+            // still holds the (typically empty) filtered results while `emptyState` already reads
+            // `query.isEmpty`, so the view would flash "No dictations yet" before the real list returns.
+            if !self.query.isEmpty {
+                do { try await self.clock.sleep(for: Self.debounceInterval) } catch { return }
+                guard !Task.isCancelled else { return }
+            }
             await self.search()
         }
         searchTask.withLock { $0 = task }
@@ -169,7 +190,19 @@ final class HistoryViewModel {
         withObservationTracking { _ = dictation.state } onChange: { [weak self] in
             Task { @MainActor in
                 guard let self, self.isScratchpadPresented else { return }
-                if case .armed = dictation.state { self.historyWriter?.suppressNext() }
+                switch dictation.state {
+                case .armed:
+                    self.historyWriter?.suppressNext()
+                case .discarded, .didntCatch, .error, .micUnavailable, .modelNotInstalled, .excluded:
+                    // Every terminal state that doesn't insert (cancelled, no speech caught, load/mic
+                    // failure, excluded app) must release the suppression it armed — otherwise the
+                    // next *real* dictation after this one silently skips history. `.idle` is
+                    // deliberately excluded: it's the resting state a fresh scratchpad open starts
+                    // from, not an exit from an armed-but-cancelled capture.
+                    self.historyWriter?.clearSuppression()
+                default:
+                    break
+                }
                 self.trackDictation()
             }
         }
@@ -183,10 +216,25 @@ final class HistoryViewModel {
         record.isUnreadable ? unreadableMessage : record.text
     }
 
+    /// The expanded detail's "WHAT YOU SAID" column — the encrypted placeholder for an unreadable
+    /// row, its raw transcript otherwise.
+    static func displayRawText(for record: DictationRecord) -> String {
+        record.isUnreadable ? unreadableMessage : record.rawText
+    }
+
+    /// The expanded detail's "INSERTED" column header — the style, uppercased, appended when the
+    /// record has one ("INSERTED · VERY CASUAL"), "INSERTED" alone otherwise.
+    static func detailHeader(for record: DictationRecord) -> String {
+        guard let style = record.style, !style.isEmpty else { return "INSERTED" }
+        return "INSERTED · \(style.uppercased())"
+    }
+
     /// "App · h:mm a · m:ss · N words · Style · LANG" (style omitted when there is none). Time uses
     /// a fixed `en_US_POSIX` locale so tests (and every viewer) see the same "9:26 AM" shape.
     static func metaLine(for record: DictationRecord) -> String {
-        var parts = [record.appName?.isEmpty == false ? record.appName! : "Unknown app"]
+        let appLabel: String
+        if let appName = record.appName, !appName.isEmpty { appLabel = appName } else { appLabel = "Unknown app" }
+        var parts = [appLabel]
         parts.append(timeFormatter.string(from: record.createdAt))
         parts.append(TimeCode.short(record.duration))
         parts.append("\(record.words) words")

@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Testing
 import VoxFlowCore
@@ -6,14 +7,22 @@ import VoxFlowStorage
 import VoxFlowTestSupport
 @testable import VoxFlow
 
+/// A real (fake, in-memory) key provider rather than a `fatalError`-ing stub: `HistoryService` opens
+/// lazily on first access, so whether `encryptHistory` is true or false at the moment that happens
+/// depends on ordering a test doesn't control (e.g. a test that flips `encryptHistory` after
+/// constructing the harness, before ever touching the service). A stub that traps if ever called was
+/// latent breakage waiting for exactly that ordering.
+private struct FakeHistoryKeyProvider: HistoryKeyProviding {
+    let key = SymmetricKey(size: .bits256)
+    func historyKey() throws -> HistoryKey { HistoryKey(key: key, isNewlyCreated: false) }
+}
+
 @Suite("HistoryViewModel", .timeLimit(.minutes(1)))
 @MainActor
 struct HistoryViewModelTests {
-    /// Encryption off (no key provider needed) so tests don't have to fake `HistoryKeyProviding`.
     static func makeService(dir: TemporaryDirectory, settings: DictationSettings, clock: any MonotonicClock) -> HistoryService {
-        settings.encryptHistory = false
-        return HistoryService(url: dir.file("voxflow.sqlite"), settings: settings,
-                              keyProvider: { fatalError("key provider unused when encryption is off") }, clock: clock)
+        HistoryService(url: dir.file("voxflow.sqlite"), settings: settings,
+                       keyProvider: { FakeHistoryKeyProvider() }, clock: clock)
     }
 
     static func draft(_ text: String, appName: String = "Slack", style: String? = "Very casual", language: String? = "en",
@@ -54,6 +63,14 @@ struct HistoryViewModelTests {
     /// No-sleep poll, same technique as `OnboardingViewModelTests`.
     private func waitFor(_ predicate: () -> Bool) async {
         for _ in 0..<2_000 where !predicate() { await Task.yield() }
+    }
+
+    /// `HistoryViewModel.trackDictation`'s `withObservationTracking` responder runs in its own
+    /// `Task { @MainActor in }`, scheduled (not run synchronously) the moment `dictation.state`
+    /// changes — so `waitFor` observing the *new* state is not proof that responder has finished
+    /// running yet. A handful of unconditional yields drains the MainActor queue enough for it to.
+    private func drainMainActor(_ iterations: Int = 20) async {
+        for _ in 0..<iterations { await Task.yield() }
     }
 
     @Test("load lists newest first")
@@ -105,6 +122,29 @@ struct HistoryViewModelTests {
         await h.clock.advance(by: 0.15)
         await waitFor { vm.records.count == 1 }
 
+        #expect(vm.records.map(\.text) == ["call about quarterly numbers"])
+    }
+
+    @Test("M1: clearSearch bypasses the 150 ms debounce — no clock advance needed for the list to return")
+    func clearSearchIsImmediate() async throws {
+        let h = Harness()
+        await h.seed(0)   // forces the store open before `.store!` below
+        _ = try! h.service.store!.insert(HistoryViewModelTests.draft("call about quarterly numbers", at: Date(timeIntervalSince1970: 1)))
+        let vm = h.vm()
+        await vm.load()
+
+        vm.query = "no match for this"
+        let sleepersBefore = h.clock.sleeperCount
+        await h.clock.waitForSleepers(sleepersBefore + 1)
+        await h.clock.advance(by: 0.15)
+        await waitFor { vm.records.isEmpty }
+        #expect(vm.emptyState == .noResults("no match for this"))
+
+        vm.clearSearch()
+        // No `clock.advance` here — an empty query must skip the debounce entirely (M1); if it didn't,
+        // `records` would stay empty for 150 ms and `emptyState` would flash `.noDictations`.
+        await waitFor { !vm.records.isEmpty }
+        #expect(vm.emptyState == nil)
         #expect(vm.records.map(\.text) == ["call about quarterly numbers"])
     }
 
@@ -199,6 +239,25 @@ struct HistoryViewModelTests {
         #expect(HistoryViewModel.displayText(for: record) == "Encrypted — turn on 'Encrypt history at rest' to read")
     }
 
+    @Test("M2: unreadable rows show the encrypted message in the detail's raw-text column too")
+    func unreadableRowRawText() {
+        let record = DictationRecord(id: 1, text: "", rawText: "", appName: "Mail", style: nil, language: nil,
+                                     duration: 3, words: 0, createdAt: Date(), isUnreadable: true)
+
+        #expect(HistoryViewModel.displayRawText(for: record) == "Encrypted — turn on 'Encrypt history at rest' to read")
+    }
+
+    @Test("M2: detailHeader includes the uppercased style when present, plain \"INSERTED\" otherwise")
+    func detailHeaderVariants() {
+        let styled = DictationRecord(id: 1, text: "hi", rawText: "hi", appName: "Mail", style: "Very casual",
+                                     language: "en", duration: 3, words: 4, createdAt: Date())
+        let unstyled = DictationRecord(id: 2, text: "hi", rawText: "hi", appName: "Mail", style: nil,
+                                       language: "en", duration: 3, words: 4, createdAt: Date())
+
+        #expect(HistoryViewModel.detailHeader(for: styled) == "INSERTED · VERY CASUAL")
+        #expect(HistoryViewModel.detailHeader(for: unstyled) == "INSERTED")
+    }
+
     @Test("footer text: encrypted on, 30 days")
     func footerEncryptedOn() {
         let h = Harness()
@@ -267,9 +326,40 @@ struct HistoryViewModelTests {
         #expect(vm.expandedID == nil)
     }
 
-    @Test("entering .armed while the scratchpad sheet is up suppresses the next history save")
-    func scratchpadSuppressesHistory() async throws {
+    @Test("M9: refresh() re-applies an active query instead of clobbering it with the unfiltered list")
+    func refreshRespectsActiveQuery() async throws {
         let h = Harness()
+        await h.seed(0)   // forces the store open before `.store!` below
+        _ = try! h.service.store!.insert(HistoryViewModelTests.draft("call about quarterly numbers", at: Date(timeIntervalSince1970: 1)))
+        _ = try! h.service.store!.insert(HistoryViewModelTests.draft("unrelated grocery list", at: Date(timeIntervalSince1970: 2)))
+        let vm = h.vm()
+        await vm.load()
+
+        vm.query = "num"
+        let sleepersBefore = h.clock.sleeperCount
+        await h.clock.waitForSleepers(sleepersBefore + 1)
+        await h.clock.advance(by: 0.15)
+        await waitFor { vm.records.count == 1 }
+
+        // Simulates `HistoryPage`'s `.task` firing again on a navigation back to History, while the
+        // search field still shows "num" — `records` must stay filtered, not revert to both rows.
+        await vm.refresh()
+
+        #expect(vm.records.map(\.text) == ["call about quarterly numbers"])
+        #expect(vm.query == "num")
+    }
+
+    /// Everything the scratchpad-suppression tests need: a `DictationCoordinator` wired to
+    /// `historyWriter` (the same instance the view model gets, so `suppressNext()`/`clearSuppression()`
+    /// called from the VM actually reach the writer this coordinator's controller saves through).
+    private struct ScratchpadBundle {
+        let dictation: DictationCoordinator
+        let historyWriter: HistoryWriter
+        let historyStoreBox: HistoryStoreBox
+        let vm: HistoryViewModel
+    }
+
+    private func makeScratchpadBundle(_ h: Harness) throws -> ScratchpadBundle {
         let historyStoreBox = HistoryStoreBox(try DictationStore(inMemoryWith: nil))
         let historyWriter = HistoryWriter(storeBox: historyStoreBox, settings: h.settings.box, now: { Date() })
         let transcriber = FakeDictationTranscriber(result: DictationResult(
@@ -286,8 +376,16 @@ struct HistoryViewModelTests {
         dictation.start()
         let vm = HistoryViewModel(service: h.service, settings: h.settings, navigation: h.navigation, clock: h.clock,
                                   dictation: dictation, historyWriter: historyWriter)
+        return ScratchpadBundle(dictation: dictation, historyWriter: historyWriter, historyStoreBox: historyStoreBox, vm: vm)
+    }
 
-        vm.isScratchpadPresented = true
+    @Test("entering .armed while the scratchpad sheet is up suppresses the next history save")
+    func scratchpadSuppressesHistory() async throws {
+        let h = Harness()
+        let bundle = try makeScratchpadBundle(h)
+        let dictation = bundle.dictation
+
+        bundle.vm.isScratchpadPresented = true
         dictation.fn(.down)
         // `.armed(_)`/`.listening(_)`/`.inserted` (explicit wildcard payload), not `if case .armed = $0`
         // — same toolchain quirk `OnboardingViewModelTests` works around.
@@ -297,6 +395,46 @@ struct HistoryViewModelTests {
         dictation.fn(.up)
         await waitFor { if case .inserted(_, _, _) = dictation.state { true } else { false } }
 
-        #expect(try historyStoreBox.current?.count() == 0)
+        #expect(try bundle.historyStoreBox.current?.count() == 0)
+    }
+
+    @Test("B1: armed then discarded (escape) does not leave suppression armed — a following real save persists")
+    func scratchpadDiscardClearsSuppression() async throws {
+        let h = Harness()
+        let bundle = try makeScratchpadBundle(h)
+        let dictation = bundle.dictation
+
+        bundle.vm.isScratchpadPresented = true
+        dictation.fn(.down)
+        await waitFor { if case .armed(_) = dictation.state { true } else { false } }
+        dictation.escape()
+        await waitFor { if case .discarded = dictation.state { true } else { false } }
+        await drainMainActor()   // let `trackDictation`'s onChange Task actually call clearSuppression()
+
+        // The scratchpad capture never saved (it was discarded) — but the suppression it armed must
+        // not still be in effect for the *next*, unrelated dictation.
+        await bundle.historyWriter.save(
+            DictationResult(text: "a real dictation", rawText: "a real dictation", segments: [], language: nil, duration: 1, lowConfidence: false),
+            appName: "Mail")
+
+        #expect(try bundle.historyStoreBox.current?.count() == 1)
+    }
+
+    @Test("B1: armed then the sheet is dismissed without an insertion — a following real save persists")
+    func scratchpadDismissClearsSuppression() async throws {
+        let h = Harness()
+        let bundle = try makeScratchpadBundle(h)
+        let dictation = bundle.dictation
+
+        bundle.vm.isScratchpadPresented = true
+        dictation.fn(.down)
+        await waitFor { if case .armed(_) = dictation.state { true } else { false } }
+        bundle.vm.isScratchpadPresented = false   // sheet closed mid-capture, before any insertion
+
+        await bundle.historyWriter.save(
+            DictationResult(text: "a real dictation", rawText: "a real dictation", segments: [], language: nil, duration: 1, lowConfidence: false),
+            appName: "Mail")
+
+        #expect(try bundle.historyStoreBox.current?.count() == 1)
     }
 }

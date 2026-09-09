@@ -94,7 +94,7 @@ struct HistoryRenderTests {
             if testCase.seeded { await seed(bundle) }
             await testCase.configure(bundle)
             let vm = bundle.vm
-            let renderer = ImageRenderer(content: HistoryPreview(viewModel: vm).frame(width: 900, height: 600))
+            let renderer = ImageRenderer(content: HistoryRenderPreview(viewModel: vm).frame(width: 900, height: 600))
             renderer.scale = 2
             guard let image = renderer.nsImage else {
                 Issue.record("Failed to render \(testCase.name)")
@@ -122,9 +122,17 @@ struct HistoryRenderTests {
     }
 }
 
-/// Standalone page body for rendering — mirrors `HistoryPage`'s layout without needing a full
-/// `AppServices`/`NavigationSplitView` host.
-private struct HistoryPreview: View {
+/// Renders `HistoryPageBody`'s content for `ImageRenderer`, sharing every content-bearing subview
+/// with production (`HistorySearchChips`, `HistoryRowList`, `HistoryEmptyView`, `UndoToastView`, and
+/// `HistoryViewModel.footerText`) — M3's concern was real re-implementation risk (rows, detail
+/// wiring, empty-state copy silently drifting), and none of that is duplicated here.
+///
+/// Two pieces still can't be the production view verbatim, confirmed empirically (not assumed): a
+/// live `TextField` renders as a solid colour-filled glyph under `ImageRenderer` with no real window
+/// behind it, and a live `ScrollView` renders its content as entirely blank. Both are substituted
+/// with static equivalents (`Text` for the field, a plain `VStack` via `HistoryRowList` with no
+/// `ScrollView` wrapper) — layout-identical, just not interactive.
+private struct HistoryRenderPreview: View {
     let viewModel: HistoryViewModel
 
     var body: some View {
@@ -134,45 +142,36 @@ private struct HistoryPreview: View {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                     Text(viewModel.query.isEmpty ? "Search your dictations" : viewModel.query)
                         .foregroundStyle(viewModel.query.isEmpty ? .secondary : .primary)
+                    if !viewModel.query.isEmpty {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                    }
                 }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
                 .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Color.secondary.opacity(0.25)))
-                chip("All apps")
-                chip("This week")
-                Spacer()
+                HistorySearchChips()
+                Spacer(minLength: 0)
             }
             .padding(20)
             Group {
                 if let emptyState = viewModel.emptyState {
                     HistoryEmptyView(state: emptyState, model: viewModel)
                 } else {
-                    // No `ScrollView` here (unlike `HistoryPage`) — `ImageRenderer` doesn't reliably
-                    // lay out `ScrollView` content, and every render case fits in the fixed frame.
-                    VStack(spacing: 0) {
-                        ForEach(viewModel.records) { record in
-                            VStack(spacing: 0) {
-                                HistoryRowView(record: record, model: viewModel)
-                                if viewModel.expandedID == record.id {
-                                    HistoryDetailView(record: record)
-                                }
-                                Divider()
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 20)
-                    .frame(maxHeight: .infinity, alignment: .top)
+                    HistoryRowList(viewModel: viewModel)
+                        .frame(maxHeight: .infinity, alignment: .top)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            Divider()
-            Text(viewModel.footerText)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 20)
-                .padding(.vertical, 10)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            if viewModel.emptyState != .historyOff {
+                Divider()
+                Text(viewModel.footerText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
         .overlay(alignment: .bottom) {
             if viewModel.toastVisible {
@@ -181,19 +180,6 @@ private struct HistoryPreview: View {
             }
         }
         .background(Color(nsColor: .windowBackgroundColor))
-    }
-
-    // Phase 4 filters — rendered so the layout matches the design, disabled until then.
-    private func chip(_ title: String) -> some View {
-        HStack(spacing: 4) {
-            Text(title)
-            Image(systemName: "chevron.up.chevron.down").font(.caption2)
-        }
-        .font(.callout)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(Color.secondary.opacity(0.1), in: Capsule())
-        .foregroundStyle(.secondary)
     }
 }
 
