@@ -6,6 +6,13 @@ struct VoxFlowApp: App {
     @Environment(\.openWindow) private var openWindow
     private var navigation: Navigation { AppServices.shared.navigation }
 
+    /// ST-01 "Show in menu bar" — `MenuBarExtra(isInserted:)` reads/writes this directly, so
+    /// toggling it in Settings › General removes/restores the menu bar item live.
+    private var showInMenuBar: Binding<Bool> {
+        Binding(get: { SettingsServices.shared.generalSettings.showInMenuBar },
+                set: { SettingsServices.shared.generalSettings.showInMenuBar = $0 })
+    }
+
     var body: some Scene {
         Window("VoxFlow", id: MainWindowID.main) {
             MainWindow()
@@ -45,7 +52,7 @@ struct VoxFlowApp: App {
             }
         }
 
-        MenuBarExtra("VoxFlow", systemImage: "waveform") {
+        MenuBarExtra("VoxFlow", systemImage: "waveform", isInserted: showInMenuBar) {
             MenuBarContent()
         }
 

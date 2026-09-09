@@ -104,3 +104,13 @@ final class FlowBarPresenter {
         }
     }
 }
+
+/// Forwards Settings › General's "Flow Bar position" straight to `panel` when it's a real
+/// `FlowBarPanel` (always true in production; test fakes conforming only to `FlowBarPanelling`
+/// simply ignore it) — lets `SettingsServices` hand `GeneralViewModel` the one `FlowBarPresenter`
+/// `AppServices` already exposes instead of needing the panel itself exposed too.
+extension FlowBarPresenter: FlowBarPositioning {
+    func apply(_ position: FlowBarPosition) {
+        (panel as? FlowBarPositioning)?.apply(position)
+    }
+}
