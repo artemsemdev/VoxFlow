@@ -4,6 +4,7 @@ import SwiftUI
 import VoxFlowCore
 import VoxFlowFiles
 import VoxFlowStorage
+import VoxFlowStyling
 
 /// State and rules of the History page (design MW-02, MW-02d, MW-02e, MW-02n, T-01). Views render
 /// it; nothing else decides.
@@ -39,12 +40,20 @@ final class HistoryViewModel {
     /// History (I-1/I-2/I-3) — this view model no longer watches dictation state to manage that.
     var isScratchpadPresented = false
     var scratchpadText = ""
+    /// The id of the row a Re-style (MW-02s) is currently rewriting, `nil` otherwise — single-flight
+    /// (see `restyle(_:to:)`) and what `HistoryRowView` reads to swap the chevron for a spinner and
+    /// disable the action strip.
+    private(set) var restylingID: Int64?
 
     private let service: HistoryService
     private let settings: DictationSettings
     private let navigation: Navigation
     private let clock: any MonotonicClock
     private let pasteboard: any Pasteboard
+    /// Injected (not built here) so tests swap in a `FakeLLMBackend`-backed one — defaults to a
+    /// rule-only styler so existing call sites (and every test that doesn't care about Re-style)
+    /// keep compiling unchanged.
+    let restyler: Restyler
 
     /// Boxed outside main-actor isolation so `deinit` (nonisolated) can cancel them without an
     /// isolation assertion — same pattern as `FilesViewModel.eventTask`.
@@ -52,12 +61,16 @@ final class HistoryViewModel {
     private nonisolated let undoTask = Mutex<Task<Void, Never>?>(nil)
 
     init(service: HistoryService, settings: DictationSettings, navigation: Navigation, clock: any MonotonicClock,
-         pasteboard: any Pasteboard = SystemPasteboard()) {
+         pasteboard: any Pasteboard = SystemPasteboard(),
+         restyler: Restyler = Restyler(styler: RuleStyler(),
+                                       settings: StylingSettingsBox(StylingSettingsSnapshot(
+                                           defaultStyle: .casual, removeFillers: true, autoPunctuate: true, snippetSayPrefix: false)))) {
         self.service = service
         self.settings = settings
         self.navigation = navigation
         self.clock = clock
         self.pasteboard = pasteboard
+        self.restyler = restyler
     }
 
     deinit {
@@ -149,6 +162,22 @@ final class HistoryViewModel {
         navigation.settingsTab = .privacy
     }
 
+    /// Re-style (design 2e, MW-02s): rewrites `record`'s raw transcript into `style` through
+    /// `restyler` (LLM when ready, rules otherwise — `Restyler`'s own fallback), stores the result,
+    /// copies it, and refreshes the list so the row's meta line picks up the new style. Single-flight
+    /// — a second call while one is already running is a no-op — and a no-op on an unreadable row,
+    /// which has no raw text to rewrite. `updateStyled` returning `nil` (the row was deleted out from
+    /// under this call) is silently skipped: the canvas has no error UI for Re-style.
+    func restyle(_ record: DictationRecord, to style: TextStyle) async {
+        guard restylingID == nil, !record.isUnreadable else { return }
+        restylingID = record.id
+        defer { restylingID = nil }
+        let text = await restyler.restyle(rawText: record.rawText, to: style)
+        guard let updated = await service.updateStyled(id: record.id, text: text, style: style.rawValue) else { return }
+        pasteboard.setString(updated.text)
+        await refresh()
+    }
+
     // MARK: Search debounce
 
     private func scheduleSearch() {
@@ -207,6 +236,19 @@ final class HistoryViewModel {
         guard let style = record.style, !style.isEmpty else { return "INSERTED" }
         return "INSERTED · \(styleLabel(style).uppercased())"
     }
+
+    /// The Re-style popover's checkmark row (design 2e): `record.style` decoded back to a
+    /// `TextStyle`, defaulting to `.casual` for a nil or unrecognized value — same fallback
+    /// `TextStyle.default` already names, kept explicit here since `RestyleMenuView` reads it
+    /// directly rather than through `TextStyle.default`.
+    static func currentStyle(of record: DictationRecord) -> TextStyle {
+        record.style.flatMap(TextStyle.init(rawValue:)) ?? .casual
+    }
+
+    /// The Re-style popover's footer copy (design 2e), verbatim from the canvas.
+    static let restyleFooter = "Rewrites locally and copies the result"
+    /// The Re-style popover's row order (design 2e).
+    static let restyleOrder: [TextStyle] = [.formal, .casual, .veryCasual, .verbatim]
 
     /// I1: `record.style` stores `TextStyle.rawValue` (e.g. `"veryCasual"`); rows must show the
     /// human display name (`"Very casual"`) instead. Falls back to the raw value itself for a style
