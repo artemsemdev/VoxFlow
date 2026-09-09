@@ -12,7 +12,7 @@ struct StyledTranscriberTests {
     func emptyFeed() -> AsyncStream<AudioChunk> { AsyncStream { $0.finish() } }
 
     func snapshots(vocabulary: [String] = [], snippets: [SnippetRule] = [], overrides: [String: TextStyle] = [:],
-                   noteUses: @escaping @Sendable ([String], [String]) -> Void = { _, _ in }) -> ContentSnapshots {
+                   noteUses: @escaping @Sendable (String, [String]) -> Void = { _, _ in }) -> ContentSnapshots {
         ContentSnapshots(vocabularyBox: SnapshotBox(vocabulary), snippetsBox: SnapshotBox(snippets),
                          overridesBox: SnapshotBox(overrides), noteUses: noteUses)
     }
@@ -71,13 +71,26 @@ struct StyledTranscriberTests {
     func snippetExpansionAndUsedCounters() async throws {
         let noted = NotedCalls()
         let content = snapshots(snippets: [SnippetRule(trigger: "/sig", body: "Best, Artem")],
-                                noteUses: { words, snippets in noted.record(words: words, snippets: snippets) })
+                                noteUses: { text, snippets in noted.record(text: text, snippets: snippets) })
         let t = transcriber(rawText: "see you soon slash sig", content: content)
         let result = try await t.transcribe(emptyFeed(), options: TranscriptionOptions()) { _ in }
         #expect(result.text == "See you soon Best, Artem.")
         let calls = noted.calls
         #expect(calls.count == 1)
         #expect(calls[0].snippets == ["/sig"])
+    }
+
+    @Test("M2: noteUses is given the styled (pre-expansion) text, so a word only inside a snippet body is not counted as dictated")
+    func noteUsesSeesStyledTextNotExpandedText() async throws {
+        let noted = NotedCalls()
+        let content = snapshots(snippets: [SnippetRule(trigger: "/sig", body: "Kubernetes expert, Artem")],
+                                noteUses: { text, snippets in noted.record(text: text, snippets: snippets) })
+        let t = transcriber(rawText: "see you soon slash sig", content: content)
+        let result = try await t.transcribe(emptyFeed(), options: TranscriptionOptions()) { _ in }
+        #expect(result.text.contains("Kubernetes"))
+        let calls = noted.calls
+        #expect(calls.count == 1)
+        #expect(calls[0].text.contains("Kubernetes") == false)
     }
 
     @Test("partial text events are forwarded unmodified (still raw)")
@@ -96,9 +109,9 @@ struct StyledTranscriberTests {
 /// `@Sendable` closure, so a test can assert on it immediately after `transcribe()` returns.
 final class NotedCalls: Sendable {
     private let box = Mutex(State())
-    private struct State { var calls: [(words: [String], snippets: [String])] = [] }
-    func record(words: [String], snippets: [String]) { box.withLock { $0.calls.append((words, snippets)) } }
-    var calls: [(words: [String], snippets: [String])] { box.withLock { $0.calls } }
+    private struct State { var calls: [(text: String, snippets: [String])] = [] }
+    func record(text: String, snippets: [String]) { box.withLock { $0.calls.append((text, snippets)) } }
+    var calls: [(text: String, snippets: [String])] { box.withLock { $0.calls } }
 }
 
 /// Collects `onEvent` calls from an `async` callback — an `actor` rather than a `Mutex` box since

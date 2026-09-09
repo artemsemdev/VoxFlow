@@ -180,7 +180,7 @@ final class AppServices {
         let usesSink = contentService.makeUsesSink()
         let contentSnapshots = ContentSnapshots(vocabularyBox: contentService.vocabularyBox, snippetsBox: contentService.snippetsBox,
                                                 overridesBox: contentService.overridesBox,
-                                                noteUses: { words, snippets in usesSink.note(words: words, snippets: snippets) })
+                                                noteUses: { text, snippets in usesSink.note(text: text, snippets: snippets) })
         let styledTranscriber = StyledTranscriber(base: WindowedTranscriber(engine: engine), styler: RuleStyler(),
                                                   settings: stylingSettings.box, content: contentSnapshots, frontmost: frontmostBox,
                                                   clipboard: { NSPasteboard.general.string(forType: .string) }, now: Date.init)

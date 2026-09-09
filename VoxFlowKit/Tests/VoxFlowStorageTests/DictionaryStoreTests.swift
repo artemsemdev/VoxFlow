@@ -87,11 +87,39 @@ struct DictionaryStoreTests {
         #expect(try store.all().map(\.word) == ["keep"])
     }
 
-    @Test("incrementUses matches folded whole words, counting occurrences")
-    func incrementUses() throws {
+    @Test("incrementUses(inText:) matches a folded whole word, once per call regardless of how many times it occurs")
+    func incrementUsesWholeWord() throws {
         let store = try store()
         _ = try store.insert(word: "Kubernetes", soundsLike: nil, type: .term, fixTyping: false)
-        try store.incrementUses(words: ["I", "love", "kubernetes", "so", "much", "KUBERNETES"])
+        try store.incrementUses(inText: "I love kubernetes so much KUBERNETES")
+        #expect(try store.find(word: "kubernetes")?.uses == 1)
+    }
+
+    @Test("I3: incrementUses(inText:) matches a multi-word phrase at word boundaries, e.g. a Contacts full name")
+    func incrementUsesMultiWordPhrase() throws {
+        let store = try store()
+        _ = try store.insert(word: "Priya Raghunathan", soundsLike: nil, type: .name, fixTyping: false, source: "contacts")
+        try store.incrementUses(inText: "hi priya raghunathan here")
+        #expect(try store.find(word: "priya raghunathan")?.uses == 1)
+    }
+
+    @Test("I3: incrementUses(inText:) does not match a word as a substring of a longer word")
+    func incrementUsesDoesNotMatchSubstring() throws {
+        let store = try store()
+        _ = try store.insert(word: "Kubernetes", soundsLike: nil, type: .term, fixTyping: false)
+        try store.incrementUses(inText: "kubernetesish is not a real word")
+        #expect(try store.find(word: "kubernetes")?.uses == 0)
+    }
+
+    @Test("I3: incrementUses(inText:) bumps every matching entry by at most one per call")
+    func incrementUsesOncePerEntryPerCall() throws {
+        let store = try store()
+        _ = try store.insert(word: "Kubernetes", soundsLike: nil, type: .term, fixTyping: false)
+        _ = try store.insert(word: "Docker", soundsLike: nil, type: .term, fixTyping: false)
+        try store.incrementUses(inText: "we deployed kubernetes and kubernetes and docker today")
+        #expect(try store.find(word: "kubernetes")?.uses == 1)
+        #expect(try store.find(word: "docker")?.uses == 1)
+        try store.incrementUses(inText: "kubernetes again")
         #expect(try store.find(word: "kubernetes")?.uses == 2)
     }
 
@@ -101,7 +129,9 @@ struct DictionaryStoreTests {
         _ = try store.insert(word: "alpha", soundsLike: nil, type: .term, fixTyping: false)
         _ = try store.insert(word: "beta", soundsLike: nil, type: .term, fixTyping: false)
         _ = try store.insert(word: "gamma", soundsLike: nil, type: .term, fixTyping: false)
-        try store.incrementUses(words: ["beta", "beta", "gamma"])
+        try store.incrementUses(inText: "beta")
+        try store.incrementUses(inText: "beta")
+        try store.incrementUses(inText: "gamma")
         #expect(try store.vocabulary(limit: 10) == ["beta", "gamma", "alpha"])
         #expect(try store.vocabulary(limit: 2) == ["beta", "gamma"])
     }

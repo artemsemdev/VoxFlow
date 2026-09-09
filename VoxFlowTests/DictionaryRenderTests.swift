@@ -71,9 +71,14 @@ struct DictionaryRenderTests {
         for sample in Self.sampleWords {
             _ = try? await listBundle.content.dictionary.insert(word: sample.word, soundsLike: sample.sounds, type: sample.type, fixTyping: false)
         }
-        var words: [String] = []
-        for sample in Self.sampleWords { words.append(contentsOf: Array(repeating: sample.word, count: sample.uses)) }
-        await listBundle.content.noteUses(words: words, snippets: [])
+        // I3: `incrementUses(inText:)` bumps a matched entry by at most one per call, so simulating
+        // `sample.uses` repeat uses means calling `noteUses` that many times rather than repeating
+        // the word within one call's text.
+        for sample in Self.sampleWords {
+            for _ in 0..<sample.uses {
+                await listBundle.content.noteUses(text: sample.word, snippets: [])
+            }
+        }
         await listBundle.vm.load()
         try Self.render(DictionaryRenderPreview(viewModel: listBundle.vm), name: "1-list", directory: directory)
 

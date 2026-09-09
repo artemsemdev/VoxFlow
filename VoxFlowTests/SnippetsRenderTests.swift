@@ -55,7 +55,7 @@ struct SnippetsRenderTests {
         _ = try? await listBundle.content.snippets.insert(trigger: "/standup",
                                                            body: "Yesterday: cursor\nToday:\nBlockers: none")
         _ = try? await listBundle.content.snippets.insert(trigger: "/eta", body: "Thanks for the update — I'll follow up by end of day.")
-        await listBundle.content.noteUses(words: [], snippets: Array(repeating: "/sig", count: 84) + Array(repeating: "/standup", count: 12))
+        await listBundle.content.noteUses(text: "", snippets: Array(repeating: "/sig", count: 84) + Array(repeating: "/standup", count: 12))
         await listBundle.vm.load()
         try Self.render(SnippetsRenderPreview(viewModel: listBundle.vm), name: "1-list", directory: directory)
 

@@ -44,17 +44,14 @@ struct StyledTranscriber: DictationTranscribing {
                                        context: (date: now(), clipboard: clipboard(), appName: app?.name, bundleID: app?.bundleID))
         let expanded = expander.expand(styled.text)
 
-        content.noteUses(Self.wholeWords(in: expanded.text), expanded.used)
+        // M2: counts uses from the styled text *before* snippet expansion, so a dictionary word that
+        // only appears inside an expanded snippet body (or a `clipboard` paste) is never counted as
+        // dictated — `DictionaryStore.incrementUses(inText:)` folds and matches whole
+        // words/phrases (I3) itself.
+        content.noteUses(styled.text, expanded.used)
 
         return DictationResult(text: expanded.text, rawText: result.rawText, segments: result.segments,
                                language: result.language, duration: result.duration, lowConfidence: result.lowConfidence,
                                style: style.rawValue, cursorOffset: expanded.cursorOffset, fillersRemoved: styled.fillersRemoved)
-    }
-
-    /// Tokenizes styled text into whole words for `DictionaryStore.incrementUses(words:)`, which
-    /// folds each candidate before matching it against `word_folded` (ruling 5: "case-insensitive
-    /// whole word").
-    private static func wholeWords(in text: String) -> [String] {
-        text.split { !$0.isLetter && !$0.isNumber }.map(String.init)
     }
 }

@@ -76,17 +76,37 @@ public final class DictionaryStore: Sendable {
         try queue.write { try $0.execute(sql: "DELETE FROM dictionary WHERE source = ?", arguments: [source]) }
     }
 
-    /// Bumps `uses` for each dictionary entry whose folded word matches a folded whole word in
-    /// `words`; a word occurring more than once increments its entry by that many.
-    public func incrementUses(words: [String]) throws {
-        var counts: [String: Int] = [:]
-        for word in words { counts[word.foldedForMatching, default: 0] += 1 }
-        guard !counts.isEmpty else { return }
+    /// I3: bumps `uses` by exactly one for every dictionary entry (single word *or* multi-word
+    /// phrase, e.g. a Contacts import's `"Priya Raghunathan"`) whose folded word/phrase appears at
+    /// a word boundary anywhere in `text`'s folded form — no entry is bumped more than once per
+    /// call, no matter how many times its word/phrase occurs in `text`. Replaces the old
+    /// single-whole-token `incrementUses(words:)`, which could never match a multi-word entry: a
+    /// two-token folded value has no single token it could ever equal.
+    public func incrementUses(inText text: String) throws {
+        let folded = text.foldedForMatching
+        guard !folded.isEmpty else { return }
+        let foldedWords = try queue.read { db in
+            try String.fetchAll(db, sql: "SELECT word_folded FROM dictionary")
+        }
+        let matched = foldedWords.filter { !$0.isEmpty && Self.containsWholeMatch(of: $0, in: folded) }
+        guard !matched.isEmpty else { return }
         try queue.write { db in
-            for (folded, count) in counts {
-                try db.execute(sql: "UPDATE dictionary SET uses = uses + ? WHERE word_folded = ?", arguments: [count, folded])
+            for wordFolded in matched {
+                try db.execute(sql: "UPDATE dictionary SET uses = uses + 1 WHERE word_folded = ?", arguments: [wordFolded])
             }
         }
+    }
+
+    /// Whether `needle` (already folded) occurs in `haystack` (already folded) at word boundaries —
+    /// `\b` on both ends means a multi-word `needle` like `"priya raghunathan"` matches only the
+    /// exact phrase, and a single-word `needle` like `"kubernetes"` does not match inside
+    /// `"kubernetesish"`.
+    private static func containsWholeMatch(of needle: String, in haystack: String) -> Bool {
+        guard let regex = try? NSRegularExpression(pattern: "\\b\(NSRegularExpression.escapedPattern(for: needle))\\b") else {
+            return false
+        }
+        let range = NSRange(haystack.startIndex..., in: haystack)
+        return regex.firstMatch(in: haystack, options: [], range: range) != nil
     }
 
     /// The most-used words first, ties broken alphabetically, capped at `limit`.

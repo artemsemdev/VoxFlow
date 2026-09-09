@@ -22,10 +22,10 @@ final class ContentUsesSink: Sendable {
     private struct WeakBox { weak var service: ContentService? }
     private let box = Mutex(WeakBox(service: nil))
     func attach(_ service: ContentService) { box.withLock { $0.service = service } }
-    func note(words: [String], snippets: [String]) {
+    func note(text: String, snippets: [String]) {
         Task { @MainActor in
             guard let service = self.box.withLock({ $0.service }) else { return }
-            await service.noteUses(words: words, snippets: snippets)
+            await service.noteUses(text: text, snippets: snippets)
         }
     }
 }
@@ -36,7 +36,7 @@ struct ContentSnapshots: Sendable {
     let vocabularyBox: SnapshotBox<[String]>
     let snippetsBox: SnapshotBox<[SnippetRule]>
     let overridesBox: SnapshotBox<[String: TextStyle]>
-    let noteUses: @Sendable ([String], [String]) -> Void
+    let noteUses: @Sendable (String, [String]) -> Void
 }
 
 /// Owns the `DictionaryStore`/`SnippetStore`/`StyleOverrideStore` built on `HistoryService`'s shared
@@ -112,16 +112,18 @@ final class ContentService {
         return sink
     }
 
-    /// Bumps dictionary uses for folded whole words in `words` that match a dictionary entry, and
-    /// snippet uses for each trigger in `snippets` — fired by `StyledTranscriber` after every
-    /// dictation (ruling 5 / ruling 4). Runs the writes off the main actor, then refreshes the boxes.
-    func noteUses(words: [String], snippets: [String]) async {
+    /// Bumps dictionary uses for every entry (single word or multi-word phrase, I3) matched inside
+    /// `text`, and snippet uses for each trigger in `snippets` — fired by `StyledTranscriber` after
+    /// every dictation (ruling 5 / ruling 4). Runs the writes off the main actor, then refreshes the
+    /// boxes. `text` is the styled (not snippet-expanded) text, so a dictionary word appearing only
+    /// inside a snippet's *body* is never counted as dictated (M2).
+    func noteUses(text: String, snippets: [String]) async {
         await ready()
         guard status == .ready, let dictionaryStore, let snippetStore else { return }
         let log = Self.log
-        if !words.isEmpty {
+        if !text.isEmpty {
             await Task.detached(priority: .utility) {
-                do { try dictionaryStore.incrementUses(words: words) }
+                do { try dictionaryStore.incrementUses(inText: text) }
                 catch { log.error("dictionary incrementUses failed: \(String(describing: error))") }
             }.value
         }
