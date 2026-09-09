@@ -32,6 +32,8 @@ any app, style cleanup with a local LLM and an MCP server follow in 2.x (see the
   or copied to the clipboard when there isn't a text field; finished dictations save to encrypted
   history unless the Privacy toggle turns that off.
 - Needs Microphone and Accessibility permission — macOS prompts for each on first use.
+- VoxFlow's own window is frontmost at launch, so click into the text field you want to dictate
+  into (e.g. TextEdit) before the first fn press, or the dictation lands on the clipboard instead.
 - Onboarding and the History page are not built yet (phase 3c); Settings tabs beyond the defaults
   follow in 2.2.
 
