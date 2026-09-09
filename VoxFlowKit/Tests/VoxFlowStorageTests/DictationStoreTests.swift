@@ -274,4 +274,66 @@ struct DictationStoreTests {
         #expect(untouched.isUnreadable == true)
         #expect(untouched.text.isEmpty)
     }
+
+    // MARK: fix round 1 (C1) — `updateStyled` must not re-stamp `encrypted` while leaving `raw_text`
+    // encoded under the row's *old* flag: `record(from:)` decodes both columns with the one flag, so
+    // a mismatch blanks the row (`isUnreadable == true`) instead of updating it.
+
+    @Test("updateStyled across a mixed encoding: a plaintext row updated through an encrypted store re-encodes rawText too and stays fully readable")
+    func updateStyledReencodesRawTextAcrossMixedEncoding() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("voxflow.sqlite")
+
+        // Inserted while "Encrypt history at rest" was off (encrypted = 0, plaintext columns).
+        let plaintextStore = try DictationStore(databaseURL: url, keyProvider: nil)
+        let original = try plaintextStore.insert(draft("plaintext raw words", at: Date(timeIntervalSince1970: 9)))
+
+        // Re-styled after the toggle flipped on (same file, a store with a cipher now) — exactly what
+        // `HistoryService.reopen()` does on a Privacy-toggle change.
+        let encryptedStore = try DictationStore(databaseURL: url, keyProvider: FakeKeyProvider())
+        let updated = try encryptedStore.updateStyled(id: original.id, text: "Restyled text.", style: "formal")
+
+        #expect(updated?.text == "Restyled text.")
+        #expect(updated?.rawText == original.rawText)   // the original raw transcript, still decodable
+        #expect(updated?.isUnreadable == false)
+
+        // Re-fetching (not just trusting the returned record) proves the bytes on disk are consistent,
+        // not just the in-memory result of the call.
+        let refetched = try encryptedStore.fetch(limit: 1).first
+        #expect(refetched?.text == "Restyled text.")
+        #expect(refetched?.rawText == original.rawText)
+        #expect(refetched?.isUnreadable == false)
+    }
+
+    @Test("updateStyled on a row the current store can't decode returns nil and leaves it byte-for-byte untouched")
+    func updateStyledOnUndecodableRowReturnsNilAndLeavesItUntouched() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("voxflow.sqlite")
+        let sharedKey = SymmetricKey(size: .bits256)
+
+        let keyed = try DictationStore(databaseURL: url, keyProvider: FakeKeyProvider(key: sharedKey))
+        let original = try keyed.insert(draft("secret raw text", at: Date(timeIntervalSince1970: 5)))
+        let beforeTextBytes = try keyed.textColumnForTesting(id: original.id)
+
+        // Same file, no cipher on this instance (e.g. "Encrypt history at rest" just got switched
+        // off) — the row is `encrypted = 1` but this store has no key to open it.
+        let plaintextStore = try DictationStore(databaseURL: url, keyProvider: nil)
+        let result = try plaintextStore.updateStyled(id: original.id, text: "attempted new text", style: "casual")
+
+        #expect(result == nil)
+        let afterTextBytes = try plaintextStore.textColumnForTesting(id: original.id)
+        #expect(afterTextBytes == beforeTextBytes)   // byte-for-byte: not even the flag/columns moved
+
+        // Reopening with the original key proves nothing changed at all, not just the `text` column.
+        let reopenedWithKey = try DictationStore(databaseURL: url, keyProvider: FakeKeyProvider(key: sharedKey))
+        let refetched = try reopenedWithKey.fetch(limit: 1).first
+        #expect(refetched?.text == original.text)
+        #expect(refetched?.rawText == original.rawText)
+        #expect(refetched?.style == original.style)
+        #expect(refetched?.words == original.words)
+    }
 }

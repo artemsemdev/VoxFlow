@@ -17,7 +17,7 @@ actor StyleModelLoader: LLMBackend {
 
     func isReady() async -> Bool {
         guard let model = await store.defaultModel(role: .style) else {
-            if loadedModelID != nil { await unload() }
+            await cancelLoadAndUnloadIfNeeded()
             return false
         }
         if loadedModelID == model.id { return true }
@@ -42,6 +42,15 @@ actor StyleModelLoader: LLMBackend {
         defer { loadTask = nil }
         do {
             try await engine.load(modelAt: store.directory.appendingPathComponent(model.fileName))
+            // The wrapping `Task` may have been cancelled (the model was removed, or `isReady()`
+            // found a different default) while `engine.load` was in flight — `engine.load` itself
+            // isn't cancellation-aware, so it can still succeed after that. Undo it rather than
+            // publish a model that's no longer the one to serve.
+            guard !Task.isCancelled else {
+                await engine.unload()
+                loadedModelID = nil
+                return
+            }
             loadedModelID = model.id
         } catch {
             Self.log.error("style model load failed: \(String(describing: error))")
@@ -49,7 +58,16 @@ actor StyleModelLoader: LLMBackend {
         }
     }
 
-    private func unload() async {
+    /// Cancels and awaits any in-flight load *before* touching the engine, so `engine.unload()` never
+    /// races an in-flight `engine.load(modelAt:)` — without this, two callers that both observe "no
+    /// default model" could both call `engine.unload()` (a load's own cancellation-triggered unload
+    /// above, plus this one), or a load could finish and resurrect `loadedModelID` for a model that's
+    /// no longer installed, right after this returned.
+    private func cancelLoadAndUnloadIfNeeded() async {
+        loadTask?.cancel()
+        await loadTask?.value
+        loadTask = nil
+        guard loadedModelID != nil else { return }
         await engine.unload()
         loadedModelID = nil
     }

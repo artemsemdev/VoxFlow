@@ -391,9 +391,10 @@ struct ModelsViewModelTests {
         let payload = Self.payload(9, count: 50_000)
         let styleModel = Self.descriptor(id: "style-real", role: .style, payload: payload, isDefault: true)
         let catalog = [Self.big, styleModel]
+        let dir = TemporaryDirectory()
         let downloader = FakeModelDownloader()
         await downloader.serve(payload, at: styleModel.downloadURL)
-        let store = ModelStore(directory: TemporaryDirectory().url, catalog: catalog, downloader: downloader,
+        let store = ModelStore(directory: dir.url, catalog: catalog, downloader: downloader,
                                freeSpace: FakeFreeSpace(available: 10_000_000_000), settings: InMemoryKeyValueStore())
         let model = ModelsViewModel(store: store, catalog: catalog)
         await model.refresh()
@@ -412,9 +413,10 @@ struct ModelsViewModelTests {
         let payload = Self.payload(9, count: 50_000)
         let styleModel = Self.descriptor(id: "style-real", role: .style, payload: payload, isDefault: true)
         let catalog = [styleModel]
+        let dir = TemporaryDirectory()
         let downloader = FakeModelDownloader()
         await downloader.serve(payload, at: styleModel.downloadURL)
-        let store = ModelStore(directory: TemporaryDirectory().url, catalog: catalog, downloader: downloader,
+        let store = ModelStore(directory: dir.url, catalog: catalog, downloader: downloader,
                                freeSpace: FakeFreeSpace(available: 10_000_000_000), settings: InMemoryKeyValueStore())
         let model = ModelsViewModel(store: store, catalog: catalog)
         await model.refresh()

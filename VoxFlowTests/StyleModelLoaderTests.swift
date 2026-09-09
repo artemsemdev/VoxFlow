@@ -65,6 +65,32 @@ struct StyleModelLoaderTests {
         let readyAfterRemoval = await loader.isReady()
         #expect(readyAfterRemoval == false)
         #expect(await engine.unloadCount == 1)
+        #expect(await engine.loadedURLs.count == 1)   // no model to reload — removal never starts a second load
+
+        // A second `isReady()` with the file still gone must not unload again (idempotent teardown).
+        let readyAgain = await loader.isReady()
+        #expect(readyAgain == false)
+        #expect(await engine.unloadCount == 1)
+    }
+
+    @Test("several concurrent isReady() calls plus warmUp() against the same installed model start exactly one background load (plan ruling 4)")
+    func concurrentReadyChecksStartExactlyOneLoad() async throws {
+        let dir = TemporaryDirectory()
+        try installStyleModelFile(in: dir)
+        let engine = FakeLLMBackend()
+        let loader = StyleModelLoader(store: store(dir: dir), engine: engine)
+
+        // `loadTask == nil` is only ever checked-and-assigned within a single actor-isolated
+        // synchronous stretch (no `await` between the check and the assignment in `isReady()`/
+        // `warmUp()`), so no interleaving of these four calls can create more than one `Task`.
+        async let first = loader.isReady()
+        async let second = loader.isReady()
+        async let third = loader.isReady()
+        await loader.warmUp()
+        _ = await (first, second, third)
+
+        #expect(await loader.isReady() == true)
+        #expect(await engine.loadedURLs.count == 1)
     }
 
     @Test("generate before a model is loaded throws modelNotLoaded; once loaded it forwards the prompt")
