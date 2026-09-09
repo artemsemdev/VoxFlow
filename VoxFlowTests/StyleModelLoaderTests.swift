@@ -93,6 +93,76 @@ struct StyleModelLoaderTests {
         #expect(await engine.loadedURLs.count == 1)
     }
 
+    /// `StyleEngine` stub whose `load(modelAt:)` suspends until `release()` — mirrors
+    /// `FakeLLMBackend.hangs`, but for the load path, to prove the removal path never awaits it
+    /// (final review I1) and to exercise the "engine load succeeded after cancellation" branch
+    /// in `StyleModelLoader.load(_:)` that had no direct test (M2).
+    private actor HangingLoadEngine: StyleEngine {
+        private(set) var loadedURLs: [URL] = []
+        private(set) var unloadCount = 0
+        private var loadWaiters: [CheckedContinuation<Void, Never>] = []
+        private var unloadWaiters: [CheckedContinuation<Void, Never>] = []
+        private var released = false
+
+        func isReady() async -> Bool { false }
+        func generate(_ prompt: ChatPrompt, maxNewTokens: Int) async throws -> String { "" }
+
+        func load(modelAt url: URL) async throws {
+            loadedURLs.append(url)
+            if !released {
+                await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in loadWaiters.append(continuation) }
+            }
+        }
+
+        func unload() async {
+            unloadCount += 1
+            unloadWaiters.forEach { $0.resume() }
+            unloadWaiters.removeAll()
+        }
+
+        /// Lets the in-flight `load(modelAt:)` call return, as if the engine call had finally
+        /// completed (mirrors production: `LlamaEngine.load` is not cancellation-aware).
+        func release() {
+            released = true
+            loadWaiters.forEach { $0.resume() }
+            loadWaiters.removeAll()
+        }
+
+        /// Suspends until `unload()` has actually been called (or already has) — deterministic
+        /// stand-in for a sleep while the resumed load task finishes its cancelled-branch unload.
+        func waitForUnload() async {
+            if unloadCount > 0 { return }
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in unloadWaiters.append(continuation) }
+        }
+    }
+
+    @Test("removing the model file while a load is in flight: isReady() returns false immediately without awaiting the load; once released, the engine ends unloaded with no second load (final review I1/M2)")
+    func removalDuringLoadDoesNotBlockIsReady() async throws {
+        let dir = TemporaryDirectory()
+        try installStyleModelFile(in: dir)
+        let engine = HangingLoadEngine()
+        let loader = StyleModelLoader(store: store(dir: dir), engine: engine)
+
+        let firstReady = await loader.isReady()   // kicks a background load that now hangs inside engine.load(modelAt:)
+        #expect(firstReady == false)
+
+        try FileManager.default.removeItem(at: dir.url.appendingPathComponent(Self.styleModel.fileName))
+
+        // The critical assertion: this must return promptly. The stub is released only *after* it —
+        // if `cancelLoadAndUnloadIfNeeded()` regressed to awaiting the load, this call would hang.
+        let readyAfterRemoval = await loader.isReady()
+        #expect(readyAfterRemoval == false)
+        #expect(await engine.unloadCount == 0)   // nothing was ever loaded, so there is nothing to unload yet
+
+        await engine.release()
+        await engine.waitForUnload()
+
+        #expect(await engine.unloadCount == 1)
+        #expect(await engine.loadedURLs.count == 1)   // the cancelled load's own unload never resurrects loadedModelID or starts a second load
+        #expect(await loader.isReady() == false)
+        #expect(await engine.unloadCount == 1)   // still just the one unload
+    }
+
     @Test("generate before a model is loaded throws modelNotLoaded; once loaded it forwards the prompt")
     func generateBeforeAndAfterLoad() async throws {
         let dir = TemporaryDirectory()

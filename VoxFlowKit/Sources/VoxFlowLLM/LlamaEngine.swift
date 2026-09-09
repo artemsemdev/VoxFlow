@@ -84,6 +84,7 @@ public actor LlamaEngine: StyleEngine {
         let cancel = CancelFlag()
         return try await withTaskCancellationHandler {
             try await onQueue {
+                guard !cancel.isSet else { throw LLMError.cancelled }
                 let vocab = llama_model_get_vocab(model.pointer)
                 let text = try Self.applyTemplate(model: model.pointer, prompt: prompt)
                 let tokens = try Self.tokenize(vocab: vocab, text: text)

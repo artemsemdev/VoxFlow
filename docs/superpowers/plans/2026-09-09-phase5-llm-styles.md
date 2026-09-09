@@ -12,7 +12,7 @@
 
 **Rulings (binding):**
 1. **Seam change**: `TextStyler.style(_:options:)` becomes `async throws`. `RuleStyler` keeps a synchronous body behind the async signature. `StyledTranscriber` awaits it. No other layer changes (ADR-005 promise).
-2. **What the LLM rewrites**: only the tone step. The rule pre-pass (`RuleStyler` with `style: .casual`, honouring `removeFillers` / `autoPunctuate`) runs first and supplies `fillersRemoved`; the LLM receives the pre-passed text. `Verbatim` never touches the LLM. Fallback (`RuleStyler` with the requested tone) whenever: the backend is not ready, the text exceeds **200 words**, generation throws, exceeds **12 s**, or the output fails validation (empty; fewer than 30 % or more than 300 % of the input's words; identical to the prompt; contains `<|im_`).
+2. **What the LLM rewrites**: only the tone step. The rule pre-pass (`RuleStyler` with `style: .casual`, honouring `removeFillers` / `autoPunctuate`) runs first and supplies `fillersRemoved`; the LLM receives the pre-passed text. `Verbatim` never touches the LLM. Fallback (`RuleStyler` with the requested tone) whenever: the backend is not ready, the text exceeds **150 words**, generation throws, exceeds **8 s**, or the output fails validation (empty; fewer than 30 % or more than 300 % of the input's words; identical to the prompt; contains `<|im_`). (amended in the final review: 8 s / 150 words)
 3. **Determinism**: greedy sampling (`llama_sampler_init_greedy`), `n_ctx 2048`, `n_batch 512`, threads `min(8, activeProcessorCount)`, all layers on Metal (`n_gpu_layers = 99`); `maxNewTokens = min(words × 3 + 32, 768)`. Prompt via the model's own chat template (`llama_model_chat_template` + `llama_chat_apply_template`), never a hand-rolled ChatML string. KV cache cleared before every request (`llama_memory_clear`). One request at a time (actor).
 4. **Model lifecycle**: the Qwen row in Settings › Models becomes downloadable by pinning size + sha256 (`ModelsViewModel.Row.isAvailable` already keys on `sha256`). `StyleModelLoader` loads the default `.style` model lazily: `isReady()` returns `true` only when loaded; when a style model is installed but not loaded it kicks one background load and returns `false` (that dictation uses rules). `warmUp()` is called once at launch (non-test) after `dictation.start`, low priority, so the first Metal shader compile (~20 s on first run) never sits on a dictation. Removing the model in Settings unloads it on the next `isReady()` (the store no longer reports it installed). The model stays loaded for the process lifetime (idle unload = follow-up).
 5. **Re-style (MW-02s)**: "Re-style ▾" on every readable History row opens a popover anchored to the button with four rows — `Formal`, `Casual`, `Very casual`, `Verbatim` — a `✓` on the record's current style, and the footer `Rewrites locally and copies the result`. Picking a tone rewrites `rawText` through the same `LlamaStyler` (LLM when ready, rules otherwise) with the current global toggles, stores the result (`text`, `words`, `style` updated; `rawText`, `createdAt` untouched), copies the new text to the pasteboard, and refreshes the list. While it runs the button shows a small `ProgressView` in place of the chevron and is disabled; a failure logs and leaves the row unchanged (no canvas copy for an error state). Snippets are **not** re-expanded on Re-style (the stored `rawText` is what the engine heard; the expanded snippet bodies are already in `text` — a Re-style replaces `text` with the rewritten raw transcript).
@@ -424,8 +424,8 @@ import Foundation
 
 /// Ruling 2/3: when the LLM is used at all, and how much it may generate.
 public struct StyleLimits: Sendable, Equatable {
-    public var maxInputWords = 200
-    public var generationTimeout: TimeInterval = 12
+    public var maxInputWords = 150
+    public var generationTimeout: TimeInterval = 8
     public var maxNewTokensCap = 768
     public init() {}
 

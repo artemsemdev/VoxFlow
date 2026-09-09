@@ -11,6 +11,12 @@ actor StyleModelLoader: LLMBackend {
     private let engine: any StyleEngine
     private(set) var loadedModelID: String?
     private var loadTask: Task<Void, Never>?
+    /// Bumped every time a new load `Task` is created, and captured by that task. Lets
+    /// `load(_:generation:)`'s `defer` tell "I am still the current `loadTask`" from "a newer load
+    /// has already replaced me" without comparing `Task` values (final review I1) — needed because
+    /// `cancelLoadAndUnloadIfNeeded()` now forgets `loadTask` immediately, without awaiting it, so a
+    /// cancelled load can still be running when a fresh one starts.
+    private var loadGeneration = 0
     private static let log = Logger(subsystem: "dev.artemsem.voxflow", category: "style-model")
 
     init(store: ModelStore, engine: any StyleEngine) { self.store = store; self.engine = engine }
@@ -21,7 +27,7 @@ actor StyleModelLoader: LLMBackend {
             return false
         }
         if loadedModelID == model.id { return true }
-        if loadTask == nil { loadTask = Task { await self.load(model) } }
+        if loadTask == nil { startLoad(model) }
         return false
     }
 
@@ -29,7 +35,7 @@ actor StyleModelLoader: LLMBackend {
     /// use the LLM once the Metal shaders and weights are in memory.
     func warmUp() async {
         guard let model = await store.defaultModel(role: .style), loadedModelID != model.id else { return }
-        if loadTask == nil { loadTask = Task { await self.load(model) } }
+        if loadTask == nil { startLoad(model) }
         await loadTask?.value
     }
 
@@ -38,8 +44,16 @@ actor StyleModelLoader: LLMBackend {
         return try await engine.generate(prompt, maxNewTokens: maxNewTokens)
     }
 
-    private func load(_ model: ModelDescriptor) async {
-        defer { loadTask = nil }
+    private func startLoad(_ model: ModelDescriptor) {
+        loadGeneration += 1
+        let generation = loadGeneration
+        loadTask = Task { await self.load(model, generation: generation) }
+    }
+
+    private func load(_ model: ModelDescriptor, generation: Int) async {
+        // Only clear `loadTask` if a newer load hasn't since replaced it — `cancelLoadAndUnloadIfNeeded()`
+        // may already have forgotten this task (without waiting for it) by the time it resumes here.
+        defer { if loadGeneration == generation { loadTask = nil } }
         do {
             try await engine.load(modelAt: store.directory.appendingPathComponent(model.fileName))
             // The wrapping `Task` may have been cancelled (the model was removed, or `isReady()`
@@ -58,14 +72,16 @@ actor StyleModelLoader: LLMBackend {
         }
     }
 
-    /// Cancels and awaits any in-flight load *before* touching the engine, so `engine.unload()` never
-    /// races an in-flight `engine.load(modelAt:)` — without this, two callers that both observe "no
-    /// default model" could both call `engine.unload()` (a load's own cancellation-triggered unload
-    /// above, plus this one), or a load could finish and resurrect `loadedModelID` for a model that's
-    /// no longer installed, right after this returned.
+    /// Non-blocking (final review I1): cancels any in-flight load and forgets it immediately,
+    /// *without* awaiting it — `LlamaEngine.load` isn't cancellation-aware, so awaiting it here could
+    /// stall a dictation's `isReady()` check for an entire first-run model load (~20 s). If nothing
+    /// is loaded yet, there is nothing to unload and this returns right away. If a model was already
+    /// loaded, that `engine.unload()` call is on an already-resident model — measured fast, so it's
+    /// still safe to await. A load that's still in flight when cancelled is unloaded by
+    /// `load(_:generation:)`'s own cancelled branch above, once the (non-cancellation-aware)
+    /// `engine.load` call eventually returns on its own.
     private func cancelLoadAndUnloadIfNeeded() async {
         loadTask?.cancel()
-        await loadTask?.value
         loadTask = nil
         guard loadedModelID != nil else { return }
         loadedModelID = nil   // clear *before* the suspension: a second caller resuming here sees nothing left to unload

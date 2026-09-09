@@ -29,6 +29,32 @@ struct LlamaStylerTests {
         #expect(result.fillersRemoved == 1)
     }
 
+    @Test("casual prompt uses StylePrompts.system(for: .casual); the reply is used as the result")
+    func casualPromptIsExact() async throws {
+        let reply = "hey, can we push the meeting to thursday afternoon?"
+        let backend = FakeLLMBackend(ready: true, reply: reply)
+        let styler = makeStyler(backend: backend)
+
+        let result = try await styler.style("um can we push the meeting to thursday", options: options(style: .casual))
+
+        let prompts = await backend.prompts
+        #expect(prompts.first?.system == StylePrompts.system(for: .casual))
+        #expect(result.text == reply)
+    }
+
+    @Test("very casual prompt uses StylePrompts.system(for: .veryCasual); the reply is used as the result")
+    func veryCasualPromptIsExact() async throws {
+        let reply = "hey can we push it to thursday"
+        let backend = FakeLLMBackend(ready: true, reply: reply)
+        let styler = makeStyler(backend: backend)
+
+        let result = try await styler.style("um can we push the meeting to thursday", options: options(style: .veryCasual))
+
+        let prompts = await backend.prompts
+        #expect(prompts.first?.system == StylePrompts.system(for: .veryCasual))
+        #expect(result.text == reply)
+    }
+
     @Test("verbatim skips the backend entirely")
     func verbatimSkipsBackend() async throws {
         let backend = FakeLLMBackend(ready: true, reply: "should never be seen")
@@ -59,7 +85,7 @@ struct LlamaStylerTests {
     func overCapFallsBackToRules() async throws {
         let backend = FakeLLMBackend(ready: true, reply: "ignored")
         let styler = makeStyler(backend: backend)
-        let raw = Array(repeating: "word", count: 201).joined(separator: " ")
+        let raw = Array(repeating: "word", count: 151).joined(separator: " ")
 
         _ = try await styler.style(raw, options: options(style: .formal))
 
@@ -124,7 +150,7 @@ struct LlamaStylerTests {
 
         let task = Task { try await styler.style(raw, options: opts) }
         await clock.waitForSleepers(1)
-        await clock.advance(by: 12)
+        await clock.advance(by: 8)
         let result = try await task.value
 
         #expect(result == RuleStyler().styleSync(raw, options: opts))

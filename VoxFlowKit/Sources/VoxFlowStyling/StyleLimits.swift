@@ -1,10 +1,12 @@
 import Foundation
 import VoxFlowCore
 
-/// Ruling 2/3: when the LLM is used at all, and how much it may generate.
+/// Ruling 2/3: when the LLM is used at all, and how much it may generate. Amended in the final
+/// review (I2): 8 s / 150 words keeps the worst case (whisper's tail + generation) well inside
+/// `FlowBarConfig.processingTimeout` (20 s) instead of eating almost all of it.
 public struct StyleLimits: Sendable, Equatable {
-    public var maxInputWords = 200
-    public var generationTimeout: TimeInterval = 12
+    public var maxInputWords = 150
+    public var generationTimeout: TimeInterval = 8
     public var maxNewTokensCap = 768
     public init() {}
 

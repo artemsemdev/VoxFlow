@@ -90,7 +90,7 @@ starts, not on your first dictation's critical path.
 it installed at the path above, or `VOXFLOW_STYLE_MODEL` set to a GGUF file elsewhere:
 
 ```bash
-VOXFLOW_STYLE_MODEL=/path/to/qwen2.5-3b-instruct-q4_k_m.gguf swift test --filter LlamaEngineIntegrationTests
+cd VoxFlowKit && VOXFLOW_STYLE_MODEL=/path/to/qwen2.5-3b-instruct-q4_k_m.gguf swift test --filter LlamaEngineIntegrationTests
 ```
 
 Without either, it prints `skipped: style model not installed` and returns — this is why it's
