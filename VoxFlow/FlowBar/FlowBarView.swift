@@ -16,12 +16,14 @@ struct FlowBarView: View {
     private let source: Source
     let onOpenSettings: () -> Void
     let onCopyRaw: () -> Void
+    let onResume: () -> Void
 
     init(content: FlowBarContent, levels: [Float],
-         onOpenSettings: @escaping () -> Void = {}, onCopyRaw: @escaping () -> Void = {}) {
+         onOpenSettings: @escaping () -> Void = {}, onCopyRaw: @escaping () -> Void = {}, onResume: @escaping () -> Void = {}) {
         self.source = .fixed(content, levels: levels)
         self.onOpenSettings = onOpenSettings
         self.onCopyRaw = onCopyRaw
+        self.onResume = onResume
     }
 
     /// Production entry point — copy comes from `coordinator.state`/`elapsed`/`hotkeyMode`, re-read
@@ -31,6 +33,7 @@ struct FlowBarView: View {
         self.source = .coordinator(coordinator)
         self.onOpenSettings = { coordinator.openSettingsForCurrentError() }
         self.onCopyRaw = { coordinator.copyRaw() }
+        self.onResume = { coordinator.resume() }
     }
 
     private var content: FlowBarContent {
@@ -214,6 +217,8 @@ struct FlowBarView: View {
             .buttonStyle(.plain)
         case .copyRaw:
             pillButton("Copy raw", action: onCopyRaw)
+        case .resume:
+            pillButton("Resume", action: onResume)
         case .tryAgain:
             // fn is the action; the pill is a hint, not a control (FB-05) — no button, no action.
             // The canvas renders the trailing "fn" as plain dimmed text here, not a boxed keycap.

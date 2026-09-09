@@ -8,7 +8,7 @@ import VoxFlowDictation
 struct FlowBarContent: Hashable {
     enum DotColor: Hashable { case idle, recording, warning, error }
     enum Leading: Hashable { case dot(DotColor), spinner, check, cross, excluded }
-    enum Button: Hashable { case openSettings, download(sizeText: String), tryAgain, copyRaw }
+    enum Button: Hashable { case openSettings, download(sizeText: String), tryAgain, copyRaw, resume }
     enum Trailing: Hashable { case keycap(String), languageChip(String), button(Button) }
 
     var leading: Leading
@@ -107,6 +107,13 @@ struct FlowBarContent: Hashable {
         case .error(let message):
             return FlowBarContent(leading: .dot(.error), title: message, subtitle: nil, showsWaveform: false,
                                    timer: nil, timerIsAmber: false, trailing: .button(.openSettings))
+
+        case .paused(let until):
+            // FB-09 "Paused · 58 min left · Resume". `until` and `elapsed` share the controller's monotonic
+            // clock: the caller passes `now` as `elapsed` for this state (phase 4b Task 4 wires it).
+            let minutesLeft = max(0, Int(((until - elapsed) / 60).rounded(.up)))
+            return FlowBarContent(leading: .dot(.warning), title: "Paused", subtitle: "\(minutesLeft) min left",
+                                   showsWaveform: false, timer: nil, timerIsAmber: false, trailing: .button(.resume))
         }
     }
 

@@ -31,6 +31,8 @@ struct FlowBarContentTests {
         let didnt = FlowBarContent.make(state: .didntCatch(rawAvailable: false), elapsed: 0, mode: .pushToTalk)
         #expect(didnt.leading == .dot(.warning) && didnt.title == "Didn't catch that" && didnt.trailing == .button(.tryAgain))
         #expect(FlowBarContent.make(state: .didntCatch(rawAvailable: true), elapsed: 0, mode: .pushToTalk).trailing == .button(.copyRaw))
+        let paused = FlowBarContent.make(state: .paused(until: 3600), elapsed: 120, mode: .pushToTalk)
+        #expect(paused.leading == .dot(.warning) && paused.title == "Paused" && paused.subtitle == "58 min left" && paused.trailing == .button(.resume))
         #expect(FlowBarContent.make(state: .discarded, elapsed: 0, mode: .pushToTalk) == FlowBarContent(leading: .cross, title: "Discarded", subtitle: nil, showsWaveform: false, timer: nil, timerIsAmber: false, trailing: nil))
         let mic = FlowBarContent.make(state: .micUnavailable(.denied), elapsed: 0, mode: .pushToTalk)
         #expect(mic.leading == .dot(.error) && mic.title == "Microphone access needed" && mic.trailing == .button(.openSettings))
