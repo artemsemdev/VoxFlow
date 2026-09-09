@@ -96,4 +96,35 @@ struct GeneralViewModelTests {
         #expect(h.vm.launchAtLogin == true)                // snapped back to true, not false
         #expect(h.settings.launchAtLogin == true)
     }
+
+    @Test("init reads launchAtLogin from LoginItemControlling.isEnabled, not the persisted setting, and reconciles the persisted value (I3)")
+    func initReconcilesFromRealStatus() {
+        // `GeneralSettings.launchAtLogin` defaults to false; a fake reporting the opposite (true)
+        // must win — this is exactly the drift ruling 4 / design 3d "Toggles" is trying to prevent,
+        // just on the read side instead of the write side. Built by hand (not via `Harness`) so the
+        // persisted value can be inspected *before* `GeneralViewModel.init` reconciles it.
+        let settings = GeneralSettings(store: InMemoryKeyValueStore())
+        #expect(settings.launchAtLogin == false)   // sanity: nothing set it yet
+        let loginItem = FakeLoginItem(isEnabled: true)
+
+        let vm = GeneralViewModel(settings: settings, dictationSettings: DictationSettings(store: InMemoryKeyValueStore()),
+                                  loginItem: loginItem, appearanceApplier: FakeAppearanceApplying(), flowBarPositioning: FakeFlowBarPositioning())
+        #expect(vm.launchAtLogin == true)          // reads the system, not the stale persisted `false`
+        #expect(settings.launchAtLogin == true)    // and reconciles the persisted value too
+    }
+
+    @Test("refreshLaunchAtLogin() re-reads LoginItemControlling.isEnabled, picking up a status change made outside VoxFlow (I3)")
+    func refreshPicksUpExternalChange() throws {
+        let h = Harness(loginItemEnabled: false)
+        #expect(h.vm.launchAtLogin == false)
+
+        // Simulates the registration changing by some means other than `vm.setLaunchAtLogin` (System
+        // Settings › Login Items, or a revoked registration) — not yet reflected in the view model.
+        try h.loginItem.setEnabled(true)
+        #expect(h.vm.launchAtLogin == false)
+
+        h.vm.refreshLaunchAtLogin()
+        #expect(h.vm.launchAtLogin == true)
+        #expect(h.settings.launchAtLogin == true)
+    }
 }

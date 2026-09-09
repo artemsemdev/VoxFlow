@@ -9,6 +9,10 @@ struct GeneralSettingsView: View {
     var body: some View {
         ScrollView { GeneralSettingsBody(general: general) }
             .frame(maxWidth: .infinity)
+            // I3: re-reads the real `SMAppService` status every time this tab appears, catching a
+            // status that changed since launch (System Settings › Login Items, or a revoked
+            // registration) without needing a relaunch.
+            .task { general.refreshLaunchAtLogin() }
     }
 }
 

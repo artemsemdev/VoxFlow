@@ -55,13 +55,28 @@ final class GeneralViewModel {
         self.loginItem = loginItem
         self.appearanceApplier = appearanceApplier
         self.flowBarPositioning = flowBarPositioning
-        launchAtLogin = settings.launchAtLogin
+        launchAtLogin = settings.launchAtLogin   // placeholder until every stored property is set — reconciled below
 
         // Apply the persisted appearance/position immediately — `SettingsServices` builds this VM
         // lazily (Task 3 scope: no `AppServices` wiring yet), so this is the first point either
         // adapter hears about the saved choice this launch.
         appearanceApplier.apply(settings.appearance)
         flowBarPositioning.apply(settings.flowBarPosition)
+
+        // I3: the persisted toggle can drift from the real `SMAppService` registration (disabled
+        // under System Settings › Login Items, or revoked after a move/re-sign) — read the actual
+        // status at construction, not just the last value this app wrote.
+        refreshLaunchAtLogin()
+    }
+
+    /// I3: re-reads `loginItem.isEnabled` and reconciles `launchAtLogin`/the persisted setting to
+    /// match — called once at construction and again from `GeneralSettingsView`'s `.task` every
+    /// time the General tab appears, so a status that changed since launch (or since the tab was
+    /// last open) shows up without needing a relaunch.
+    func refreshLaunchAtLogin() {
+        let actual = loginItem.isEnabled
+        launchAtLogin = actual
+        settings.launchAtLogin = actual
     }
 
     /// ST-01 "Launch at login" — registers/unregisters through `loginItem`; on failure (e.g. the
