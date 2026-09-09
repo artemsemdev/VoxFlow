@@ -86,6 +86,9 @@ struct MCPSettingsBody: View {
                 Text(mcp.maskedToken).font(.caption.monospaced()).foregroundStyle(.secondary)
             }
             Spacer()
+            // Review fix (Task 3 minor 1): `copyToken()` already existed and was already tested
+            // (`MCPViewModelTests.copyToken`) but had no button calling it anywhere in the view.
+            Button("Copy") { mcp.copyToken() }.buttonStyle(.bordered).controlSize(.small)
             Button("Regenerate") { mcp.requestRegenerate() }.buttonStyle(.bordered).controlSize(.small)
         }
         .padding(.horizontal, 16)
@@ -122,10 +125,13 @@ struct MCPSettingsBody: View {
         .padding(.vertical, 10)
     }
 
+    /// Review fix (Task 3 minor 2): matches against `MCPViewModel.tools`' own entries — the single
+    /// source of truth for which id is which tool — instead of repeating `"transcribe_file"`/
+    /// `"dictate"` as separate literals here, which could silently drift from `MCPViewModel.tools`.
     private func toolBinding(_ tool: MCPViewModel.Tool, settings: MCPSettings) -> Binding<Bool> {
         switch tool.id {
-        case "transcribe_file": Binding(get: { settings.toolTranscribeFile }, set: { settings.toolTranscribeFile = $0 })
-        case "dictate": Binding(get: { settings.toolDictate }, set: { settings.toolDictate = $0 })
+        case MCPViewModel.tools[0].id: Binding(get: { settings.toolTranscribeFile }, set: { settings.toolTranscribeFile = $0 })
+        case MCPViewModel.tools[1].id: Binding(get: { settings.toolDictate }, set: { settings.toolDictate = $0 })
         default: Binding(get: { settings.toolSearchHistory }, set: { settings.toolSearchHistory = $0 })
         }
     }

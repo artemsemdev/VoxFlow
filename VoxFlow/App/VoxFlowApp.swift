@@ -48,16 +48,16 @@ struct VoxFlowApp: App {
                     navigation.page = .files
                     navigation.requestFileImport = true
                 }
-                .keyboardShortcut("o")
+                // ⇧⌘O (review fix, Task 4/5): plain ⌘O is "Open VoxFlow" below (the menu bar
+                // dropdown's own item, ruling 9) — the two are genuinely different actions and can't
+                // share one keystroke, so File › Open… moves off it instead of silently losing to
+                // whichever `CommandGroup` AppKit resolves ties toward.
+                .keyboardShortcut("o", modifiers: [.command, .shift])
             }
             // Ruling 9: the menu bar dropdown's own items ("Open VoxFlow ⌘O", "History ⌥⌘H",
             // "Settings… ⌘,") declared app-wide too, so they work whether or not the dropdown is
             // open. "Quit VoxFlow ⌘Q" needs no separate declaration — every macOS app already gets
             // that for free in its own App menu.
-            //
-            // Known residual: "Open VoxFlow" ⌘O sits in a different `CommandGroup` than File ›
-            // "Open…" (also ⌘O, above) — the two are genuinely different actions sharing one
-            // keystroke; see the task report.
             CommandGroup(after: .appInfo) {
                 Button("Open VoxFlow") { navigation.requestMainWindow = true }
                     .keyboardShortcut("o", modifiers: .command)
