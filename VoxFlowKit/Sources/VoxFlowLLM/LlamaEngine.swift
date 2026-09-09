@@ -7,7 +7,6 @@ import llama
 public actor LlamaEngine: StyleEngine {
     private let queue = DispatchQueue(label: "dev.artemsem.voxflow.llama", qos: .userInitiated)
     private let parameters: LlamaParameters
-    private var model: ModelBox?
     private var context: ContextBox?
     private static let backendInit: Void = { llama_backend_init() }()
 
@@ -15,28 +14,35 @@ public actor LlamaEngine: StyleEngine {
         self.parameters = parameters
     }
 
-    /// Owns the `llama_model` pointer and frees it when the engine (or an in-flight run) lets go.
+    /// Owns the `llama_model` pointer. Whoever drops the last reference (the actor, or an in-flight
+    /// run) may do so on any executor, so `deinit` does not free in place: it enqueues the free on
+    /// `queue`, behind every run already queued — the only place llama.cpp objects are ever touched.
     final class ModelBox: @unchecked Sendable {
-        // Safe: the pointer is only dereferenced on LlamaEngine.queue while runs are in flight, and
-        // `load`/`unload` always drop their last reference inside `release(model:context:)`'s
-        // `onQueue` body, so `llama_model_free` always runs on `queue`, never on the actor's
-        // cooperative executor.
+        // Safe: `pointer` is immutable and only dereferenced on LlamaEngine.queue; the free is
+        // enqueued from deinit, so no executor other than `queue` ever calls into llama.cpp.
         let pointer: OpaquePointer
-        init(_ pointer: OpaquePointer) { self.pointer = pointer }
-        deinit { llama_model_free(pointer) }
+        private let queue: DispatchQueue
+        init(_ pointer: OpaquePointer, queue: DispatchQueue) { self.pointer = pointer; self.queue = queue }
+        deinit {
+            let address = UInt(bitPattern: pointer)   // OpaquePointer is not Sendable; the address is
+            queue.async { llama_model_free(OpaquePointer(bitPattern: address)) }
+        }
     }
 
+    /// Owns the `llama_context` pointer and keeps its `ModelBox` alive, so the context is always
+    /// freed (enqueued) before the model it was created from.
     final class ContextBox: @unchecked Sendable {
-        // Safe: same rule as ModelBox — only touched on LlamaEngine.queue, and its last reference is
-        // always dropped inside `release(model:context:)`'s `onQueue` body, so `llama_free` always
-        // runs on `queue`.
+        // Safe: same rule as ModelBox — immutable pointer, dereferenced only on `queue`, freed on `queue`.
         let pointer: OpaquePointer
-        init(_ pointer: OpaquePointer) { self.pointer = pointer }
-        deinit { llama_free(pointer) }
+        let model: ModelBox
+        private let queue: DispatchQueue
+        init(_ pointer: OpaquePointer, model: ModelBox, queue: DispatchQueue) { self.pointer = pointer; self.model = model; self.queue = queue }
+        deinit {
+            let address = UInt(bitPattern: pointer)
+            queue.async { llama_free(OpaquePointer(bitPattern: address)) }
+        }
     }
 
-    /// Set from `withTaskCancellationHandler`'s onCancel (any thread) and read on `queue` between
-    /// decode steps — the lock is the whole synchronisation, same as `WhisperCppEngine.CancelFlag`.
     final class CancelFlag: @unchecked Sendable {
         private let lock = NSLock()
         private var flag = false
@@ -49,49 +55,31 @@ public actor LlamaEngine: StyleEngine {
     public func load(modelAt url: URL) async throws {
         let path = url.path
         let parameters = parameters
-        let boxes: (ModelBox, ContextBox) = try await onQueue {
+        let queue = queue
+        let box: ContextBox = try await onQueue {
             _ = Self.backendInit
             var modelParams = llama_model_default_params()
             modelParams.n_gpu_layers = parameters.gpuLayers
             guard let model = llama_model_load_from_file(path, modelParams) else { throw LLMError.modelLoadFailed(path) }
-            let modelBox = ModelBox(model)
+            let modelBox = ModelBox(model, queue: queue)
             var contextParams = llama_context_default_params()
             contextParams.n_ctx = UInt32(parameters.contextTokens)
             contextParams.n_batch = UInt32(parameters.batchTokens)
             contextParams.n_threads = parameters.threadCount
             contextParams.n_threads_batch = parameters.threadCount
             guard let context = llama_init_from_model(model, contextParams) else { throw LLMError.modelLoadFailed(path) }
-            return (modelBox, ContextBox(context))
+            return ContextBox(context, model: modelBox, queue: queue)
         }
-        let previousModel = model
-        let previousContext = context
-        context = nil
-        model = boxes.0
-        context = boxes.1
-        await release(model: previousModel, context: previousContext)
+        context = box   // the previous box (if any) is released here; its deinit enqueues the frees on `queue`
     }
 
     public func unload() async {
-        let previousModel = model
-        let previousContext = context
-        model = nil
         context = nil
-        await release(model: previousModel, context: previousContext)
-    }
-
-    /// Drops the last strong reference to `model`/`context` inside an `onQueue` body, so their
-    /// `deinit` (`llama_free` / `llama_model_free`) runs on `queue`, never synchronously on the
-    /// actor's cooperative executor. The caller has already nilled its own stored properties, so
-    /// these two parameters are the only remaining references — unless an in-flight `generate()`
-    /// still holds one, in which case its own reference keeps the box alive until that run finishes,
-    /// which is what makes a concurrent `unload()` safe.
-    private func release(model: ModelBox?, context: ContextBox?) async {
-        guard model != nil || context != nil else { return }
-        try? await onQueue { _ = (model, context) }
     }
 
     public func generate(_ prompt: ChatPrompt, maxNewTokens: Int) async throws -> String {
-        guard let model, let context else { throw LLMError.modelNotLoaded }
+        guard let context else { throw LLMError.modelNotLoaded }
+        let model = context.model
         let limit = Int(parameters.contextTokens)
         let cancel = CancelFlag()
         return try await withTaskCancellationHandler {
