@@ -8,26 +8,53 @@ public final class SnippetStore: Sendable {
 
     public init(database: VoxFlowDatabase) { queue = database.queue }
 
-    /// Throws `StorageError.duplicate(existingID:)` when a row with the same folded trigger already exists.
+    /// Throws `StorageError.duplicate(existingID:)` when a row with the same folded trigger already
+    /// exists. The `find` is a fast pre-check; the `trigger_folded` `UNIQUE` column is the real
+    /// enforcement, so a `SQLITE_CONSTRAINT_UNIQUE` from the write itself (e.g. a race between two
+    /// inserts) is also caught and translated — callers never see a raw `GRDB.DatabaseError`.
     @discardableResult
     public func insert(trigger: String, body: String, onlyIn: (bundleID: String, appName: String)? = nil) throws -> Snippet {
         if let existing = try find(trigger: trigger) { throw StorageError.duplicate(existingID: existing.id) }
         let createdAt = Date()
-        let id: Int64 = try queue.write { db in
-            try db.execute(
-                sql: "INSERT INTO snippets (trigger, trigger_folded, body, only_in_bundle_id, only_in_app_name, uses, created_at) VALUES (?,?,?,?,?,0,?)",
-                arguments: [trigger, trigger.foldedForMatching, body, onlyIn?.bundleID, onlyIn?.appName, createdAt.timeIntervalSince1970])
-            return db.lastInsertedRowID
+        do {
+            let id: Int64 = try queue.write { db in
+                try db.execute(
+                    sql: "INSERT INTO snippets (trigger, trigger_folded, body, only_in_bundle_id, only_in_app_name, uses, created_at) VALUES (?,?,?,?,?,0,?)",
+                    arguments: [trigger, trigger.foldedForMatching, body, onlyIn?.bundleID, onlyIn?.appName, createdAt.timeIntervalSince1970])
+                return db.lastInsertedRowID
+            }
+            return Snippet(id: id, trigger: trigger, body: body, onlyInBundleID: onlyIn?.bundleID, onlyInAppName: onlyIn?.appName, uses: 0, createdAt: createdAt)
+        } catch let error as DatabaseError where error.extendedResultCode == .SQLITE_CONSTRAINT_UNIQUE {
+            throw try duplicateError(forFoldedTrigger: trigger.foldedForMatching, excluding: nil)
         }
-        return Snippet(id: id, trigger: trigger, body: body, onlyInBundleID: onlyIn?.bundleID, onlyInAppName: onlyIn?.appName, uses: 0, createdAt: createdAt)
     }
 
+    /// Throws `StorageError.duplicate(existingID:)` when the edited trigger folds to a value
+    /// another row already owns (a case/diacritic variant of the snippet's own current value is
+    /// not a collision, since `UPDATE` never conflicts with itself).
     public func update(_ snippet: Snippet) throws {
-        try queue.write { db in
-            try db.execute(
-                sql: "UPDATE snippets SET trigger = ?, trigger_folded = ?, body = ?, only_in_bundle_id = ?, only_in_app_name = ?, uses = ? WHERE id = ?",
-                arguments: [snippet.trigger, snippet.trigger.foldedForMatching, snippet.body, snippet.onlyInBundleID, snippet.onlyInAppName, snippet.uses, snippet.id])
+        do {
+            try queue.write { db in
+                try db.execute(
+                    sql: "UPDATE snippets SET trigger = ?, trigger_folded = ?, body = ?, only_in_bundle_id = ?, only_in_app_name = ?, uses = ? WHERE id = ?",
+                    arguments: [snippet.trigger, snippet.trigger.foldedForMatching, snippet.body, snippet.onlyInBundleID, snippet.onlyInAppName, snippet.uses, snippet.id])
+            }
+        } catch let error as DatabaseError where error.extendedResultCode == .SQLITE_CONSTRAINT_UNIQUE {
+            throw try duplicateError(forFoldedTrigger: snippet.trigger.foldedForMatching, excluding: snippet.id)
         }
+    }
+
+    /// Looks up the row already holding `folded` (optionally excluding one id) to report in
+    /// `StorageError.duplicate(existingID:)` after a `UNIQUE` violation.
+    private func duplicateError(forFoldedTrigger folded: String, excluding id: Int64?) throws -> StorageError {
+        let existingID: Int64? = try queue.read { db in
+            if let id {
+                try Int64.fetchOne(db, sql: "SELECT id FROM snippets WHERE trigger_folded = ? AND id != ?", arguments: [folded, id])
+            } else {
+                try Int64.fetchOne(db, sql: "SELECT id FROM snippets WHERE trigger_folded = ?", arguments: [folded])
+            }
+        }
+        return .duplicate(existingID: existingID ?? id ?? 0)
     }
 
     public func delete(id: Int64) throws {

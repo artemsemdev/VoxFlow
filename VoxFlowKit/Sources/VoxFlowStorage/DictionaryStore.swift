@@ -9,26 +9,53 @@ public final class DictionaryStore: Sendable {
 
     public init(database: VoxFlowDatabase) { queue = database.queue }
 
-    /// Throws `StorageError.duplicate(existingID:)` when a row with the same folded word already exists.
+    /// Throws `StorageError.duplicate(existingID:)` when a row with the same folded word already
+    /// exists. The `find` is a fast pre-check; the `word_folded` `UNIQUE` column is the real
+    /// enforcement, so a `SQLITE_CONSTRAINT_UNIQUE` from the write itself (e.g. a race between two
+    /// inserts) is also caught and translated — callers never see a raw `GRDB.DatabaseError`.
     @discardableResult
     public func insert(word: String, soundsLike: String?, type: DictionaryEntryType, fixTyping: Bool, source: String = "user") throws -> DictionaryEntry {
         if let existing = try find(word: word) { throw StorageError.duplicate(existingID: existing.id) }
         let createdAt = Date()
-        let id: Int64 = try queue.write { db in
-            try db.execute(
-                sql: "INSERT INTO dictionary (word, word_folded, sounds_like, type, fix_typing, source, uses, created_at) VALUES (?,?,?,?,?,?,0,?)",
-                arguments: [word, word.foldedForMatching, soundsLike, type.rawValue, fixTyping, source, createdAt.timeIntervalSince1970])
-            return db.lastInsertedRowID
+        do {
+            let id: Int64 = try queue.write { db in
+                try db.execute(
+                    sql: "INSERT INTO dictionary (word, word_folded, sounds_like, type, fix_typing, source, uses, created_at) VALUES (?,?,?,?,?,?,0,?)",
+                    arguments: [word, word.foldedForMatching, soundsLike, type.rawValue, fixTyping, source, createdAt.timeIntervalSince1970])
+                return db.lastInsertedRowID
+            }
+            return DictionaryEntry(id: id, word: word, soundsLike: soundsLike, type: type, fixTyping: fixTyping, source: source, uses: 0, createdAt: createdAt)
+        } catch let error as DatabaseError where error.extendedResultCode == .SQLITE_CONSTRAINT_UNIQUE {
+            throw try duplicateError(forFoldedWord: word.foldedForMatching, excluding: nil)
         }
-        return DictionaryEntry(id: id, word: word, soundsLike: soundsLike, type: type, fixTyping: fixTyping, source: source, uses: 0, createdAt: createdAt)
     }
 
+    /// Throws `StorageError.duplicate(existingID:)` when the edited word folds to a value another
+    /// row already owns (a case/diacritic variant of the entry's own current value is not a
+    /// collision, since `UPDATE` never conflicts with itself).
     public func update(_ entry: DictionaryEntry) throws {
-        try queue.write { db in
-            try db.execute(
-                sql: "UPDATE dictionary SET word = ?, word_folded = ?, sounds_like = ?, type = ?, fix_typing = ?, source = ?, uses = ? WHERE id = ?",
-                arguments: [entry.word, entry.word.foldedForMatching, entry.soundsLike, entry.type.rawValue, entry.fixTyping, entry.source, entry.uses, entry.id])
+        do {
+            try queue.write { db in
+                try db.execute(
+                    sql: "UPDATE dictionary SET word = ?, word_folded = ?, sounds_like = ?, type = ?, fix_typing = ?, source = ?, uses = ? WHERE id = ?",
+                    arguments: [entry.word, entry.word.foldedForMatching, entry.soundsLike, entry.type.rawValue, entry.fixTyping, entry.source, entry.uses, entry.id])
+            }
+        } catch let error as DatabaseError where error.extendedResultCode == .SQLITE_CONSTRAINT_UNIQUE {
+            throw try duplicateError(forFoldedWord: entry.word.foldedForMatching, excluding: entry.id)
         }
+    }
+
+    /// Looks up the row already holding `folded` (optionally excluding one id) to report in
+    /// `StorageError.duplicate(existingID:)` after a `UNIQUE` violation.
+    private func duplicateError(forFoldedWord folded: String, excluding id: Int64?) throws -> StorageError {
+        let existingID: Int64? = try queue.read { db in
+            if let id {
+                try Int64.fetchOne(db, sql: "SELECT id FROM dictionary WHERE word_folded = ? AND id != ?", arguments: [folded, id])
+            } else {
+                try Int64.fetchOne(db, sql: "SELECT id FROM dictionary WHERE word_folded = ?", arguments: [folded])
+            }
+        }
+        return .duplicate(existingID: existingID ?? id ?? 0)
     }
 
     public func delete(id: Int64) throws {

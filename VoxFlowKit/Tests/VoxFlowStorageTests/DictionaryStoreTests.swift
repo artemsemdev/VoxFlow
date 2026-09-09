@@ -40,6 +40,28 @@ struct DictionaryStoreTests {
         #expect(try store.find(word: "term")?.word == "Term")
     }
 
+    @Test("update to another row's folded word throws .duplicate with that row's id, not a raw DatabaseError")
+    func updateCollidesWithAnotherRow() throws {
+        let store = try store()
+        let kept = try store.insert(word: "Kubernetes", soundsLike: nil, type: .term, fixTyping: false)
+        var toRename = try store.insert(word: "Docker", soundsLike: nil, type: .term, fixTyping: false)
+        toRename.word = "kubernetes"
+        #expect(throws: StorageError.duplicate(existingID: kept.id)) {
+            try store.update(toRename)
+        }
+        // the write did not go through: the original row is untouched.
+        #expect(try store.find(word: "docker")?.word == "Docker")
+    }
+
+    @Test("update to a case variant of its own value succeeds")
+    func updateToOwnCaseVariantSucceeds() throws {
+        let store = try store()
+        var entry = try store.insert(word: "term", soundsLike: nil, type: .term, fixTyping: false)
+        entry.word = "TERM"
+        try store.update(entry)
+        #expect(try store.find(word: "term")?.word == "TERM")
+    }
+
     @Test("delete removes the row")
     func delete() throws {
         let store = try store()

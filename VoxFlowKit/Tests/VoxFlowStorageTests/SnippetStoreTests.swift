@@ -33,6 +33,27 @@ struct SnippetStoreTests {
         #expect(try store.find(trigger: "sig")?.body == "new")
     }
 
+    @Test("update to another row's folded trigger throws .duplicate with that row's id, not a raw DatabaseError")
+    func updateCollidesWithAnotherRow() throws {
+        let store = try store()
+        let kept = try store.insert(trigger: "sig", body: "Best, A")
+        var toRename = try store.insert(trigger: "addr", body: "123 Main St")
+        toRename.trigger = "SIG"
+        #expect(throws: StorageError.duplicate(existingID: kept.id)) {
+            try store.update(toRename)
+        }
+        #expect(try store.find(trigger: "addr")?.body == "123 Main St")
+    }
+
+    @Test("update to a case variant of its own value succeeds")
+    func updateToOwnCaseVariantSucceeds() throws {
+        let store = try store()
+        var snippet = try store.insert(trigger: "sig", body: "x")
+        snippet.trigger = "SIG"
+        try store.update(snippet)
+        #expect(try store.find(trigger: "sig")?.trigger == "SIG")
+    }
+
     @Test("delete removes the row")
     func delete() throws {
         let store = try store()
