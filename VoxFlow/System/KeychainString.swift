@@ -1,4 +1,5 @@
 import Foundation
+import os
 import Security
 
 /// A minimal generic-password Keychain reader/writer for app-level string secrets.
@@ -7,6 +8,8 @@ import Security
 /// currently only used for the MCP access token (design ST-06, `dev.artemsem.voxflow` /
 /// `mcp-token`).
 enum KeychainString {
+    private static let log = Logger(subsystem: "dev.artemsem.voxflow", category: "keychain")
+
     static func read(service: String, account: String) throws -> String? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -37,6 +40,15 @@ enum KeychainString {
             addQuery[kSecValueData as String] = data
             addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
             let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
+            if addStatus == errSecDuplicateItem {
+                // M2: `SecItemUpdate` just reported `errSecItemNotFound` for this exact query, yet
+                // `SecItemAdd` says the item already exists — the item is present but unreadable/
+                // unwritable under the current signing identity (e.g. a changing ad-hoc dev
+                // identity). Logged specifically (not just the generic throw below) so this is
+                // visible in Console instead of silently regenerating an in-memory-only token on
+                // every launch with no signal.
+                Self.log.error("Keychain item exists but is unreadable under the current signing identity (service: \(service, privacy: .public), account: \(account, privacy: .public)) — value will not persist across relaunch")
+            }
             guard addStatus == errSecSuccess else { throw KeychainStringError.status(addStatus) }
             return
         }

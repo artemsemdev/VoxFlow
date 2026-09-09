@@ -6,7 +6,9 @@ import VoxFlowDictation
 /// without a real `NSPanel` or a `Task.sleep`.
 enum MenuBarHintPolicy {
     /// Shown once, right after onboarding finishes — never again once `hintShown` is persisted.
-    static func shouldShow(hintShown: Bool) -> Bool { !hintShown }
+    /// M4: also gated on `showInMenuBar` — someone who turned the menu bar item off before
+    /// finishing onboarding must not get a hint pointing at an empty menu bar.
+    static func shouldShow(hintShown: Bool, showInMenuBar: Bool) -> Bool { !hintShown && showInMenuBar }
 
     /// Auto-dismisses the instant a real dictation starts (fn pressed, or already listening) — not
     /// any other Flow Bar activity (e.g. an error/warning pill from a previous, already-dismissed

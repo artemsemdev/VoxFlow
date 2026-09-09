@@ -34,6 +34,13 @@ public final class DictationStore: Sendable {
 
     public static var defaultURL: URL { VoxFlowDatabase.defaultURL }
 
+    /// M3: how far back `streak(endingAt:calendar:)` looks. The unbounded query used to pull every
+    /// row ever written into memory on every `refresh()` (every Home navigation and every history
+    /// change) just to test for a break in the last few days' worth of dictations. A genuine streak
+    /// longer than this many consecutive days is effectively unreachable, so capping the lookback
+    /// trades that edge case for a query that can never grow with the whole table's history.
+    public static let streakLookbackDays = 400
+
     public convenience init(databaseURL: URL, keyProvider: (any HistoryKeyProviding)?) throws {
         try self.init(database: VoxFlowDatabase(url: databaseURL), keyProvider: keyProvider)
     }
@@ -133,8 +140,11 @@ public final class DictationStore: Sendable {
     public func streak(endingAt: Date, calendar: Calendar) throws -> Int {
         let today = calendar.startOfDay(for: endingAt)
         guard let rangeEnd = calendar.date(byAdding: .day, value: 1, to: today) else { return 0 }
+        // M3: bounded to `streakLookbackDays` — see that constant's doc comment.
+        let rangeStart = calendar.date(byAdding: .day, value: -Self.streakLookbackDays, to: today) ?? .distantPast
         let timestamps = try queue.read { db in
-            try Double.fetchAll(db, sql: "SELECT created_at FROM dictations WHERE created_at < ?", arguments: [rangeEnd.timeIntervalSince1970])
+            try Double.fetchAll(db, sql: "SELECT created_at FROM dictations WHERE created_at >= ? AND created_at < ?",
+                                arguments: [rangeStart.timeIntervalSince1970, rangeEnd.timeIntervalSince1970])
         }
         let daysWithDictation = Set(timestamps.map { calendar.startOfDay(for: Date(timeIntervalSince1970: $0)) })
         var streak = 0

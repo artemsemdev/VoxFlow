@@ -6,8 +6,14 @@ import VoxFlowDictation
 struct MenuBarHintPolicyTests {
     @Test("shouldShow: only once — true until hintShown is persisted, then never again")
     func shouldShow() {
-        #expect(MenuBarHintPolicy.shouldShow(hintShown: false))
-        #expect(!MenuBarHintPolicy.shouldShow(hintShown: true))
+        #expect(MenuBarHintPolicy.shouldShow(hintShown: false, showInMenuBar: true))
+        #expect(!MenuBarHintPolicy.shouldShow(hintShown: true, showInMenuBar: true))
+    }
+
+    @Test("shouldShow: never when the menu bar item itself is off (M4) — even if it hasn't been shown yet")
+    func shouldShowGatedOnShowInMenuBar() {
+        #expect(!MenuBarHintPolicy.shouldShow(hintShown: false, showInMenuBar: false))
+        #expect(!MenuBarHintPolicy.shouldShow(hintShown: true, showInMenuBar: false))
     }
 
     @Test("shouldDismiss: the first sign of a real dictation (armed/tapped/listening) dismisses; everything else doesn't")

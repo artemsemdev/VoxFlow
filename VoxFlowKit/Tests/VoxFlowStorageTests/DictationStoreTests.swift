@@ -183,6 +183,20 @@ struct DictationStoreTests {
         #expect(try onlyYesterday.streak(endingAt: today, calendar: calendar) == 0)   // nothing today: no streak
     }
 
+    @Test("streak is bounded to streakLookbackDays: a row far outside the window doesn't affect the result (M3)")
+    func streakIsBoundedToLookbackWindow() throws {
+        let calendar = Self.utcCalendar()
+        let today = calendar.date(from: DateComponents(year: 2026, month: 9, day: 9, hour: 10))!
+        let store = try DictationStore(inMemoryWith: nil)
+        _ = try store.insert(draft("today", at: today, app: nil))
+        // Well outside the lookback window — the unbounded query used to pull this into memory on
+        // every `streak()` call; it must have no bearing on today's (unbroken, 1-day) streak.
+        let longAgo = calendar.date(byAdding: .day, value: -(DictationStore.streakLookbackDays + 50), to: today)!
+        _ = try store.insert(draft("long ago", at: longAgo, app: nil))
+
+        #expect(try store.streak(endingAt: today, calendar: calendar) == 1)
+    }
+
     @Test("a key provider reporting a freshly-created key over an already-encrypted database throws keyLost; the existing key still works")
     func lostKeyIsDetected() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)

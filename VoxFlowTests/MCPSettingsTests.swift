@@ -1,3 +1,5 @@
+import Observation
+import Synchronization
 import Testing
 import VoxFlowTestSupport
 @testable import VoxFlow
@@ -83,5 +85,21 @@ struct MCPSettingsTests {
         #expect(token.hasPrefix("vf_"))
         #expect(tokenStore.stored == nil)       // write failed, nothing persisted
         #expect(s.token == token)               // still cached in-memory though
+    }
+
+    @Test("maskedToken's first read doesn't self-invalidate: caching cachedToken lazily must not fire Observation's change handler on the very read that populates it (M1)")
+    func maskedTokenReadDoesNotSelfInvalidateObservation() async {
+        let s = MCPSettings(store: InMemoryKeyValueStore(), token: FakeTokenStore())
+        let changed = Mutex(false)
+        withObservationTracking {
+            _ = s.maskedToken
+        } onChange: {
+            changed.withLock { $0 = true }
+        }
+        // Bounded, non-sleeping wait: a real self-invalidation notifies very soon after the tracked
+        // closure returns (the exact mid-render mutation `MCPSettingsView` was hitting) — nothing
+        // should ever flip `changed` here.
+        for _ in 0..<50 { await Task.yield() }
+        #expect(changed.withLock { $0 } == false)
     }
 }

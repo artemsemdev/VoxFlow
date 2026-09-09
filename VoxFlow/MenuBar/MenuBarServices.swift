@@ -23,7 +23,8 @@ final class MenuBarServices {
     /// MB-00: shown once, right after onboarding finishes (`OnboardingViewModel.onFinished`, wired
     /// to this from `OnboardingWindow.onAppear`) — no-ops if it's already been shown.
     func showHintIfNeeded() {
-        guard hintPanel == nil, MenuBarHintPolicy.shouldShow(hintShown: AppServices.shared.onboardingState.hintShown) else { return }
+        guard hintPanel == nil, MenuBarHintPolicy.shouldShow(hintShown: AppServices.shared.onboardingState.hintShown,
+                                                              showInMenuBar: AppServices.shared.generalSettings.showInMenuBar) else { return }
         let panel = MenuBarHintPanel(onGotIt: { [weak self] in self?.dismissHint() })
         hintPanel = panel
         panel.show()

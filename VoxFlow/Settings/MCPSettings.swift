@@ -28,7 +28,12 @@ struct KeychainTokenStore: TokenStoring {
 final class MCPSettings {
     private let store: any KeyValueStore
     private let tokenStore: any TokenStoring
-    private var cachedToken: String?
+    /// M1: `token`'s getter writes this lazily on first read, including from inside a SwiftUI
+    /// `body` (`MCPSettingsView` reads `mcp.maskedToken`) — without `@ObservationIgnored`, that
+    /// first render mutates `@Observable`-tracked state mid-update. Nothing outside `token`/
+    /// `maskedToken`/`regenerate()` needs this to be observed; those already publish through
+    /// `token`'s return value.
+    @ObservationIgnored private var cachedToken: String?
 
     enum Keys {
         static let enabled = "mcp.enabled"

@@ -18,7 +18,11 @@ struct MenuBarView: View {
                 statsRow
             }
             if let downloading = viewModel.downloading {
-                Divider().padding(.horizontal, 14)
+                // M7: no divider between "Resume dictation" and "Downloading …" — canvas page 8
+                // shows those two adjacent with no rule when both apply at once.
+                if !viewModel.isPaused {
+                    Divider().padding(.horizontal, 14)
+                }
                 downloadingRow(downloading)
             }
             Divider().padding(.horizontal, 14)
