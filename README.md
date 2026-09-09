@@ -25,20 +25,29 @@ any app, style cleanup with a local LLM and an MCP server follow in 2.x (see the
 - Everything on this Mac: audio is processed in memory and discarded; the only network action is a
   model download you start. No account, no analytics.
 
-### Dictation (`develop`, in progress toward 2.1.0)
+### Dictation (`develop`, in progress toward 2.2.0)
 
 - Hold fn anywhere to dictate (double-tap for hands-free); a floating Flow Bar HUD shows listening,
   processing and the result. Recognized text is inserted into the focused field via Accessibility,
   or copied to the clipboard when there isn't a text field; finished dictations save to encrypted
   history unless the Privacy toggle turns that off.
-- Needs Microphone and Accessibility permission. First launch walks a five-step onboarding window
-  (welcome, permissions, hotkey mode, model, try it) with buttons to grant each permission and a
-  scratchpad to try dictation before the main window opens; SETUP.md explains how to reset it.
+- Needs Microphone and Accessibility permission, and Contacts (optional — only prompted if you turn
+  on "Learn names from Contacts" on the Dictionary page). First launch walks a five-step onboarding
+  window (welcome, permissions, hotkey mode, model, try it) with buttons to grant each permission
+  and a scratchpad to try dictation before the main window opens; SETUP.md explains how to reset it.
 - VoxFlow's own window is frontmost at launch, so click into the text field you want to dictate
   into (e.g. TextEdit) before the first fn press, or the dictation lands on the clipboard instead.
 - History page: search past dictations, expand a row for the full transcript, Copy, Delete with
-  Undo. Settings › Hotkeys (mode + shortcuts), Audio (input device, silence-stop, hands-free) and
-  Privacy (encrypt-at-rest toggle, retention) are built; General and MCP tabs follow in 2.2.
+  Undo; the expanded row shows the resolved style. Settings › Hotkeys (mode + shortcuts), Audio
+  (input device, silence-stop, hands-free) and Privacy (encrypt-at-rest toggle, retention) are
+  built; General and MCP tabs follow later in 2.2.
+- Dictionary page: add names, terms, products and places with an optional phonetic hint; recognised
+  words feed the speech engine directly, and "Learn names from Contacts" imports names locally.
+- Snippets page: define a trigger (e.g. `/sig`) and a body with `cursor`/`date`/`clipboard`/`app`
+  placeholders; say or type the trigger in any app to expand it.
+- Styles page: pick a rewrite tone (Formal, Casual, Very casual, Verbatim) and per-app overrides;
+  rule-based styling (fillers removed, punctuation and capitalization added) runs on every
+  dictation before it's inserted — see [ADR-005](docs/adr/005-rule-based-styling-pipeline.md).
 
 ## Roadmap
 

@@ -24,6 +24,24 @@ versioning.
 - Launch wiring: `HistoryService` opens (and starts retention) once at every real launch; the
   XCTest host skips that open, dictation start, Flow Bar binding and the fn/esc monitor so running
   tests never opens the microphone, installs global monitors or touches the Keychain.
+- Dictionary page: add names, terms, products and places with an optional phonetic hint and
+  "Also fix it when I type it wrong"; duplicate detection is case- and diacritic-insensitive.
+  "Learn names from Contacts" imports first + last names locally (permission prompt, denied/
+  granted/importing states, re-imports when Contacts changes, entries removed if the toggle
+  turns off).
+- Snippets page: create a trigger (`/sig`) and a multiline body with `cursor`/`date`/`clipboard`/
+  `app` placeholders, an optional "Only in {app}" scope, and a "Say 'snippet' before the trigger"
+  toggle to avoid accidental expansion; triggers work by typing (`/sig`) or speaking ("slash sig").
+- Styles page: choose a default rewrite tone (Formal, Casual, Very casual, Verbatim) plus
+  per-app overrides by bundle id, and global "Remove filler words" / "Auto-punctuate and
+  capitalize" toggles.
+- Rule-based styling pipeline (`RuleStyler`, `SnippetExpander`, `StyleResolver` — see ADR-005):
+  dictation is styled and snippet-expanded after the speech engine returns; History stores the
+  raw engine text, the styled text, and the resolved style's name.
+- Dictionary words feed the speech engine as `TranscriptionOptions.vocabulary` (most-used first,
+  capped at 64) so recognised names/terms get spelled right without a manual correction pass.
+- `dictionary`, `snippets` and `app_style_overrides` tables added to the shared VoxFlow SQLite
+  database (unencrypted — only dictation text is sensitive, per ADR-004).
 
 ## 2.0.0 — 2026-09-08
 

@@ -135,8 +135,23 @@ Dictionary/snippet text is not encrypted (design: only dictation text is sensiti
 ### Task 6: Wiring check, docs, PR
 
 - `README.md`/`CHANGELOG.md` (Unreleased on develop: 2.2.0 line items), ADR-005 "Rule-based styling pipeline and where the LLM plugs in" (TextStyler seam, snippet expansion order, override precedence, vocabulary budget 64).
-- Full verification; manual checklist for the owner: add a word → dictate it → recognised; create `/sig` → say "slash sig" → expanded; set Mail → Formal → dictate in Mail → contractions expanded; History meta shows the style; Contacts import with permission.
+- Full verification; manual checklist for the owner (see below).
 - PR into `develop`: `Part of #111.`; follow-ups for anything deferred (cursor placement in the inserter, "fix it when I type it wrong").
+
+**Manual checklist for the owner:**
+
+1. Dictionary page: add a word → hold fn and dictate it → the word is recognised (not
+   mis-heard).
+2. Snippets page: create a snippet with trigger `/sig` → hold fn and say "slash sig" →
+   the body is expanded into the dictated text.
+3. Styles page: set the Mail override to Formal → hold fn and dictate into Mail →
+   contractions are expanded (e.g. "can't" → "cannot").
+4. History page: expand a row from one of the dictations above → the style used is
+   shown in the row's meta.
+5. Dictionary page: turn on "Learn names from Contacts" → grant the Contacts
+   permission prompt → names are imported (and denying it snaps the toggle back off).
+6. Snippets page: turn on "Say 'snippet' before the trigger" for a snippet → dictating
+   the trigger alone does *not* expand it, but saying "snippet slash sig" does.
 
 ## Self-review
 - Coverage: §5 tables (T1); MW-03* (T4); MW-04*, MW-05* (T5); styling + overrides + vocabulary in the dictation path (T2, T3). Deferred: caret placement for `cursor` (4b), auto-correct typing, Re-style (5), Home/General/MCP/menu bar/notifications (4b).

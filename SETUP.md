@@ -67,6 +67,13 @@ Settings → Privacy) independently of onboarding. `HistoryService` also
 opens the store lazily, on first use rather than at construction, specifically so that launching
 the app as the XCTest host never prompts for Keychain access — see #143.
 
+### Contacts permission
+
+VoxFlow does not ask for Contacts access at launch. It prompts only if you turn on "Learn names
+from Contacts" on the Dictionary page — the prompt string is `NSContactsUsageDescription` in
+`project.yml`. Denying it (or later revoking it in System Settings → Privacy & Security →
+Contacts) snaps the toggle back off; no names are imported or read.
+
 ## Local code signing (once per Mac)
 
 macOS ties Microphone/Accessibility grants and Keychain access to the app's code signature. An
