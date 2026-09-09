@@ -54,19 +54,4 @@ struct HistoryWriterTests {
         await saveTask.value
         #expect(try store.count() == 1)          // inserted exactly once, after the gate opened
     }
-
-    @Test("suppressNext() skips exactly the next save, not the one after it")
-    func suppressNextSkipsOneSave() async throws {
-        let store = try DictationStore(inMemoryWith: nil)
-        let storeBox = HistoryStoreBox(store)
-        let on = DictationSettingsBox(DictationSettingsSnapshot(excludedBundleIDs: [], keepHistory: true, options: TranscriptionOptions()))
-        let writer = HistoryWriter(storeBox: storeBox, settings: on, now: { Date() })
-
-        writer.suppressNext()
-        await writer.save(result, appName: "Mail")
-        #expect(try store.count() == 0)
-
-        await writer.save(result, appName: "Mail")
-        #expect(try store.count() == 1)
-    }
 }

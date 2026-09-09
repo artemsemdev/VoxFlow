@@ -63,6 +63,10 @@ final class AppServices {
     /// its search/expanded/undo state, same reasoning as `filesViewModel`.
     let historyViewModel: HistoryViewModel
     let inserter: AccessibilityTextInserter
+    /// Entered/left by onboarding's Try It step and History's scratchpad sheet — read once at the
+    /// start of every capture (`dictationController`'s `ephemeral:` closure) to decide whether that
+    /// capture should be written to History (I-1/I-2/I-3). See `EphemeralScope`'s doc comment.
+    let ephemeralScope: EphemeralScope
     let dictationController: DictationController
     let dictation: DictationCoordinator
     let flowBar: FlowBarPresenter
@@ -77,7 +81,7 @@ final class AppServices {
                  filesViewModel: FilesViewModel, modelsViewModel: ModelsViewModel, audioViewModel: AudioViewModel,
                  privacyViewModel: PrivacyViewModel, dictationSettings: DictationSettings,
                  modelLoader: ModelLoader, historyService: HistoryService, historyViewModel: HistoryViewModel,
-                 inserter: AccessibilityTextInserter, dictationController: DictationController,
+                 inserter: AccessibilityTextInserter, ephemeralScope: EphemeralScope, dictationController: DictationController,
                  dictation: DictationCoordinator, flowBar: FlowBarPresenter, fnMonitor: FnKeyMonitor,
                  onboardingState: OnboardingState, onboardingViewModel: OnboardingViewModel) {
         self.modelStore = modelStore
@@ -96,6 +100,7 @@ final class AppServices {
         self.historyService = historyService
         self.historyViewModel = historyViewModel
         self.inserter = inserter
+        self.ephemeralScope = ephemeralScope
         self.dictationController = dictationController
         self.dictation = dictation
         self.flowBar = flowBar
@@ -153,6 +158,10 @@ final class AppServices {
         // `levelSink` carries the level callback across that gap without capturing the (non-Sendable)
         // coordinator itself in the microphone's `@Sendable` closure.
         let levelSink = DictationLevelSink()
+        // Entered/left by onboarding's Try It step and History's scratchpad sheet — read once at the
+        // start of every capture below so an onboarding/scratchpad dictation is never written to
+        // History (I-1/I-2/I-3), replacing the old shared `HistoryWriter` suppression flag.
+        let ephemeralScope = EphemeralScope()
         let dictationController = DictationController(
             config: dictationSettings.flowBarConfig,
             microphone: MeteredMicrophone(base: MicrophoneSource()) { rms in levelSink.report(rms) },
@@ -163,17 +172,17 @@ final class AppServices {
             loadModel: { _ = try await modelLoader.ensureLoaded() },
             options: { dictationSettings.box.current.options },
             onSave: { result, appName in await historyWriter.save(result, appName: appName) },
-            copyToClipboard: { SystemPasteboard().setString($0) }
+            copyToClipboard: { SystemPasteboard().setString($0) },
+            ephemeral: { ephemeralScope.isActive }
         )
         let dictation = DictationCoordinator(controller: dictationController, settings: dictationSettings,
                                              permissions: permissions, navigation: navigation)
         levelSink.attach(dictation)
 
-        // Injects `dictation`/`historyWriter` so History's "Try it in a scratchpad" (design 2d) can
-        // suppress the next save the same way onboarding's Try It step does.
+        // History's "Try it in a scratchpad" (design 2d) enters/leaves `ephemeralScope` from its own
+        // sheet view (`HistoryPage.ScratchpadSheet`) — this view model doesn't need to know about it.
         let historyViewModel = HistoryViewModel(service: historyService, settings: dictationSettings, navigation: navigation,
-                                                clock: SystemMonotonicClock(), dictation: dictation, historyWriter: historyWriter,
-                                                pasteboard: SystemPasteboard())
+                                                clock: SystemMonotonicClock(), pasteboard: SystemPasteboard())
 
         // Live settings: a silence-stop change reaches the running controller without waiting for
         // the next dictation to start it fresh; an encryption/retention change reopens the store.
@@ -192,7 +201,7 @@ final class AppServices {
 
         let onboardingState = OnboardingState(store: settingsStore)
         let onboardingViewModel = OnboardingViewModel(state: onboardingState, permissions: permissions, settings: dictationSettings,
-                                                       models: modelsViewModel, dictation: dictation, historyWriter: historyWriter,
+                                                       models: modelsViewModel, dictation: dictation, ephemeralScope: ephemeralScope,
                                                        navigation: navigation, clock: SystemMonotonicClock())
 
         let audioViewModel = AudioViewModel(devices: AVCaptureInputDeviceProvider(), settings: dictationSettings, dictation: dictation)
@@ -203,7 +212,8 @@ final class AppServices {
                            modelsViewModel: modelsViewModel, audioViewModel: audioViewModel, privacyViewModel: privacyViewModel,
                            dictationSettings: dictationSettings, modelLoader: modelLoader,
                            historyService: historyService, historyViewModel: historyViewModel, inserter: inserter,
-                           dictationController: dictationController, dictation: dictation, flowBar: flowBar, fnMonitor: fnMonitor,
+                           ephemeralScope: ephemeralScope, dictationController: dictationController, dictation: dictation,
+                           flowBar: flowBar, fnMonitor: fnMonitor,
                            onboardingState: onboardingState, onboardingViewModel: onboardingViewModel)
     }
 

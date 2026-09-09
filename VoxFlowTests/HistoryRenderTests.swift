@@ -163,7 +163,11 @@ private struct HistoryRenderPreview: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            if viewModel.emptyState != .historyOff {
+            let hidesFooter: Bool = switch viewModel.emptyState {
+                case .historyOff, .unavailable: true
+                case .noDictations, .noResults, nil: false
+            }
+            if !hidesFooter {
                 Divider()
                 Text(viewModel.footerText)
                     .font(.caption)

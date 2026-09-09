@@ -18,7 +18,10 @@ final class OnboardingViewModel {
     /// view's `@Observable` tracking, since `models` is itself `@Observable`.
     let models: ModelsViewModel
     private let dictation: DictationCoordinator
-    private let historyWriter: HistoryWriter
+    /// Entered by `beginTryIt()`, left by `endTryIt()` — tells `DictationController` (via
+    /// `AppServices`' `ephemeral:` closure) that a capture starting right now shouldn't be written to
+    /// History (I-1/I-2/I-3). Replaces the old shared `HistoryWriter` suppression flag.
+    private let ephemeralScope: EphemeralScope
     private let navigation: Navigation
     private let clock: any MonotonicClock
 
@@ -50,14 +53,14 @@ final class OnboardingViewModel {
     private nonisolated let accessibilityPollTask = Mutex<Task<Void, Never>?>(nil)
 
     init(state: OnboardingState, permissions: any PermissionChecking, settings: DictationSettings,
-         models: ModelsViewModel, dictation: DictationCoordinator, historyWriter: HistoryWriter,
+         models: ModelsViewModel, dictation: DictationCoordinator, ephemeralScope: EphemeralScope,
          navigation: Navigation, clock: any MonotonicClock) {
         self.state = state
         self.permissions = permissions
         self.settings = settings
         self.models = models
         self.dictation = dictation
-        self.historyWriter = historyWriter
+        self.ephemeralScope = ephemeralScope
         self.navigation = navigation
         self.clock = clock
         self.step = state.step
@@ -94,9 +97,10 @@ final class OnboardingViewModel {
 
     private func transition(to newStep: OnboardingStep) {
         accessibilityPollTask.withLock { $0?.cancel() }
-        // Leaving `.tryIt` without ever reaching `.inserted` (e.g. "Back" after only arming) must not
-        // leave a stale suppression armed for the next real dictation (M-2) — `endTryIt()` itself
-        // clears it now, so no separate call is needed here.
+        // Leaving `.tryIt` (e.g. "Back" after only arming) must leave the ephemeral scope — otherwise
+        // any dictation started elsewhere for the rest of the session would still be treated as a
+        // Try It capture and silently not saved (M-2). `endTryIt()` itself does this, so no separate
+        // call is needed here.
         if step == .tryIt { endTryIt() }
         step = newStep
         state.step = newStep
@@ -253,33 +257,37 @@ final class OnboardingViewModel {
 
     // MARK: Try it (ONB-05)
 
-    /// Arms the try-it observation — called from `TryItStepView.onAppear`. No-ops once onboarding is
-    /// `completed` or the step has moved on, so a stray call (or a relaunch that happens to resume on
-    /// `.tryIt`) can never suppress history (B-1). Also idempotent while already armed
-    /// (`tryItTrackingEnabled`) — SwiftUI can re-run `onAppear` without an intervening `onDisappear`
-    /// (observed via `ImageRenderer`, which re-triggers it on every snapshot pass), and re-arming
-    /// would otherwise wipe out an in-flight or just-finished capture's `tryItResult` from under it.
+    /// Arms the try-it observation and enters `ephemeralScope` — called from `TryItStepView.onAppear`.
+    /// No-ops once onboarding is `completed` or the step has moved on, so a stray call (or a relaunch
+    /// that happens to resume on `.tryIt`) can never enter the scope (B-1). Also idempotent while
+    /// already armed (`tryItTrackingEnabled`) — SwiftUI can re-run `onAppear` without an intervening
+    /// `onDisappear` (observed via `ImageRenderer`, which re-triggers it on every snapshot pass), and
+    /// re-arming would otherwise both double-enter the scope and wipe out an in-flight or
+    /// just-finished capture's `tryItResult` from under it.
     func beginTryIt() {
         guard step == .tryIt, !state.completed, !tryItTrackingEnabled else { return }
         tryItResult = nil
         processingStartedAt = nil
         tryItTrackingEnabled = true
+        ephemeralScope.enter()
         trackDictation()
     }
 
-    /// Disarms the try-it observation — called from `TryItStepView.onDisappear` (including the
-    /// onboarding window being closed mid-try-it), `transition(to:)` (leaving `.tryIt`), and
-    /// `finish()`. Also clears any pending suppression (N-2): a capture that armed
-    /// (`.armed`/`.tapped`/`.listening`/`.processing`) but never reached `.inserted`/`.copied` before
-    /// the step was left would otherwise leave `HistoryWriter`'s flag set, silently dropping the
-    /// *next real* dictation's save.
+    /// Disarms the try-it observation and leaves `ephemeralScope` — called from
+    /// `TryItStepView.onDisappear` (including the onboarding window being closed mid-try-it),
+    /// `transition(to:)` (leaving `.tryIt`), and `finish()`. Idempotent (guarded by
+    /// `tryItTrackingEnabled`, mirroring `beginTryIt()`'s guard) so the several call sites above can
+    /// each call it unconditionally without double-leaving the scope.
     func endTryIt() {
+        guard tryItTrackingEnabled else { return }
         tryItTrackingEnabled = false
-        historyWriter.clearSuppression()
+        ephemeralScope.leave()
     }
 
     /// Mirrors `FlowBarPresenter.trackState(of:)`'s `withObservationTracking` pattern, gated by
-    /// `tryItTrackingEnabled` (only `beginTryIt()` arms it) rather than just `step == .tryIt`.
+    /// `tryItTrackingEnabled` (only `beginTryIt()` arms it) rather than just `step == .tryIt`. Purely
+    /// for the result chip now — whether a capture is saved to History is `DictationController`'s own
+    /// per-capture `ephemeral:` decision (I-1/I-2/I-3), not anything this observation drives.
     private func trackDictation() {
         withObservationTracking { _ = self.dictation.state } onChange: { [weak self] in
             Task { @MainActor in
@@ -292,27 +300,12 @@ final class OnboardingViewModel {
 
     private func handleDictationChange() {
         switch dictation.state {
-        case .armed, .tapped, .listening:
-            // The Try It capture shouldn't leave a real history entry — `HistoryWriter.save`
-            // consumes this flag and skips exactly the one save that follows. Set (idempotently) at
-            // every pre-processing state, not just `.armed`, so a fast `.armed → .listening` coalesced
-            // by `withObservationTracking` still suppresses (M-3).
-            historyWriter.suppressNext()
         case .processing:
-            historyWriter.suppressNext()
             processingStartedAt = clock.now()
         case .inserted(_, let words, _):
             let elapsed = processingStartedAt.map { clock.now() - $0 } ?? dictation.elapsed
             tryItResult = "✓ Inserted · \(words) words · \(String(format: "%.1f", elapsed)) s"
             processingStartedAt = nil
-        // N-2: the capture ended without a save — `FlowBarMachine` only emits `saveHistory` from
-        // `.inserted`/`.copied` (`.copied` is deliberately left out here: it's still a *saving* path,
-        // so the flag must survive to be consumed by that save). Clearing here (still on `.tryIt`,
-        // still tracking) covers a cancelled-but-not-step-exited capture; `endTryIt()` covers leaving
-        // the step or closing the window. Never on `.idle` — that would race the still-pending
-        // `Task { await onSave(…) }` `DictationController` kicks off right after `.inserted`/`.copied`.
-        case .discarded, .didntCatch, .error, .micUnavailable, .modelNotInstalled, .excluded:
-            historyWriter.clearSuppression()
         default:
             break
         }

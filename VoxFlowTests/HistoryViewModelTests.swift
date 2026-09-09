@@ -17,6 +17,13 @@ private struct FakeHistoryKeyProvider: HistoryKeyProviding {
     func historyKey() throws -> HistoryKey { HistoryKey(key: key, isNewlyCreated: false) }
 }
 
+/// I-4: claims `isNewlyCreated: true` on every call (unlike `FakeHistoryKeyProvider` above) — opening
+/// an *already-encrypted* database with this is exactly what `DictationStore` treats as "the original
+/// key is gone" (`StorageError.keyLost`, mirroring `HistoryServiceTests.keyLostDisablesHistory`).
+private struct FakeFreshKeyProvider: HistoryKeyProviding {
+    func historyKey() throws -> HistoryKey { HistoryKey(key: SymmetricKey(size: .bits256), isNewlyCreated: true) }
+}
+
 @Suite("HistoryViewModel", .timeLimit(.minutes(1)))
 @MainActor
 struct HistoryViewModelTests {
@@ -63,14 +70,6 @@ struct HistoryViewModelTests {
     /// No-sleep poll, same technique as `OnboardingViewModelTests`.
     private func waitFor(_ predicate: () -> Bool) async {
         for _ in 0..<2_000 where !predicate() { await Task.yield() }
-    }
-
-    /// `HistoryViewModel.trackDictation`'s `withObservationTracking` responder runs in its own
-    /// `Task { @MainActor in }`, scheduled (not run synchronously) the moment `dictation.state`
-    /// changes — so `waitFor` observing the *new* state is not proof that responder has finished
-    /// running yet. A handful of unconditional yields drains the MainActor queue enough for it to.
-    private func drainMainActor(_ iterations: Int = 20) async {
-        for _ in 0..<iterations { await Task.yield() }
     }
 
     @Test("load lists newest first")
@@ -231,6 +230,35 @@ struct HistoryViewModelTests {
         #expect(vm.emptyState == .noResults("nothing matches this"))
     }
 
+    @Test("I-4: emptyState is .unavailable when the history service is disabled — outranks .noDictations, and maps the key-lost reason to readable copy")
+    func emptyStateUnavailableWhenHistoryDisabled() async throws {
+        let dir = TemporaryDirectory()
+        let url = dir.file("voxflow.sqlite")
+        // An already-encrypted database on disk (mirrors `HistoryServiceTests.keyLostDisablesHistory`)
+        // — `records` will still end up empty (the broken service can't read it), so this also proves
+        // `.unavailable` isn't just falling out of the ordinary `.noDictations` path.
+        _ = try DictationStore(databaseURL: url, keyProvider: FakeHistoryKeyProvider())
+            .insert(HistoryViewModelTests.draft("secret", at: Date()))
+
+        let settings = DictationSettings(store: InMemoryKeyValueStore())
+        let brokenService = HistoryService(url: url, settings: settings, keyProvider: { FakeFreshKeyProvider() }, clock: FakeClock())
+        let vm = HistoryViewModel(service: brokenService, settings: settings, navigation: Navigation(), clock: FakeClock())
+
+        await vm.load()
+
+        #expect(vm.records.isEmpty)
+        #expect(vm.emptyState == .unavailable(reason: "The history key could not be found in your Keychain"))
+    }
+
+    @Test("I-4: emptyState does not treat the service's transient not-opened-yet placeholder as unavailable")
+    func emptyStateIgnoresNotOpenedYetPlaceholder() {
+        let h = Harness()
+        let vm = h.vm()
+        // Never awaited load()/refresh() — `h.service.status` is still `.disabled(reason: "not opened
+        // yet")`, the placeholder every fresh `HistoryService` starts with, not a real failure.
+        #expect(vm.emptyState == .noDictations)
+    }
+
     @Test("unreadable rows show the encrypted message instead of their text")
     func unreadableRowText() {
         let record = DictationRecord(id: 1, text: "", rawText: "", appName: "Mail", style: nil, language: nil,
@@ -349,19 +377,22 @@ struct HistoryViewModelTests {
         #expect(vm.query == "num")
     }
 
-    /// Everything the scratchpad-suppression tests need: a `DictationCoordinator` wired to
-    /// `historyWriter` (the same instance the view model gets, so `suppressNext()`/`clearSuppression()`
-    /// called from the VM actually reach the writer this coordinator's controller saves through).
+    /// Everything the scratchpad-ephemeral tests need: a `DictationCoordinator` wired to `scope` (the
+    /// same instance `ScratchpadSheet.onAppear`/`onDisappear` would enter/leave in production) so
+    /// `scope.isActive` at capture start is what decides whether the capture reaches
+    /// `historyWriter.save` at all (I-1/I-2/I-3).
     private struct ScratchpadBundle {
         let dictation: DictationCoordinator
         let historyWriter: HistoryWriter
         let historyStoreBox: HistoryStoreBox
+        let scope: EphemeralScope
         let vm: HistoryViewModel
     }
 
     private func makeScratchpadBundle(_ h: Harness) throws -> ScratchpadBundle {
         let historyStoreBox = HistoryStoreBox(try DictationStore(inMemoryWith: nil))
         let historyWriter = HistoryWriter(storeBox: historyStoreBox, settings: h.settings.box, now: { Date() })
+        let scope = EphemeralScope()
         let transcriber = FakeDictationTranscriber(result: DictationResult(
             text: "one two three", rawText: "one two three", segments: [], language: nil, duration: 0.4, lowConfidence: false))
         let controller = DictationController(
@@ -370,22 +401,23 @@ struct HistoryViewModelTests {
             preflight: { Preflight(excludedApp: nil, secureInput: false, microphone: .granted, model: .loaded) },
             loadModel: {}, options: { TranscriptionOptions() },
             onSave: { result, appName in await historyWriter.save(result, appName: appName) },
-            copyToClipboard: { _ in })
+            copyToClipboard: { _ in },
+            ephemeral: { scope.isActive })
         let permissions = FakePermissions(microphone: .granted, requestResult: .granted, accessibility: true)
         let dictation = DictationCoordinator(controller: controller, settings: h.settings, permissions: permissions, navigation: h.navigation)
         dictation.start()
-        let vm = HistoryViewModel(service: h.service, settings: h.settings, navigation: h.navigation, clock: h.clock,
-                                  dictation: dictation, historyWriter: historyWriter)
-        return ScratchpadBundle(dictation: dictation, historyWriter: historyWriter, historyStoreBox: historyStoreBox, vm: vm)
+        let vm = HistoryViewModel(service: h.service, settings: h.settings, navigation: h.navigation, clock: h.clock)
+        return ScratchpadBundle(dictation: dictation, historyWriter: historyWriter, historyStoreBox: historyStoreBox, scope: scope, vm: vm)
     }
 
-    @Test("entering .armed while the scratchpad sheet is up suppresses the next history save")
+    @Test("a capture started while the scratchpad scope is active (entered the way ScratchpadSheet.onAppear would) is not saved")
     func scratchpadSuppressesHistory() async throws {
         let h = Harness()
         let bundle = try makeScratchpadBundle(h)
         let dictation = bundle.dictation
 
-        bundle.vm.isScratchpadPresented = true
+        bundle.vm.isScratchpadPresented = true   // mirrors the sheet binding; the scope is what actually matters
+        bundle.scope.enter()                     // what ScratchpadSheet.onAppear does
         dictation.fn(.down)
         // `.armed(_)`/`.listening(_)`/`.inserted` (explicit wildcard payload), not `if case .armed = $0`
         // — same toolchain quirk `OnboardingViewModelTests` works around.
@@ -398,38 +430,22 @@ struct HistoryViewModelTests {
         #expect(try bundle.historyStoreBox.current?.count() == 0)
     }
 
-    @Test("B1: armed then discarded (escape) does not leave suppression armed — a following real save persists")
-    func scratchpadDiscardClearsSuppression() async throws {
-        let h = Harness()
-        let bundle = try makeScratchpadBundle(h)
-        let dictation = bundle.dictation
-
-        bundle.vm.isScratchpadPresented = true
-        dictation.fn(.down)
-        await waitFor { if case .armed(_) = dictation.state { true } else { false } }
-        dictation.escape()
-        await waitFor { if case .discarded = dictation.state { true } else { false } }
-        await drainMainActor()   // let `trackDictation`'s onChange Task actually call clearSuppression()
-
-        // The scratchpad capture never saved (it was discarded) — but the suppression it armed must
-        // not still be in effect for the *next*, unrelated dictation.
-        await bundle.historyWriter.save(
-            DictationResult(text: "a real dictation", rawText: "a real dictation", segments: [], language: nil, duration: 1, lowConfidence: false),
-            appName: "Mail")
-
-        #expect(try bundle.historyStoreBox.current?.count() == 1)
-    }
-
-    @Test("B1: armed then the sheet is dismissed without an insertion — a following real save persists")
+    @Test("leaving the scope before the next capture starts (ScratchpadSheet.onDisappear) — that next capture is saved normally, whatever became of the scratchpad one")
     func scratchpadDismissClearsSuppression() async throws {
         let h = Harness()
         let bundle = try makeScratchpadBundle(h)
         let dictation = bundle.dictation
 
         bundle.vm.isScratchpadPresented = true
+        bundle.scope.enter()
         dictation.fn(.down)
         await waitFor { if case .armed(_) = dictation.state { true } else { false } }
-        bundle.vm.isScratchpadPresented = false   // sheet closed mid-capture, before any insertion
+        dictation.escape()   // the scratchpad capture itself is discarded, not saved either way
+        await waitFor { if case .discarded = dictation.state { true } else { false } }
+
+        bundle.vm.isScratchpadPresented = false   // sheet closed
+        bundle.scope.leave()                      // what ScratchpadSheet.onDisappear does
+        #expect(bundle.scope.isActive == false)
 
         await bundle.historyWriter.save(
             DictationResult(text: "a real dictation", rawText: "a real dictation", segments: [], language: nil, duration: 1, lowConfidence: false),

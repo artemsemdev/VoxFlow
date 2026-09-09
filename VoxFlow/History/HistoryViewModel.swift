@@ -13,6 +13,12 @@ final class HistoryViewModel {
         case noDictations
         case historyOff
         case noResults(String)
+        /// `HistoryService.status == .disabled` (I-4): history storage itself is unavailable this
+        /// session (e.g. the Keychain lost the encryption key) — every dictation is silently not
+        /// being saved, and rows that already exist on disk can't be read from here either, so this
+        /// must outrank `.noDictations`, which would otherwise claim there's simply nothing yet.
+        /// `reason` is already the human-readable copy (see `HistoryViewModel.readableReason`).
+        case unavailable(reason: String)
     }
 
     static let debounceInterval: TimeInterval = 0.15
@@ -28,27 +34,16 @@ final class HistoryViewModel {
     private(set) var pendingDeletion: (record: DictationRecord, index: Int)?
     var toastVisible: Bool { pendingDeletion != nil }
     /// Bound by `HistoryPage`'s `.sheet(isPresented:)` for the "Try it in a scratchpad" button
-    /// (design 2d) — starts tracking `dictation.state` while it's up so an armed capture there
-    /// doesn't leave a real history entry (ONB-05's `HistoryWriter.suppressNext()` pattern).
-    var isScratchpadPresented = false {
-        didSet {
-            if isScratchpadPresented {
-                trackDictation()
-            } else {
-                // Dismissing without ever reaching `.inserted` (armed-then-cancelled, or never armed
-                // at all) must not leave a stale suppression armed for the next *real* dictation.
-                historyWriter?.clearSuppression()
-            }
-        }
-    }
+    /// (design 2d). The sheet itself (`ScratchpadSheet.onAppear`/`onDisappear`) enters/leaves
+    /// `AppServices.ephemeralScope`, which is what actually keeps a scratchpad capture out of real
+    /// History (I-1/I-2/I-3) — this view model no longer watches dictation state to manage that.
+    var isScratchpadPresented = false
     var scratchpadText = ""
 
     private let service: HistoryService
     private let settings: DictationSettings
     private let navigation: Navigation
     private let clock: any MonotonicClock
-    private let dictation: DictationCoordinator?
-    private let historyWriter: HistoryWriter?
     private let pasteboard: any Pasteboard
 
     /// Boxed outside main-actor isolation so `deinit` (nonisolated) can cancel them without an
@@ -57,13 +52,11 @@ final class HistoryViewModel {
     private nonisolated let undoTask = Mutex<Task<Void, Never>?>(nil)
 
     init(service: HistoryService, settings: DictationSettings, navigation: Navigation, clock: any MonotonicClock,
-         dictation: DictationCoordinator? = nil, historyWriter: HistoryWriter? = nil, pasteboard: any Pasteboard = SystemPasteboard()) {
+         pasteboard: any Pasteboard = SystemPasteboard()) {
         self.service = service
         self.settings = settings
         self.navigation = navigation
         self.clock = clock
-        self.dictation = dictation
-        self.historyWriter = historyWriter
         self.pasteboard = pasteboard
     }
 
@@ -75,9 +68,23 @@ final class HistoryViewModel {
     // MARK: Derived state
 
     var emptyState: EmptyState? {
+        // Skips the service's transient startup placeholder (`HistoryService.notOpenedYetReason`) —
+        // that's not a real failure, just "no one has touched history yet this launch", and would
+        // otherwise flash "History is unavailable" for every user during the first `load()`/`refresh()`.
+        if case .disabled(let reason) = service.status, reason != HistoryService.notOpenedYetReason {
+            return .unavailable(reason: Self.readableReason(reason))
+        }
         guard settings.keepHistory else { return .historyOff }
         guard records.isEmpty else { return nil }
         return query.isEmpty ? .noDictations : .noResults(query)
+    }
+
+    /// I-4: `HistoryService.Status.disabled(reason:)`'s reason is written for the log
+    /// (`"history key lost"`, or an arbitrary `String(describing: error)`) — this maps the one case
+    /// with a known, common cause to copy a user can act on; anything else is shown as-is rather than
+    /// hidden, since even an unrecognized reason is better than none.
+    static func readableReason(_ raw: String) -> String {
+        raw == "history key lost" ? "The history key could not be found in your Keychain" : raw
     }
 
     var footerText: String {
@@ -178,34 +185,6 @@ final class HistoryViewModel {
             self.pendingDeletion = nil
         }
         undoTask.withLock { $0 = task }
-    }
-
-    // MARK: Scratchpad (ONB-05-style suppress)
-
-    /// Mirrors `OnboardingViewModel.trackDictation`'s `withObservationTracking` pattern, but only
-    /// re-registers while the scratchpad sheet is still up — dismissing it (or `deinit`) lets the
-    /// chain lapse.
-    private func trackDictation() {
-        guard let dictation else { return }
-        withObservationTracking { _ = dictation.state } onChange: { [weak self] in
-            Task { @MainActor in
-                guard let self, self.isScratchpadPresented else { return }
-                switch dictation.state {
-                case .armed:
-                    self.historyWriter?.suppressNext()
-                case .discarded, .didntCatch, .error, .micUnavailable, .modelNotInstalled, .excluded:
-                    // Every terminal state that doesn't insert (cancelled, no speech caught, load/mic
-                    // failure, excluded app) must release the suppression it armed — otherwise the
-                    // next *real* dictation after this one silently skips history. `.idle` is
-                    // deliberately excluded: it's the resting state a fresh scratchpad open starts
-                    // from, not an exit from an armed-but-cancelled capture.
-                    self.historyWriter?.clearSuppression()
-                default:
-                    break
-                }
-                self.trackDictation()
-            }
-        }
     }
 
     // MARK: Row helpers (design MW-02 row fields)

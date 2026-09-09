@@ -1,24 +1,12 @@
 import Foundation
 import os
-import Synchronization
 import VoxFlowDictation
 import VoxFlowStorage
 
-/// Sendable box for `HistoryWriter.suppressNext()` — `HistoryWriter` is a `struct`, and `Mutex` is
-/// noncopyable, so the flag lives behind a class reference the same way `HistoryStoreBox` and
-/// `DictationSettingsBox` box their own `Mutex`-guarded state.
-final class HistorySuppressBox: Sendable {
-    private let flag = Mutex(false)
-    func set() { flag.withLock { $0 = true } }
-    /// Reads and clears in one step so exactly one `save` is skipped per `set()`.
-    func consume() -> Bool { flag.withLock { let was = $0; $0 = false; return was } }
-    /// Clears an armed-but-never-consumed flag (e.g. a try-it capture that's discarded or the user
-    /// leaves ONB-05 before reaching `.inserted`) so it doesn't leak into the *next* real dictation's
-    /// save — see `HistoryWriter.clearSuppression()`.
-    func clear() { flag.withLock { $0 = false } }
-}
-
 /// Persists a finished dictation to history, respecting the "Keep history" toggle (design ST-05).
+/// Whether a *given* capture should skip this entirely (onboarding's Try It, a History scratchpad) is
+/// no longer this type's concern — `DictationController`'s `ephemeral:` closure decides that once per
+/// capture and simply never invokes the `onSave` handler this writer is wired to (I-1/I-2/I-3).
 struct HistoryWriter: Sendable {
     /// Read at save time (not captured once) so a `HistoryService.reopen()` — e.g. toggling
     /// "Encrypt history at rest" — takes effect on the very next save, not only after a relaunch.
@@ -31,10 +19,6 @@ struct HistoryWriter: Sendable {
     /// a no-op so every existing call site (`HistoryWriter(storeBox:settings:now:)`) keeps compiling
     /// unchanged; `AppServices` passes `{ await historyService.ready() }`.
     var ready: @Sendable () async -> Void = {}
-    /// Defaulted so every existing call site (`HistoryWriter(storeBox:settings:now:)`) keeps
-    /// compiling unchanged; a caller that wants to suppress a save (onboarding's Try It, ONB-05)
-    /// holds onto the same `HistoryWriter` value and calls `suppressNext()` on it.
-    private let suppress = HistorySuppressBox()
     private static let log = Logger(subsystem: "dev.artemsem.voxflow", category: "history")
 
     static func draft(from result: DictationResult, appName: String?, now: Date) -> DictationDraft {
@@ -42,20 +26,9 @@ struct HistoryWriter: Sendable {
                        language: result.language?.code, duration: result.duration, createdAt: now)
     }
 
-    /// Skips exactly the next `save` call (e.g. onboarding's Try It dictation, which shouldn't leave
-    /// a real history entry) without disabling history for any dictation after that one.
-    func suppressNext() { suppress.set() }
-
-    /// Clears a pending `suppressNext()` that was never consumed by a `save` (e.g. onboarding's
-    /// Try It armed a capture the user then discarded, or left the step before it finished) — without
-    /// this, that armed-but-unconsumed flag would silently skip the *next real* dictation's save.
-    func clearSuppression() { suppress.clear() }
-
-    /// No-op when history is off, there's no store (Privacy toggle / storage unavailable), or this
-    /// save was just suppressed via `suppressNext()`. The insert itself is blocking SQLite I/O, so it
-    /// runs on a detached task off the caller's actor.
+    /// No-op when history is off or there's no store (Privacy toggle / storage unavailable). The
+    /// insert itself is blocking SQLite I/O, so it runs on a detached task off the caller's actor.
     func save(_ result: DictationResult, appName: String?) async {
-        if suppress.consume() { return }
         guard settings.current.keepHistory else { return }
         await ready()
         guard let store = storeBox.current else { return }

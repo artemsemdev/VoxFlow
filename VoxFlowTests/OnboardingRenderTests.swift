@@ -63,18 +63,20 @@ struct OnboardingRenderTests {
             rawText: "testing one two three four five this is voxflow running on my mac",
             segments: [], language: nil, duration: 0.6, lowConfidence: false))
         let clock = FakeClock()
+        let ephemeralScope = EphemeralScope()
         let controller = DictationController(config: FlowBarConfig(), microphone: FakeMicrophone(), transcriber: transcriber,
                                              inserter: FakeTextInserter(), clock: clock,
                                              preflight: { Preflight(excludedApp: nil, secureInput: false, microphone: .granted, model: .loaded) },
                                              loadModel: {}, options: { TranscriptionOptions() },
                                              onSave: { result, appName in await historyWriter.save(result, appName: appName) },
-                                             copyToClipboard: { _ in })
+                                             copyToClipboard: { _ in },
+                                             ephemeral: { ephemeralScope.isActive })
         let dictation = DictationCoordinator(controller: controller, settings: dictationSettings, permissions: permissions, navigation: navigation)
         dictation.start()
         let state = OnboardingState(store: settingsStore)
         state.step = step
         let vm = OnboardingViewModel(state: state, permissions: permissions, settings: dictationSettings, models: models,
-                                     dictation: dictation, historyWriter: historyWriter, navigation: navigation, clock: clock)
+                                     dictation: dictation, ephemeralScope: ephemeralScope, navigation: navigation, clock: clock)
         return Bundle(vm: vm, dictation: dictation, clock: clock)
     }
 

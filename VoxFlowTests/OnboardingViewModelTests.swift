@@ -26,9 +26,6 @@ struct OnboardingViewModelTests {
     static let small = descriptor(id: "small", payload: smallPayload, isDefault: false)
     static let catalog = [big, small]
 
-    static let sampleResult = DictationResult(text: "hello there", rawText: "hello there", segments: [],
-                                              language: nil, duration: 0.5, lowConfidence: false)
-
     /// One store backs everything (onboarding step/completed, dictation settings, model store
     /// bookkeeping) — the same shape `AppServices.live()` uses in production.
     @MainActor
@@ -62,10 +59,10 @@ struct OnboardingViewModelTests {
             return ModelsViewModel(store: modelStore, catalog: OnboardingViewModelTests.catalog)
         }
 
-        /// A `DictationCoordinator` wired to `historyWriter` (same instance the view model gets), so
-        /// `historyWriter.suppressNext()` called from the view model actually reaches the writer this
-        /// coordinator's controller saves through.
-        func dictation(historyWriter: HistoryWriter) -> DictationCoordinator {
+        /// A `DictationCoordinator` wired to `historyWriter` and `ephemeralScope` (same instances the
+        /// view model gets) — `ephemeralScope.isActive` at capture start is what decides whether that
+        /// capture reaches `historyWriter.save` at all (I-1/I-2/I-3).
+        func dictation(historyWriter: HistoryWriter, ephemeralScope: EphemeralScope) -> DictationCoordinator {
             let transcriber = FakeDictationTranscriber(result: DictationResult(
                 text: "one two three four five six seven eight nine ten eleven",
                 rawText: "one two three four five six seven eight nine ten eleven",
@@ -76,7 +73,8 @@ struct OnboardingViewModelTests {
                 preflight: { Preflight(excludedApp: nil, secureInput: false, microphone: .granted, model: .loaded) },
                 loadModel: {}, options: { TranscriptionOptions() },
                 onSave: { result, appName in await historyWriter.save(result, appName: appName) },
-                copyToClipboard: { _ in })
+                copyToClipboard: { _ in },
+                ephemeral: { ephemeralScope.isActive })
             let coordinator = DictationCoordinator(controller: controller, settings: dictationSettings,
                                                    permissions: permissions, navigation: navigation)
             coordinator.start()
@@ -87,17 +85,18 @@ struct OnboardingViewModelTests {
         /// same way a relaunch would resume it) plus every collaborator it was built from.
         func viewModel(step: OnboardingStep = .welcome, completed: Bool = false)
             -> (vm: OnboardingViewModel, state: OnboardingState, models: ModelsViewModel,
-                dictation: DictationCoordinator, historyWriter: HistoryWriter) {
+                dictation: DictationCoordinator, scope: EphemeralScope) {
             let bootstrap = OnboardingState(store: store)
             bootstrap.step = step
             bootstrap.completed = completed
             let state = OnboardingState(store: store)
             let models = modelsViewModel()
             let historyWriter = HistoryWriter(storeBox: historyStoreBox, settings: dictationSettings.box, now: { Date() })
-            let dc = dictation(historyWriter: historyWriter)
+            let scope = EphemeralScope()
+            let dc = dictation(historyWriter: historyWriter, ephemeralScope: scope)
             let vm = OnboardingViewModel(state: state, permissions: permissions, settings: dictationSettings, models: models,
-                                         dictation: dc, historyWriter: historyWriter, navigation: navigation, clock: clock)
-            return (vm, state, models, dc, historyWriter)
+                                         dictation: dc, ephemeralScope: scope, navigation: navigation, clock: clock)
+            return (vm, state, models, dc, scope)
         }
     }
 
@@ -284,11 +283,12 @@ struct OnboardingViewModelTests {
         #expect(dismissed)
     }
 
-    @Test("tryIt: beginTryIt() arms the observation — .armed suppresses the next save; .inserted sets tryItResult without saving")
+    @Test("tryIt: beginTryIt() enters the ephemeral scope — a capture started while it's active isn't saved; .inserted still sets tryItResult")
     func tryItSuppressesHistory() async throws {
         let h = try Harness()
-        let (vm, _, _, dc, _) = h.viewModel(step: .tryIt)
+        let (vm, _, _, dc, scope) = h.viewModel(step: .tryIt)
         vm.beginTryIt()
+        #expect(scope.isActive)
 
         dc.fn(.down)
         // `.armed(_)`/`.listening(_)` (explicit wildcard payload), not `if case .armed = $0` — same
@@ -305,12 +305,13 @@ struct OnboardingViewModelTests {
 
     // MARK: B-1 — the try-it observation lifecycle must not leak past onboarding
 
-    @Test("B-1: a fresh view model resuming with completed == true never arms try-it suppression, even on .tryIt")
+    @Test("B-1: a fresh view model resuming with completed == true never enters the ephemeral scope, even on .tryIt")
     func completedNeverSuppresses() async throws {
         let h = try Harness()
-        let (vm, _, _, dc, _) = h.viewModel(step: .tryIt, completed: true)
+        let (vm, _, _, dc, scope) = h.viewModel(step: .tryIt, completed: true)
 
         vm.beginTryIt()   // must no-op: onboarding is already completed
+        #expect(scope.isActive == false)
 
         dc.fn(.down)
         await waitFor { if case .armed(_) = dc.state { true } else { false } }
@@ -323,14 +324,16 @@ struct OnboardingViewModelTests {
         #expect(try h.historyStore.count() == 1)   // never suppressed
     }
 
-    @Test("B-1: finish() stops the observation — a dictation started after finish() is saved normally")
+    @Test("B-1: finish() leaves the ephemeral scope — a dictation started after finish() is saved normally")
     func finishStopsObservation() async throws {
         let h = try Harness()
-        let (vm, state, _, dc, _) = h.viewModel(step: .tryIt)
+        let (vm, state, _, dc, scope) = h.viewModel(step: .tryIt)
         vm.beginTryIt()
+        #expect(scope.isActive)
 
         vm.finish()
         #expect(state.completed)
+        #expect(scope.isActive == false)
 
         dc.fn(.down)
         await waitFor { if case .armed(_) = dc.state { true } else { false } }
@@ -343,49 +346,37 @@ struct OnboardingViewModelTests {
         #expect(try h.historyStore.count() == 1)
     }
 
-    @Test("B-1/M-2: leaving .tryIt (e.g. Back) after only arming clears a pending suppression instead of leaking into the next save")
+    @Test("B-1/M-2: leaving .tryIt (e.g. Back) after only arming leaves the ephemeral scope — the next capture is saved normally")
     func leavingTryItClearsSuppression() async throws {
         let h = try Harness()
-        let (vm, _, _, _, historyWriter) = h.viewModel(step: .tryIt)
+        let (vm, _, _, dc, scope) = h.viewModel(step: .tryIt)
         vm.beginTryIt()
-        historyWriter.suppressNext()   // simulates the .armed transition having suppressed the capture
+        #expect(scope.isActive)
 
         vm.back()   // leaves .tryIt without ever reaching .inserted
-
-        await historyWriter.save(OnboardingViewModelTests.sampleResult, appName: "Test")
-        #expect(try h.historyStore.count() == 1)   // the stale suppression didn't eat this save
-    }
-
-    @Test("N-2: a try-it capture discarded (Esc) while still on .tryIt clears the suppression instead of leaking into the next save")
-    func discardedTryItClearsSuppression() async throws {
-        let h = try Harness()
-        let (vm, _, _, dc, historyWriter) = h.viewModel(step: .tryIt)
-        vm.beginTryIt()
+        #expect(scope.isActive == false)
 
         dc.fn(.down)
         await waitFor { if case .armed(_) = dc.state { true } else { false } }
-        dc.escape()
-        await waitFor { dc.state == .discarded }
-        // Let the VM's `withObservationTracking` hop actually process `.discarded` before checking —
-        // no observable side effect of "the flag was cleared" exists to poll directly, so this gives
-        // the (non-blocking, actor-hop-only) handler ample chances to run.
-        for _ in 0..<200 { await Task.yield() }
-
-        await historyWriter.save(OnboardingViewModelTests.sampleResult, appName: "Test")
-        #expect(try h.historyStore.count() == 1)   // the discarded try-it didn't eat this save
+        await h.clock.advance(by: 0.3)
+        await waitFor { if case .listening(_) = dc.state { true } else { false } }
+        dc.fn(.up)
+        await waitFor { (try? h.historyStore.count()) == 1 }
+        #expect(try h.historyStore.count() == 1)   // the stale suppression didn't eat this save
     }
 
-    @Test("N-2: endTryIt() (e.g. the onboarding window closing mid-try-it) clears a pending suppression")
+    @Test("N-2: endTryIt() (e.g. the onboarding window closing mid-try-it) leaves the ephemeral scope; idempotent against a second call")
     func endTryItClearsSuppression() async throws {
         let h = try Harness()
-        let (vm, _, _, _, historyWriter) = h.viewModel(step: .tryIt)
+        let (vm, _, _, _, scope) = h.viewModel(step: .tryIt)
         vm.beginTryIt()
-        historyWriter.suppressNext()   // simulates the .armed transition having suppressed the capture
+        #expect(scope.isActive)
 
         vm.endTryIt()   // e.g. the window is closed instead of "Back"/"Start using VoxFlow"
+        #expect(scope.isActive == false)
 
-        await historyWriter.save(OnboardingViewModelTests.sampleResult, appName: "Test")
-        #expect(try h.historyStore.count() == 1)   // the stale suppression didn't eat this save
+        vm.endTryIt()   // a second call (e.g. transition(to:) then onDisappear) must not go negative
+        #expect(scope.isActive == false)
     }
 
     @Test("N-3: finish() resets the in-memory step to .welcome, not just the persisted one")

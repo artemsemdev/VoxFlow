@@ -8,7 +8,7 @@ struct HistoryPage: View {
     private var model: HistoryViewModel { services.historyViewModel }
 
     var body: some View {
-        HistoryPageBody(viewModel: model)
+        HistoryPageBody(viewModel: model, ephemeralScope: services.ephemeralScope)
             .navigationTitle("History")
             // `.task` re-runs on every navigation back to History — `refresh()` (not `load()`)
             // respects an in-progress search so it doesn't clobber a filtered list with the
@@ -21,6 +21,7 @@ struct HistoryPage: View {
 /// (or an empty state), footer, the delete-undo toast, and the scratchpad sheet.
 struct HistoryPageBody: View {
     let viewModel: HistoryViewModel
+    let ephemeralScope: EphemeralScope
 
     var body: some View {
         VStack(spacing: 0) {
@@ -33,9 +34,10 @@ struct HistoryPageBody: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            // History-off already says so front and centre — a retention/encryption footer under it
-            // would read as contradicting itself (M10).
-            if viewModel.emptyState != .historyOff {
+            // History-off already says so front and centre, and an unavailable store has nothing a
+            // retention/encryption footer could usefully add — either would read as contradicting the
+            // empty state above it (M10, extended to I-4's `.unavailable`).
+            if !hidesFooter {
                 Divider()
                 Text(viewModel.footerText)
                     .font(.caption)
@@ -52,7 +54,14 @@ struct HistoryPageBody: View {
             }
         }
         .sheet(isPresented: scratchpadBinding) {
-            ScratchpadSheet(text: scratchpadTextBinding)
+            ScratchpadSheet(text: scratchpadTextBinding, ephemeralScope: ephemeralScope)
+        }
+    }
+
+    private var hidesFooter: Bool {
+        switch viewModel.emptyState {
+        case .historyOff, .unavailable: true
+        case .noDictations, .noResults, nil: false
         }
     }
 
@@ -154,10 +163,12 @@ struct HistoryRowList: View {
 }
 
 /// "Try it in a scratchpad" (design 2d): a small sheet to say something into without leaving a real
-/// history entry — `HistoryViewModel` suppresses the next save for as long as this is up (the same
-/// pattern onboarding's Try It step uses).
+/// history entry — entering/leaving `ephemeralScope` on appear/disappear is what keeps a capture
+/// started while this is up out of real History (I-1/I-2/I-3), the same pattern onboarding's Try It
+/// step uses (`OnboardingViewModel.beginTryIt()`/`endTryIt()`).
 private struct ScratchpadSheet: View {
     @Binding var text: String
+    let ephemeralScope: EphemeralScope
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -177,5 +188,7 @@ private struct ScratchpadSheet: View {
             }
         }
         .padding(20)
+        .onAppear { ephemeralScope.enter() }
+        .onDisappear { ephemeralScope.leave() }
     }
 }
