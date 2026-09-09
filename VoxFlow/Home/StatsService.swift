@@ -70,6 +70,15 @@ final class StatsService {
     /// Last `recentLimit` dictations for the Home page's "Recent" list (design ruling 1).
     private(set) var recent: [DictationRecord] = []
 
+    /// False while the history store itself is unavailable this session (`HistoryService.status ==
+    /// .disabled`, e.g. a lost Keychain key) — `refresh()` zeroes `recent`/`today`/`week` exactly the
+    /// same way it does for a genuinely empty store, so `HomeViewModel.isFirstRun` needs this to tell
+    /// "no dictations ever" apart from "can't read the store right now" (review minor 1).
+    var isHistoryAvailable: Bool {
+        if case .disabled = history.status { return false }
+        return true
+    }
+
     private let history: HistoryService
     private let now: () -> Date
     private let calendar: Calendar

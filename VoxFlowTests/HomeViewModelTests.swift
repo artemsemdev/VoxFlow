@@ -11,6 +11,13 @@ private struct FakeHistoryKeyProvider: HistoryKeyProviding {
     func historyKey() throws -> HistoryKey { HistoryKey(key: SymmetricKey(size: .bits256), isNewlyCreated: false) }
 }
 
+/// Claims `isNewlyCreated: true` on every call — opening an *already-encrypted* database with this
+/// is exactly what `DictationStore` treats as "the original key is gone" (`StorageError.keyLost`),
+/// mirroring `HistoryViewModelTests.emptyStateUnavailableWhenHistoryDisabled`'s harness.
+private struct FakeFreshKeyProvider: HistoryKeyProviding {
+    func historyKey() throws -> HistoryKey { HistoryKey(key: SymmetricKey(size: .bits256), isNewlyCreated: true) }
+}
+
 @Suite("HomeRecentRow")
 @MainActor
 struct HomeRecentRowTests {
@@ -222,6 +229,36 @@ struct HomeViewModelTests {
         #expect(!h.vm.isFirstRun)
     }
 
+    @Test("isFirstRun: false when the history store is unavailable — normal page with zeroed stats, not the first-run welcome")
+    func firstRunFalseWhenHistoryUnavailable() async throws {
+        let dir = TemporaryDirectory()
+        let url = dir.file("voxflow.sqlite")
+        // An already-encrypted database on disk (mirrors `HistoryViewModelTests`' harness): opening
+        // it below with a "fresh" key provider makes `DictationStore` throw `.keyLost`, landing
+        // `HistoryService.status` in `.disabled` — `recent` ends up empty exactly like a genuinely
+        // first-time user, so this is the case review minor 1 is about.
+        _ = try DictationStore(databaseURL: url, keyProvider: FakeHistoryKeyProvider())
+            .insert(DictationDraft(text: "secret", rawText: "secret", appName: "Mail", style: nil,
+                                   language: "en", duration: 1, createdAt: Date()))
+
+        let settings = DictationSettings(store: InMemoryKeyValueStore())
+        settings.retentionDays = 0
+        let brokenHistory = HistoryService(url: url, settings: settings, keyProvider: { FakeFreshKeyProvider() }, clock: FakeClock())
+        let stats = StatsService(history: brokenHistory)
+        let navigation = Navigation()
+        let permissions = FakePermissions(microphone: .granted, requestResult: .granted, accessibility: true)
+        let vm = HomeViewModel(stats: stats, settings: settings, permissions: permissions,
+                               modelStatus: { HomeModelStatus(readiness: .loaded, displayName: "large-v3-turbo") },
+                               navigation: navigation, ephemeralScope: EphemeralScope())
+        await vm.refresh()
+
+        #expect(!stats.isHistoryAvailable)
+        #expect(!vm.isFirstRun)
+        // Normal-page formatting of an all-zero `HomeStats`, not the first-run "—/—/—/0" placeholders.
+        #expect(vm.statCards.map(\.value) == ["0", "0", "—", "0"])
+        withExtendedLifetime(dir) {}   // the temp dir must outlive the broken service's open attempt
+    }
+
     @Test("showsSetupCard: true on first run even with every permission granted")
     func showsSetupCardFirstRun() async {
         let h = Harness()
@@ -352,5 +389,73 @@ struct HomeViewModelTests {
         #expect(h.ephemeralScope.isActive)
         h.vm.leaveScratchpad()
         #expect(!h.ephemeralScope.isActive)
+    }
+
+    @Test("referenceDate is the injected now(), for WeekChart's calendar-driven 'today' (review minor 3)")
+    func referenceDate() {
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        let h = Harness(now: now)
+        #expect(h.vm.referenceDate == now)
+    }
+}
+
+@Suite("WeekChart")
+@MainActor
+struct WeekChartTests {
+    private var utc: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        return calendar
+    }
+
+    private func date(_ year: Int, _ month: Int, _ day: Int, hour: Int = 12) -> Date {
+        utc.date(from: DateComponents(year: year, month: month, day: day, hour: hour))!
+    }
+
+    @Test("isToday: same calendar day as referenceDate, regardless of time of day")
+    func isTodaySameDay() {
+        let referenceDate = date(2026, 9, 9, hour: 15)
+        #expect(WeekChart.isToday(date(2026, 9, 9, hour: 0), referenceDate: referenceDate, calendar: utc))
+        #expect(WeekChart.isToday(date(2026, 9, 9, hour: 23), referenceDate: referenceDate, calendar: utc))
+        #expect(!WeekChart.isToday(date(2026, 9, 8, hour: 23), referenceDate: referenceDate, calendar: utc))
+        #expect(!WeekChart.isToday(date(2026, 9, 10, hour: 0), referenceDate: referenceDate, calendar: utc))
+    }
+
+    @Test("isToday: driven by the date, not array position — a referenceDate that isn't the last bucket still lights up the right one")
+    func isTodayIsNotPositional() {
+        // Oldest-first week ending three days *before* referenceDate (e.g. a stale render, or a
+        // week array built for a different purpose than `StatsService.week`) — the positional rule
+        // (`index == days.count - 1`) this replaces would have wrongly lit the last bucket.
+        let referenceDate = date(2026, 9, 9)
+        let days = (0..<7).map { offset in date(2026, 9, 3 + offset) }   // Sep 3...Sep 9
+        let flags = days.map { WeekChart.isToday($0, referenceDate: referenceDate, calendar: utc) }
+        #expect(flags == [false, false, false, false, false, false, true])   // Sep 9 is index 6 here too, but *because* it's the date match
+
+        let daysNotEndingToday = (0..<7).map { offset in date(2026, 9, 1 + offset) }   // Sep 1...Sep 7 — no Sep 9 at all
+        #expect(daysNotEndingToday.allSatisfy { !WeekChart.isToday($0, referenceDate: referenceDate, calendar: utc) })
+    }
+
+    @Test("barHeight: proportional to the week's max day; a zero-word day still draws barMinHeight, never zero")
+    func barHeight() {
+        let days = [DayWords(date: date(2026, 9, 1), words: 0), DayWords(date: date(2026, 9, 2), words: 50),
+                    DayWords(date: date(2026, 9, 3), words: 100)]
+        #expect(WeekChart.barHeight(for: days[0], in: days) == WeekChart.barMinHeight)
+        #expect(WeekChart.barHeight(for: days[2], in: days) == WeekChart.barMaxHeight)   // the max day fills the full height
+        #expect(WeekChart.barHeight(for: days[1], in: days) == WeekChart.barMaxHeight / 2)
+
+        // An all-zero week degrades to a flat row of minimum-height slivers rather than dividing by 0.
+        let allZero = [DayWords(date: date(2026, 9, 1), words: 0), DayWords(date: date(2026, 9, 2), words: 0)]
+        #expect(allZero.allSatisfy { WeekChart.barHeight(for: $0, in: allZero) == WeekChart.barMinHeight })
+    }
+
+    @Test("letter: very-short weekday symbol, matching the canvas's T W T F S S M for a week ending Monday")
+    func letter() {
+        let locale = Locale(identifier: "en_US")
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        calendar.locale = locale
+        // Sept 1, 2026 is a Tuesday; a 7-day window ending Monday Sept 7 is Tue…Mon.
+        let letters = (1...7).map { day in WeekChart.letter(for: date(2026, 9, day), calendar: calendar) }
+        #expect(letters == ["T", "W", "T", "F", "S", "S", "M"])
     }
 }

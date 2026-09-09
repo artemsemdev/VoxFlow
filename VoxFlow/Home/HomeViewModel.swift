@@ -112,7 +112,13 @@ final class HomeViewModel {
     /// No dictation has ever been saved. `StatsService.recent` is the store's most-recent-first
     /// list with no date filter (`DictationStore.fetch(limit:)` orders by `created_at DESC` with no
     /// `WHERE`), so an empty list here means exactly "zero dictations ever" — not just "none today".
-    var isFirstRun: Bool { stats.recent.isEmpty }
+    ///
+    /// Gated on `stats.isHistoryAvailable`: a disabled store (lost Keychain key, failed open) also
+    /// leaves `recent` empty, but that's "can't read history right now", not "welcome, first-timer"
+    /// — review minor 1. A disabled store falls through to the normal MW-01 layout instead, where
+    /// every number reads its ordinary empty-state value (0 / "—" pace) rather than the first-run
+    /// placeholders.
+    var isFirstRun: Bool { stats.recent.isEmpty && stats.isHistoryAvailable }
 
     /// Ruling 3 / 3e: the Setup card shows on first run, and again on a returning MW-01 whenever a
     /// permission (not the model) is missing — a model download in progress doesn't re-litigate
@@ -147,6 +153,11 @@ final class HomeViewModel {
     var recentRows: [HomeRecentRow] { stats.recent.map { HomeRecentRow.make(from: $0, now: now()) } }
     var week: [DayWords] { stats.week }
     var weekTotalText: String { "\(Self.grouped(stats.weekTotal)) words" }
+    /// What `WeekChart` compares each bucket's date against to decide which bar is "today" — this
+    /// view model's own `now()`, not the view's system clock, so a test-injected `now` (and, in
+    /// production, the moment `refresh()` last ran) is what actually drives the accent, not array
+    /// position (review minor 3).
+    var referenceDate: Date { now() }
 
     func seeAll() { navigation.page = .history }
 

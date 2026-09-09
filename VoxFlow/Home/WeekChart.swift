@@ -7,11 +7,15 @@ struct WeekChart: View {
     /// Oldest first, ending today — `StatsService.week` / `HomeViewModel.week`.
     let days: [DayWords]
     let totalText: String
+    /// What each bucket's date is compared against to find "today" (`HomeViewModel.referenceDate`) —
+    /// not the array position, which is only *incidentally* today for `StatsService.week` and would
+    /// be silently wrong for any other list (review minor 3).
+    let referenceDate: Date
     let calendar: Calendar
 
-    private static let barWidth: CGFloat = 22
-    private static let barMaxHeight: CGFloat = 64
-    private static let barMinHeight: CGFloat = 4
+    static let barWidth: CGFloat = 22
+    static let barMaxHeight: CGFloat = 64
+    static let barMinHeight: CGFloat = 4
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -21,13 +25,13 @@ struct WeekChart: View {
                 Text(totalText).font(.headline)
             }
             HStack(alignment: .bottom, spacing: 8) {
-                ForEach(Array(days.enumerated()), id: \.offset) { index, day in
-                    let isToday = index == days.count - 1
+                ForEach(Array(days.enumerated()), id: \.offset) { _, day in
+                    let isToday = Self.isToday(day.date, referenceDate: referenceDate, calendar: calendar)
                     VStack(spacing: 6) {
                         Spacer(minLength: 0)
                         RoundedRectangle(cornerRadius: 3, style: .continuous)
                             .fill(isToday ? Color.accentColor : Color.secondary.opacity(0.25))
-                            .frame(width: Self.barWidth, height: barHeight(for: day))
+                            .frame(width: Self.barWidth, height: Self.barHeight(for: day, in: days))
                         Text(Self.letter(for: day.date, calendar: calendar))
                             .font(.caption2)
                             .foregroundStyle(isToday ? Color.accentColor : .secondary)
@@ -41,12 +45,20 @@ struct WeekChart: View {
         .background(.background.secondary, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
+    /// Whether `date` falls on the same calendar day as `referenceDate` — the accent rule, calendar-
+    /// driven rather than positional (review minor 3). `HomeViewModel.referenceDate` is `now()`, so
+    /// this is testable independent of the system clock.
+    static func isToday(_ date: Date, referenceDate: Date, calendar: Calendar) -> Bool {
+        calendar.isDate(date, inSameDayAs: referenceDate)
+    }
+
     /// Every bar's height relative to the week's busiest day; a day with 0 words still draws a thin
-    /// sliver (`barMinHeight`) rather than vanishing entirely.
-    private func barHeight(for day: DayWords) -> CGFloat {
+    /// sliver (`barMinHeight`) rather than vanishing entirely. `static`, not a `body`-local closure,
+    /// so it's directly testable (review minor 4).
+    static func barHeight(for day: DayWords, in days: [DayWords]) -> CGFloat {
         let maxWords = max(days.map(\.words).max() ?? 0, 1)
         let fraction = CGFloat(day.words) / CGFloat(maxWords)
-        return max(Self.barMinHeight, Self.barMaxHeight * fraction)
+        return max(barMinHeight, barMaxHeight * fraction)
     }
 
     /// Calendar's very-short weekday symbol for `date`'s weekday. `veryShortWeekdaySymbols` is

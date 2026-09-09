@@ -23,6 +23,11 @@ struct HomeRenderTests {
     private struct Bundle {
         let vm: HomeViewModel
         let history: HistoryService
+        /// Kept alive here (review minor 2) — `HistoryService` opens lazily, *after* `makeBundle`
+        /// returns, so a `dir` that's only a `makeBundle` local risks `TemporaryDirectory.deinit`
+        /// deleting the directory before that open ever reads it. Renders happened to survive that
+        /// ordering, but it was never guaranteed.
+        let dir: TemporaryDirectory
     }
 
     /// A fixed Monday so the header/date line and week-chart day letters match the canvas exactly
@@ -50,7 +55,7 @@ struct HomeRenderTests {
         let vm = HomeViewModel(stats: stats, settings: settings, permissions: permissions,
                                modelStatus: { modelStatus }, navigation: navigation,
                                ephemeralScope: EphemeralScope(), now: { Self.now }, fullUserName: { "Anh Nguyen" })
-        return Bundle(vm: vm, history: history)
+        return Bundle(vm: vm, history: history, dir: dir)
     }
 
     /// Four "Recent" rows (matching the canvas examples) plus a spread of earlier-in-the-week
@@ -138,18 +143,25 @@ private struct HomeRenderPreview: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             HomeHeaderView(title: viewModel.headerTitle, subtitle: viewModel.headerSubtitle, modeChip: viewModel.modeChip)
-            if viewModel.showsSetupCard {
-                SetupCard(rows: viewModel.setupRows, perform: viewModel.perform)
-            }
-            StatCardsRow(cards: viewModel.statCards)
             if viewModel.isFirstRun {
-                tryItPreview
+                HStack(alignment: .top, spacing: 20) {
+                    SetupCard(rows: viewModel.setupRows, perform: viewModel.perform)
+                        .frame(width: HomeContentView.firstRunSetupCardWidth, alignment: .top)
+                    tryItPreview
+                        .frame(maxWidth: .infinity, alignment: .top)
+                }
+                StatCardsRow(cards: viewModel.statCards)
             } else {
+                if viewModel.showsSetupCard {
+                    SetupCard(rows: viewModel.setupRows, perform: viewModel.perform)
+                }
+                StatCardsRow(cards: viewModel.statCards)
                 HStack(alignment: .top, spacing: 20) {
                     RecentList(rows: viewModel.recentRows, seeAll: viewModel.seeAll)
                         .frame(maxWidth: .infinity, alignment: .top)
                     VStack(spacing: 20) {
-                        WeekChart(days: viewModel.week, totalText: viewModel.weekTotalText, calendar: .current)
+                        WeekChart(days: viewModel.week, totalText: viewModel.weekTotalText,
+                                 referenceDate: viewModel.referenceDate, calendar: .current)
                         EverythingStaysOnYourMacCard()
                     }
                     .frame(maxWidth: .infinity, alignment: .top)

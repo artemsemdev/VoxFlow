@@ -28,27 +28,39 @@ struct HomePageBody: View {
     }
 }
 
-/// The page content itself: greeting header + mode chip, the Setup card (first run, or ruling 3e's
-/// "permission missing" return visit), four stat cards, and either the first-run "Try it here"
-/// scratchpad or the Recent/This-week/"Everything stays on your Mac" trio.
+/// The page content itself: greeting header + mode chip, then either the first-run pair (MW-01e:
+/// Setup ~45% + "Try it here" side by side, stat cards below both — canvas page 3) or the returning
+/// layout (MW-01: the Setup card full-width when ruling 3e applies, stat cards, then
+/// Recent/This-week/"Everything stays on your Mac").
 struct HomeContentView: View {
     let viewModel: HomeViewModel
+    /// The Setup card's share of the first-run row's width (canvas page 3: Setup left ≈ 45%, "Try it
+    /// here" fills the rest) — a fixed point width rather than a `GeometryReader` fraction, since the
+    /// two cards' natural heights differ and a `GeometryReader` would have to be pinned to one.
+    static let firstRunSetupCardWidth: CGFloat = 420
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             HomeHeaderView(title: viewModel.headerTitle, subtitle: viewModel.headerSubtitle, modeChip: viewModel.modeChip)
-            if viewModel.showsSetupCard {
-                SetupCard(rows: viewModel.setupRows, perform: viewModel.perform)
-            }
-            StatCardsRow(cards: viewModel.statCards)
             if viewModel.isFirstRun {
-                TryItCard(onAppear: viewModel.enterScratchpad, onDisappear: viewModel.leaveScratchpad)
+                HStack(alignment: .top, spacing: 20) {
+                    SetupCard(rows: viewModel.setupRows, perform: viewModel.perform)
+                        .frame(width: Self.firstRunSetupCardWidth, alignment: .top)
+                    TryItCard(onAppear: viewModel.enterScratchpad, onDisappear: viewModel.leaveScratchpad)
+                        .frame(maxWidth: .infinity, alignment: .top)
+                }
+                StatCardsRow(cards: viewModel.statCards)
             } else {
+                if viewModel.showsSetupCard {
+                    SetupCard(rows: viewModel.setupRows, perform: viewModel.perform)
+                }
+                StatCardsRow(cards: viewModel.statCards)
                 HStack(alignment: .top, spacing: 20) {
                     RecentList(rows: viewModel.recentRows, seeAll: viewModel.seeAll)
                         .frame(maxWidth: .infinity, alignment: .top)
                     VStack(spacing: 20) {
-                        WeekChart(days: viewModel.week, totalText: viewModel.weekTotalText, calendar: .current)
+                        WeekChart(days: viewModel.week, totalText: viewModel.weekTotalText,
+                                 referenceDate: viewModel.referenceDate, calendar: .current)
                         EverythingStaysOnYourMacCard()
                     }
                     .frame(maxWidth: .infinity, alignment: .top)
