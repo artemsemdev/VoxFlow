@@ -55,6 +55,9 @@ final class AppServices {
     /// Owns the `DictationStore`/`RetentionRunner`; `historyService.status` is `.disabled(reason:)`
     /// when history storage is unavailable this launch (see `StorageError.keyLost`) or reopening failed.
     let historyService: HistoryService
+    /// Drives the History page (design MW-02) — built once here so navigating away and back keeps
+    /// its search/expanded/undo state, same reasoning as `filesViewModel`.
+    let historyViewModel: HistoryViewModel
     let inserter: AccessibilityTextInserter
     let dictationController: DictationController
     let dictation: DictationCoordinator
@@ -68,7 +71,7 @@ final class AppServices {
     private init(modelStore: ModelStore, engine: WhisperCppEngine, queue: FileQueue, filesSettings: FilesSettings,
                  durations: AudioDurationReader, exports: ExportCoordinator, navigation: Navigation,
                  filesViewModel: FilesViewModel, modelsViewModel: ModelsViewModel, dictationSettings: DictationSettings,
-                 modelLoader: ModelLoader, historyService: HistoryService,
+                 modelLoader: ModelLoader, historyService: HistoryService, historyViewModel: HistoryViewModel,
                  inserter: AccessibilityTextInserter, dictationController: DictationController,
                  dictation: DictationCoordinator, flowBar: FlowBarPresenter, fnMonitor: FnKeyMonitor,
                  onboardingState: OnboardingState, onboardingViewModel: OnboardingViewModel) {
@@ -84,6 +87,7 @@ final class AppServices {
         self.dictationSettings = dictationSettings
         self.modelLoader = modelLoader
         self.historyService = historyService
+        self.historyViewModel = historyViewModel
         self.inserter = inserter
         self.dictationController = dictationController
         self.dictation = dictation
@@ -158,6 +162,12 @@ final class AppServices {
                                              permissions: permissions, navigation: navigation)
         levelSink.attach(dictation)
 
+        // Injects `dictation`/`historyWriter` so History's "Try it in a scratchpad" (design 2d) can
+        // suppress the next save the same way onboarding's Try It step does.
+        let historyViewModel = HistoryViewModel(service: historyService, settings: dictationSettings, navigation: navigation,
+                                                clock: SystemMonotonicClock(), dictation: dictation, historyWriter: historyWriter,
+                                                pasteboard: SystemPasteboard())
+
         // Live settings: a silence-stop change reaches the running controller without waiting for
         // the next dictation to start it fresh; an encryption/retention change reopens the store.
         dictationSettings.onConfigChange = { config in Task { await dictationController.updateConfig(config) } }
@@ -181,7 +191,7 @@ final class AppServices {
         return AppServices(modelStore: modelStore, engine: engine, queue: queue, filesSettings: filesSettings,
                            durations: durations, exports: exports, navigation: navigation, filesViewModel: filesViewModel,
                            modelsViewModel: modelsViewModel, dictationSettings: dictationSettings, modelLoader: modelLoader,
-                           historyService: historyService, inserter: inserter,
+                           historyService: historyService, historyViewModel: historyViewModel, inserter: inserter,
                            dictationController: dictationController, dictation: dictation, flowBar: flowBar, fnMonitor: fnMonitor,
                            onboardingState: onboardingState, onboardingViewModel: onboardingViewModel)
     }
