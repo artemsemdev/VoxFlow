@@ -13,21 +13,22 @@ public actor FakeLLMBackend: StyleEngine {
     public private(set) var loadedURLs: [URL] = []
     public private(set) var unloadCount = 0
     private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var released = false
 
     public init(ready: Bool = true, reply: String = "") { self.ready = ready; self.reply = reply }
 
     public func set(ready: Bool) { self.ready = ready }
     public func set(reply: String) { self.reply = reply }
     public func set(error: LLMError?) { self.error = error }
-    public func set(hangs: Bool) { self.hangs = hangs }
-    public func release() { waiters.forEach { $0.resume() }; waiters.removeAll() }
+    public func set(hangs: Bool) { self.hangs = hangs; released = false }
+    public func release() { released = true; waiters.forEach { $0.resume() }; waiters.removeAll() }
 
     public func isReady() async -> Bool { ready }
 
     public func generate(_ prompt: ChatPrompt, maxNewTokens: Int) async throws -> String {
         prompts.append(prompt); maxTokens.append(maxNewTokens)
         if let error { throw error }
-        if hangs {
+        if hangs && !released {
             await withTaskCancellationHandler {
                 await withCheckedContinuation { waiters.append($0) }
             } onCancel: { Task { await self.release() } }

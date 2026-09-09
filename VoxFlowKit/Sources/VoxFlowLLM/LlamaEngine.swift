@@ -17,15 +17,19 @@ public actor LlamaEngine: StyleEngine {
 
     /// Owns the `llama_model` pointer and frees it when the engine (or an in-flight run) lets go.
     final class ModelBox: @unchecked Sendable {
-        // Safe: the pointer is only dereferenced on LlamaEngine.queue while runs are in flight;
-        // deinit runs when the last reference goes away, so nothing can be using it.
+        // Safe: the pointer is only dereferenced on LlamaEngine.queue while runs are in flight, and
+        // `load`/`unload` always drop their last reference inside `release(model:context:)`'s
+        // `onQueue` body, so `llama_model_free` always runs on `queue`, never on the actor's
+        // cooperative executor.
         let pointer: OpaquePointer
         init(_ pointer: OpaquePointer) { self.pointer = pointer }
         deinit { llama_model_free(pointer) }
     }
 
     final class ContextBox: @unchecked Sendable {
-        // Safe: same rule as ModelBox — only touched on LlamaEngine.queue.
+        // Safe: same rule as ModelBox — only touched on LlamaEngine.queue, and its last reference is
+        // always dropped inside `release(model:context:)`'s `onQueue` body, so `llama_free` always
+        // runs on `queue`.
         let pointer: OpaquePointer
         init(_ pointer: OpaquePointer) { self.pointer = pointer }
         deinit { llama_free(pointer) }
@@ -41,10 +45,10 @@ public actor LlamaEngine: StyleEngine {
     public func isReady() async -> Bool { context != nil }
 
     public func load(modelAt url: URL) async throws {
-        _ = Self.backendInit
         let path = url.path
         let parameters = parameters
         let boxes: (ModelBox, ContextBox) = try await onQueue {
+            _ = Self.backendInit
             var modelParams = llama_model_default_params()
             modelParams.n_gpu_layers = parameters.gpuLayers
             guard let model = llama_model_load_from_file(path, modelParams) else { throw LLMError.modelLoadFailed(path) }
@@ -57,14 +61,31 @@ public actor LlamaEngine: StyleEngine {
             guard let context = llama_init_from_model(model, contextParams) else { throw LLMError.modelLoadFailed(path) }
             return (modelBox, ContextBox(context))
         }
+        let previousModel = model
+        let previousContext = context
         context = nil
         model = boxes.0
         context = boxes.1
+        await release(model: previousModel, context: previousContext)
     }
 
     public func unload() async {
-        context = nil
+        let previousModel = model
+        let previousContext = context
         model = nil
+        context = nil
+        await release(model: previousModel, context: previousContext)
+    }
+
+    /// Drops the last strong reference to `model`/`context` inside an `onQueue` body, so their
+    /// `deinit` (`llama_free` / `llama_model_free`) runs on `queue`, never synchronously on the
+    /// actor's cooperative executor. The caller has already nilled its own stored properties, so
+    /// these two parameters are the only remaining references — unless an in-flight `generate()`
+    /// still holds one, in which case its own reference keeps the box alive until that run finishes,
+    /// which is what makes a concurrent `unload()` safe.
+    private func release(model: ModelBox?, context: ContextBox?) async {
+        guard model != nil || context != nil else { return }
+        try? await onQueue { _ = (model, context) }
     }
 
     public func generate(_ prompt: ChatPrompt, maxNewTokens: Int) async throws -> String {
