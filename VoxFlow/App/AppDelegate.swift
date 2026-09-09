@@ -6,10 +6,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Starts the dictation loop exactly once: `dictation.start()` begins mirroring controller state,
     /// `flowBar.bind(to:)` shows/hides the HUD off that state, `fnMonitor.start()` arms the global
     /// fn/esc/any-key monitors (design 3e — needs Accessibility trust to see events at all).
+    ///
+    /// None of that (nor `historyService.ready()`) runs under the XCTest host: the test process must
+    /// never open the mic, install global fn/esc monitors or touch the Keychain (#143) just because
+    /// it launched the app to host its tests.
     func applicationDidFinishLaunching(_ notification: Notification) {
-        AppServices.shared.dictation.start()
-        AppServices.shared.flowBar.bind(to: AppServices.shared.dictation)
-        AppServices.shared.fnMonitor.start()
+        if LaunchEnvironment.isRunningTests() == false {
+            AppServices.shared.dictation.start()
+            AppServices.shared.flowBar.bind(to: AppServices.shared.dictation)
+            AppServices.shared.fnMonitor.start()
+            // `HistoryService` opens lazily (Keychain access deferred to first use) — run that open
+            // once here at a real launch so retention (design §5) runs at launch as the spec says,
+            // rather than waiting for the first History read/write to trigger it implicitly.
+            Task { await AppServices.shared.historyService.ready() }
+        }
 
         // First launch (or onboarding never finished): show it instead of the main window — closing
         // whatever SwiftUI already opened for `MainWindowID.main` so the two don't both appear.
