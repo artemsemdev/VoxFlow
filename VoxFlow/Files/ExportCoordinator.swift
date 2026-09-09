@@ -11,6 +11,14 @@ final class ExportCoordinator {
     private(set) var exportErrors: [UUID: String] = [:]
     private let task = Mutex<Task<Void, Never>?>(nil)
 
+    /// Fired after a successful export only — never on a failed one. MB-04 (review I2) subscribes
+    /// to this instead of racing `FileQueue.finished` directly: the two were independent
+    /// subscribers with no delivery-order guarantee, so a notification could post before the
+    /// export had written anything, with a hard-coded folder and even after the export itself
+    /// failed. This hook fires with the real written URL and the format actually used, exactly
+    /// once, only once the file is genuinely on disk.
+    var onExported: ((QueueItem, TranscriptDocument, URL, OutputFormat) -> Void)?
+
     init(queue: FileQueue, settings: FilesSettings, exporter: @escaping () -> TranscriptExporter) {
         let job = Task { [weak self] in
             let stream = await queue.subscribe()
@@ -32,8 +40,11 @@ final class ExportCoordinator {
         case .finished(let item):
             guard case .done(let document) = item.status else { return }
             do {
-                exportedURLs[item.id] = try exporter().export(document, format: settings.outputFormat, timestamps: settings.timestamps)
+                let format = settings.outputFormat
+                let url = try exporter().export(document, format: format, timestamps: settings.timestamps)
+                exportedURLs[item.id] = url
                 exportErrors[item.id] = nil
+                onExported?(item, document, url, format)
             } catch {
                 exportErrors[item.id] = error.localizedDescription
             }

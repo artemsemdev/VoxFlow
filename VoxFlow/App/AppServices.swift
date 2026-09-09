@@ -284,7 +284,8 @@ final class AppServices {
         // One instance, shared with `dictation` below (review fix, Task 4): `SystemMonotonicClock`
         // captures its own `origin` at `init` — two separate instances disagree about "now" by
         // however long apart they were created, which would throw off `DictationCoordinator`'s
-        // wall-clock projection of `pausedUntil` (`pausedUntilDate`, MB-02 "Paused until 10:41").
+        // wall-clock projection of `pausedUntil` (`MenuBarViewModel.pausedUntilText`, MB-02
+        // "Paused until 10:41").
         let clock = SystemMonotonicClock()
         let dictationController = DictationController(
             config: dictationSettings.flowBarConfig,
@@ -390,9 +391,11 @@ final class AppServices {
         let isMainWindowFrontmost: () -> Bool = {
             NSApp.isActive && NSApp.windows.contains { $0.isKeyWindow && $0.identifier?.rawValue == MainWindowID.main }
         }
+        // I2: subscribes to `exports.onExported` (the export's own success signal), not
+        // `queue.subscribe()` directly — see the type's own doc comment.
         let notifications = NotificationCoordinator(posting: notificationsPoster, isFrontmost: isMainWindowFrontmost,
-                                                     navigation: navigation, queue: queue, modelsViewModel: modelsViewModel,
-                                                     filesViewModel: filesViewModel, outputFormat: { filesSettings.outputFormat })
+                                                     navigation: navigation, exports: exports, modelsViewModel: modelsViewModel,
+                                                     filesViewModel: filesViewModel)
         routeSink.attach(notifications)
 
         return AppServices(modelStore: modelStore, engine: engine, queue: queue, filesSettings: filesSettings,

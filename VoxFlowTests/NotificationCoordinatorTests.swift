@@ -47,11 +47,14 @@ struct NotificationCoordinatorTests {
         let queue: FileQueue
         let exports: ExportCoordinator
         let filesViewModel: FilesViewModel
+        let transcriptsDirectory: URL
 
-        init() {
+        init(exportDirectory: URL? = nil) {
             let modelStore = ModelStore(directory: dir.file("Models"), downloader: FakeModelDownloader(),
                                         freeSpace: FakeFreeSpace(available: 10_000_000_000), settings: InMemoryKeyValueStore())
-            let transcriptsDirectory = dir.file("Transcripts")   // a local (not `self.dir`), so the escaping `exporter` closure below doesn't capture `self` before every stored property is set
+            // A local (not `self.dir`), so the escaping `exporter` closure below doesn't capture `self` before every stored property is set.
+            let transcriptsDirectory = exportDirectory ?? dir.file("Transcripts")
+            self.transcriptsDirectory = transcriptsDirectory
             queue = FileQueue(transcriber: transcriber, durations: durations, supportedExtensions: SupportedAudio.extensions,
                               options: { TranscriptionOptions() })
             exports = ExportCoordinator(queue: queue, settings: filesSettings, exporter: { TranscriptExporter(directory: transcriptsDirectory) })
@@ -89,9 +92,8 @@ struct NotificationCoordinatorTests {
 
     private func coordinator(files: FilesHarness, poster: FakePoster, models: ModelsViewModel,
                              navigation: Navigation, isFrontmost: @escaping () -> Bool) -> NotificationCoordinator {
-        NotificationCoordinator(posting: poster, isFrontmost: isFrontmost, navigation: navigation, queue: files.queue,
-                                modelsViewModel: models, filesViewModel: files.filesViewModel,
-                                outputFormat: { files.filesSettings.outputFormat })
+        NotificationCoordinator(posting: poster, isFrontmost: isFrontmost, navigation: navigation, exports: files.exports,
+                                modelsViewModel: models, filesViewModel: files.filesViewModel)
     }
 
     // MARK: Files (MB-04)
@@ -127,12 +129,61 @@ struct NotificationCoordinatorTests {
         await files.settle()
 
         let item = try #require(await files.queue.items.first)
+        let exportedURL = try #require(files.exports.url(for: item.id))
+        let folder = (exportedURL.deletingLastPathComponent().path as NSString).abbreviatingWithTildeInPath
         #expect(poster.posted.count == 1)
         let notification = try #require(poster.posted.first)
         #expect(notification.title == "VoxFlow")
-        #expect(notification.body == "interview-raw.m4a transcribed · 1:05 · TXT saved to ~/Transcripts")
+        // I2: the folder is the file's *real* destination, not a hard-coded "~/Transcripts" —
+        // `FilesHarness`'s default export directory is a temp dir, not the user's actual home, so
+        // this deliberately does **not** abbreviate down to "~".
+        #expect(notification.body == "interview-raw.m4a transcribed · 1:05 · TXT saved to \(folder)")
         #expect(notification.route == .filesResult(itemID: item.id))
         #expect(poster.authorizeCount == 1)
+    }
+
+    @Test("a custom output folder shows up verbatim in the notification body (I2)")
+    func fileBackgroundCustomFolder() async throws {
+        let customFolder = TemporaryDirectory().file("Desktop/Notes")
+        let files = FilesHarness(exportDirectory: customFolder)
+        await files.transcriber.script(Self.fileURL, .document(Self.document(duration: 65)))
+        let poster = FakePoster()
+        let coordinator = coordinator(files: files, poster: poster, models: ModelsHarness().viewModel(),
+                                      navigation: Navigation(), isFrontmost: { false })
+        coordinator.start()
+
+        await files.queue.add([Self.fileURL])
+        await files.queue.start()
+        await files.settle()
+
+        let item = try #require(await files.queue.items.first)
+        let exportedURL = try #require(files.exports.url(for: item.id))
+        #expect(exportedURL.deletingLastPathComponent().path == customFolder.path)   // sanity: really wrote there
+        let folder = (customFolder.path as NSString).abbreviatingWithTildeInPath
+        let notification = try #require(poster.posted.first)
+        #expect(poster.posted.count == 1)
+        #expect(notification.body == "interview-raw.m4a transcribed · 1:05 · TXT saved to \(folder)")
+    }
+
+    @Test("an export failure (not a transcription failure) never posts (I2)")
+    func fileExportFailureNeverPosts() async throws {
+        let outerDir = TemporaryDirectory()
+        let blockedPath = outerDir.file("Transcripts")
+        try Data("not a directory".utf8).write(to: blockedPath)   // a plain file where the exporter needs a directory
+        let files = FilesHarness(exportDirectory: blockedPath)
+        await files.transcriber.script(Self.fileURL, .document(Self.document(duration: 65)))
+        let poster = FakePoster()
+        let coordinator = coordinator(files: files, poster: poster, models: ModelsHarness().viewModel(),
+                                      navigation: Navigation(), isFrontmost: { false })
+        coordinator.start()
+
+        await files.queue.add([Self.fileURL])
+        await files.queue.start()
+        await files.settle()
+
+        let item = try #require(await files.queue.items.first)
+        #expect(files.exports.error(for: item.id) != nil)   // the export really did fail
+        #expect(poster.posted.isEmpty)
     }
 
     @Test("a failed transcription never posts, frontmost or not")

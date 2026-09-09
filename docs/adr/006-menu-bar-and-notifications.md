@@ -33,8 +33,11 @@ looking at.
   non-activating panel positioned under the status item's known screen
   location instead — close enough to read as attached, without pretending to
   be a first-class `NSPopover` anchored to the item (which would need private
-  API to reach). It shows once, gated by `OnboardingState.hintShown`
-  (`MenuBarHintPolicy.shouldShow`), triggered by `OnboardingViewModel.onFinished`
+  API to reach). It shows once, gated by `OnboardingState.hintShown` and
+  `GeneralSettings.showInMenuBar` (`MenuBarHintPolicy.shouldShow` — the latter
+  guard is review M4: without it, turning the menu bar item off before
+  finishing onboarding got a hint pointing at an empty menu bar), triggered by
+  `OnboardingViewModel.onFinished`
   (wired from `OnboardingWindow.onAppear` to
   `MenuBarServices.shared.showHintIfNeeded()`), and dismisses itself after 10 s
   or on the first sign of an actual dictation (`MenuBarHintPolicy.shouldDismiss`),
@@ -55,7 +58,13 @@ looking at.
   already auto-hidden. `DictationCoordinator.pause(for:)`/`resume()`/
   `pausedUntil` are the one place both the pill and the menu bar dropdown read
   from, so the two can't disagree about whether — or until when — VoxFlow is
-  paused.
+  paused. `DictationCoordinator.isHUDActive` (`FnKeyMonitor`'s gate for its
+  *global* `.keyDown` handler) excludes `.paused` (review I1): before FB-09
+  every non-idle state was seconds long, but a hold can last up to an hour,
+  and leaving `.paused` "HUD active" meant every keystroke in every app, for
+  the whole pause, forwarded into the dictation actor for no visible effect.
+  The pill itself is unaffected — `FlowBarPresenter` shows/hides off `state`,
+  never off `isHUDActive`.
 - **Notifications are completion-only, and only when nobody's looking.**
   `NotificationCoordinator` posts MB-03 (a model finishing an install) and
   MB-04 (a file finishing transcription) through `NotificationPosting` — never
@@ -67,10 +76,16 @@ looking at.
   Onboarding being key while the app is active still counts as "away", since
   the person isn't looking at Files or Home either, which is where the
   notification would take them.
-  - MB-04 subscribes to `FileQueue.subscribe()`'s `.finished(item)` and only
-    acts on `.done` (never `.failed`) — the queue's own definition of "this
-    file is completely finished, one way or another" already exists, so this
-    reuses it rather than re-deriving "done" from `QueueItem.status` itself.
+  - MB-04 subscribes to `ExportCoordinator.onExported` — the export's own
+    success signal, not `FileQueue.subscribe()`'s `.finished(item)` directly.
+    `ExportCoordinator` and `NotificationCoordinator` used to be two
+    independent subscribers to the same queue event with no delivery-order
+    guarantee, so a notification could post before the export had written
+    anything, with a hard-coded "~/Transcripts", and even when the export
+    itself then failed (review I2, phase 4b fix round). Subscribing to the
+    export's outcome instead means the body is always built from the file's
+    real destination (`FilesSettings.outputFolder`, abbreviated the same way
+    Finder/Save panels do) and never fires when the export failed.
   - MB-03 has no equivalent standalone event: `ModelStore.install(id:)`
     returns a fresh `AsyncThrowingStream` per call, and the one already in
     flight is fully consumed inside `ModelsViewModel.download(_:)`. Rather
@@ -103,7 +118,7 @@ looking at.
   for free — `MenuBarView` has to be a normal SwiftUI view with its own
   buttons and hit-testing, and hasn't been given the accessibility pass a
   native menu would get automatically. Acceptable for phase 4b; worth
-  revisiting once VoxOver-style navigation of the dropdown is asked for.
+  revisiting once VoiceOver-style navigation of the dropdown is asked for.
 - The hint panel is a good-enough approximation, not pixel-perfect: it
   guesses the status item's screen position from `NSStatusItem.button` at
   show time rather than tracking it live, so a status item that moves

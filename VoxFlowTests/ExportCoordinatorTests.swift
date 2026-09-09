@@ -85,4 +85,43 @@ struct ExportCoordinatorTests {
         #expect(h.exports.url(for: item.id) == nil)
         #expect(h.exports.error(for: item.id) != nil)
     }
+
+    // MARK: onExported (review I2 — MB-04 posts from this, not from FileQueue.finished)
+
+    @Test("onExported fires once, with the item, document, real written URL and format actually used, on success")
+    func onExportedFiresOnSuccess() async throws {
+        let h = Harness()
+        await h.transcriber.script(Self.a, .document(Self.doc(Self.a)))
+        var calls: [(QueueItem, TranscriptDocument, URL, OutputFormat)] = []
+        h.exports.onExported = { calls.append(($0, $1, $2, $3)) }
+
+        await h.queue.add([Self.a])
+        await h.queue.start()
+        await h.settle()
+
+        let item = try #require(await h.queue.items.first)
+        let url = try #require(h.exports.url(for: item.id))
+        #expect(calls.count == 1)
+        #expect(calls.first?.0.id == item.id)
+        #expect(calls.first?.2 == url)
+        #expect(calls.first?.3 == h.settings.outputFormat)
+    }
+
+    @Test("onExported never fires when the export itself fails, even though the transcription succeeded")
+    func onExportedNeverFiresOnFailure() async throws {
+        let outerDir = TemporaryDirectory()
+        let blockedPath = outerDir.file("Transcripts")
+        try Data("not a directory".utf8).write(to: blockedPath)
+        let h = Harness(exportDirectory: blockedPath)
+        await h.transcriber.script(Self.a, .document(Self.doc(Self.a)))
+        var calls = 0
+        h.exports.onExported = { _, _, _, _ in calls += 1 }
+
+        await h.queue.add([Self.a])
+        await h.queue.start()
+        await h.settle()
+
+        #expect(h.exports.error(for: (try #require(await h.queue.items.first)).id) != nil)
+        #expect(calls == 0)
+    }
 }

@@ -1,5 +1,4 @@
 import Foundation
-import Synchronization
 import VoxFlowCore
 import VoxFlowFiles
 import VoxFlowModels
@@ -10,7 +9,13 @@ import VoxFlowModels
 /// install failure already shows its own alert (`ModelsViewModel.Alert`).
 ///
 /// Two sources, two different "just finished" signals:
-/// - Files: `FileQueue.subscribe()`'s `.finished(item)` event — the queue's own definition of done.
+/// - Files: `ExportCoordinator.onExported` (review I2) — the export's own success signal, not
+///   `FileQueue.finished`. The queue event fires the instant transcription finishes, before either
+///   of its two independent subscribers (`ExportCoordinator`, this type) has necessarily run, so
+///   racing it directly could post "saved to …" before anything was written, with a hard-coded
+///   folder, and even when the export itself then failed. Subscribing to the export's own outcome
+///   instead means the body is always built from where the file actually landed, and never fires
+///   on a failed export.
 /// - Models: there is no standalone "install finished" event to subscribe to (`ModelStore.install`'s
 ///   stream is consumed entirely inside `ModelsViewModel.download(_:)`, one producer per row). The
 ///   cleanest existing surface is `ModelsViewModel`'s own `@Observable` `speechRows`/`styleRows` —
@@ -24,10 +29,9 @@ final class NotificationCoordinator {
     private let posting: any NotificationPosting
     private let isFrontmost: () -> Bool
     private let navigation: Navigation
-    private let queue: FileQueue
+    private let exports: ExportCoordinator
     private let modelsViewModel: ModelsViewModel
     private let filesViewModel: FilesViewModel
-    private let outputFormat: () -> OutputFormat
 
     /// `true` once `authorize()` has been requested — cached so a session that posts many
     /// notifications only ever prompts (or re-reads the cached OS answer) once (ruling 8: "requested
@@ -39,37 +43,22 @@ final class NotificationCoordinator {
     /// `speechRows`/`styleRows` happens to change for an unrelated reason.
     private var previousModelStates: [String: ModelState] = [:]
 
-    /// Boxed outside main-actor isolation so `deinit` (nonisolated, may run on any thread) can
-    /// cancel it without an isolation assertion — same pattern as `FilesViewModel.eventTask`.
-    private nonisolated let fileTask = Mutex<Task<Void, Never>?>(nil)
-
     init(posting: any NotificationPosting, isFrontmost: @escaping () -> Bool, navigation: Navigation,
-         queue: FileQueue, modelsViewModel: ModelsViewModel, filesViewModel: FilesViewModel,
-         outputFormat: @escaping () -> OutputFormat) {
+         exports: ExportCoordinator, modelsViewModel: ModelsViewModel, filesViewModel: FilesViewModel) {
         self.posting = posting
         self.isFrontmost = isFrontmost
         self.navigation = navigation
-        self.queue = queue
+        self.exports = exports
         self.modelsViewModel = modelsViewModel
         self.filesViewModel = filesViewModel
-        self.outputFormat = outputFormat
-    }
-
-    deinit {
-        fileTask.withLock { $0?.cancel() }
     }
 
     /// Begins both subscriptions — called once, at a real launch (`AppDelegate`, non-test path),
     /// same reasoning as `dictation.start()`/`fnMonitor.start()` right next to it.
     func start() {
-        let task = Task { [weak self, queue] in
-            let stream = await queue.subscribe()
-            for await event in stream {
-                guard let self else { break }
-                await self.handle(event)
-            }
+        exports.onExported = { [weak self] item, document, url, format in
+            self?.handleExported(item: item, document: document, url: url, format: format)
         }
-        fileTask.withLock { $0?.cancel(); $0 = task }
         // Seed `previousModelStates` from whatever's already loaded (typically empty this early —
         // `ModelsViewModel.refresh()` hasn't necessarily run yet) before the first observation
         // registers, so a row that's already `.installed` by the time rows are first read doesn't
@@ -101,20 +90,24 @@ final class NotificationCoordinator {
 
     // MARK: Files (MB-04)
 
-    private func handle(_ event: FileQueueEvent) async {
-        guard case .finished(let item) = event, case .done(let document) = item.status else { return }
+    /// Wired to `ExportCoordinator.onExported` (review I2) — fires once, only after the file is
+    /// actually written, with the URL it was actually written to.
+    private func handleExported(item: QueueItem, document: TranscriptDocument, url: URL, format: OutputFormat) {
         guard !isFrontmost() else { return }
-        let body = Self.fileBody(item: item, document: document, format: outputFormat())
-        await postIfNeeded(AppNotification(body: body, route: .filesResult(itemID: item.id)))
+        let body = Self.fileBody(item: item, document: document, url: url, format: format)
+        Task { await postIfNeeded(AppNotification(body: body, route: .filesResult(itemID: item.id))) }
     }
 
-    /// "{file name} transcribed · {m:ss or h:mm:ss} · {FORMAT} saved to ~/Transcripts" (design
-    /// MB-04, ruling 8). Duration prefers the item's own (the same number the Files queue row shows
-    /// while it's running) and falls back to the document's, in case the file's duration lookup
-    /// failed to attach to the row for some reason.
-    static func fileBody(item: QueueItem, document: TranscriptDocument, format: OutputFormat) -> String {
+    /// "{file name} transcribed · {m:ss or h:mm:ss} · {FORMAT} saved to {folder}" (design MB-04,
+    /// ruling 8) — `{folder}` is the *actual* exported file's containing folder (review I2, not a
+    /// hard-coded "~/Transcripts"), abbreviated the same way Finder/Save panels do. Duration prefers
+    /// the item's own (the same number the Files queue row shows while it's running) and falls back
+    /// to the document's, in case the file's duration lookup failed to attach to the row for some
+    /// reason.
+    static func fileBody(item: QueueItem, document: TranscriptDocument, url: URL, format: OutputFormat) -> String {
         let duration = item.duration ?? document.audioDuration
-        return "\(item.url.lastPathComponent) transcribed · \(durationText(duration)) · \(format.displayName) saved to ~/Transcripts"
+        let folder = (url.deletingLastPathComponent().path as NSString).abbreviatingWithTildeInPath
+        return "\(item.url.lastPathComponent) transcribed · \(durationText(duration)) · \(format.displayName) saved to \(folder)"
     }
 
     /// "3:45" under an hour, "1:03:45" at or past one — never zero-padded minutes/hours, always

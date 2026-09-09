@@ -20,8 +20,9 @@ final class DictationCoordinator {
     private let navigation: Navigation
     /// The coordinator's own "now" (`now()`, below) — ideally the same instance the controller's
     /// clock uses (production wiring lives in `AppServices.swift`, outside this task's file scope),
-    /// so `pausedUntilDate` projects `pausedUntil`'s monotonic timeline onto a wall-clock `Date`
-    /// consistently. Defaulted so every existing call site keeps compiling unchanged.
+    /// so `pausedUntil`'s monotonic timeline projects onto a wall-clock `Date` consistently
+    /// wherever a reader (e.g. `MenuBarViewModel.pausedUntilText`) does that math. Defaulted so
+    /// every existing call site keeps compiling unchanged.
     private let clock: any MonotonicClock
     /// Boxed outside main-actor isolation so `deinit` (nonisolated, may run on any thread) can cancel
     /// it without an isolation assertion — same pattern as `FilesViewModel.eventTask`.
@@ -41,7 +42,15 @@ final class DictationCoordinator {
     private(set) var levels: [Float] = Array(repeating: 0, count: DictationCoordinator.barCount)
     private(set) var elapsed: TimeInterval = 0
     var hotkeyMode: HotkeyMode { settings.hotkeyMode }
-    var isHUDActive: Bool { state != .idle }
+    /// I1: `.paused` is excluded even though `state != .idle` — before FB-09 every non-idle state
+    /// was seconds long, but `.paused(until:)` lasts up to an hour, and `FnKeyMonitor` gates its
+    /// *global* `.keyDown` handler on this. Leaving `.paused` "HUD active" meant every keystroke in
+    /// every app, for the whole pause, forwarded an `anyKey()`/`escape()` command into the
+    /// coordinator for no visible effect (`FlowBarMachine` already ignores them from `.paused` —
+    /// see `default: return []`) — harmless, but a needless firehose into the dictation actor and a
+    /// hijacked Esc key system-wide. The paused pill itself is unaffected: `FlowBarPresenter` shows/
+    /// hides off `state`, never off this property.
+    var isHUDActive: Bool { state != .idle && pausedUntil == nil }
 
     init(controller: DictationController, settings: DictationSettings, permissions: any PermissionChecking, navigation: Navigation,
          clock: any MonotonicClock = SystemMonotonicClock()) {
@@ -148,21 +157,6 @@ final class DictationCoordinator {
     /// reason (see review M4 at `FlowBarView.content`'s `.coordinator` case) — the countdown is a
     /// snapshot at render time, not a live ticker.
     func now() -> TimeInterval { clock.now() }
-
-    /// Wall-clock projection of `pausedUntil` for the menu bar's "Paused until 10:41" (design MB-02)
-    /// — `nil` outside `.paused`. `pausedUntil` and `now()` share this coordinator's monotonic
-    /// timeline, so `pausedUntil - now()` is "seconds from this instant", added onto the real
-    /// wall-clock `Date()` to get the wall-clock moment the pause ends.
-    ///
-    /// Review M9: `MenuBarViewModel.pausedUntilText` deliberately does *not* call this — it
-    /// recomputes the same projection from its own injected `now`/`locale` so the exact string is
-    /// test-deterministic, which leaves this property with the same formula duplicated. Left as-is;
-    /// unifying the two (and the coordinator/controller's separate `SystemMonotonicClock` instances)
-    /// is routed to whichever task next touches `AppServices.swift`.
-    var pausedUntilDate: Date? {
-        guard let pausedUntil else { return nil }
-        return Date().addingTimeInterval(pausedUntil - now())
-    }
 
     /// Called from `MeteredMicrophone.onLevel` (wrapped in `Task { @MainActor in }` by the caller).
     func reportLevel(_ rms: Float) {

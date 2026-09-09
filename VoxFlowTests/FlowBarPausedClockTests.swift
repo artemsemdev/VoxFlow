@@ -5,10 +5,10 @@ import VoxFlowDictation
 import VoxFlowTestSupport
 @testable import VoxFlow
 
-/// FB-09 "Paused · N min left" (`FlowBarContent`'s `now:` parameter) and the menu bar's
-/// "Paused until 10:41" (`DictationCoordinator.now()`/`pausedUntilDate`) — the coordinator-level
-/// half of the paused-pill plumbing `FlowBarContentTests`/`MenuBarViewModelTests` don't cover
-/// directly.
+/// FB-09 "Paused · N min left" (`FlowBarContent`'s `now:` parameter), the menu bar's "Paused until
+/// 10:41" (`DictationCoordinator.now()`), and `isHUDActive` staying false throughout a pause (I1)
+/// — the coordinator-level half of the paused-pill plumbing `FlowBarContentTests`/
+/// `MenuBarViewModelTests` don't cover directly.
 @Suite("DictationCoordinator paused clock")
 @MainActor
 struct FlowBarPausedClockTests {
@@ -35,28 +35,19 @@ struct FlowBarPausedClockTests {
         #expect(coordinator.now() == clock.now())
     }
 
-    @Test("pausedUntilDate is nil outside .paused, and projects pausedUntil onto a wall-clock Date once paused")
-    func pausedUntilDateProjectsWallClock() async throws {
+    @Test("isHUDActive is false while paused (I1): FnKeyMonitor's global keyDown gate must not stay armed for the whole pause")
+    func isHUDActiveFalseWhilePaused() async throws {
         let clock = FakeClock()
         let coordinator = makeCoordinator(clock: clock)
-        #expect(coordinator.pausedUntilDate == nil)
+        #expect(!coordinator.isHUDActive)
 
         coordinator.pause(for: 3600)
         await wait(coordinator) { if case .paused = $0 { true } else { false } }
-
-        let before = Date()
-        guard let until = coordinator.pausedUntilDate else {
-            Issue.record("pausedUntilDate was nil while paused")
-            return
-        }
-        let after = Date()
-        // `pausedUntilDate` = `Date()` (called inside the computed property, so it lands between
-        // `before`/`after` above) + (`pausedUntil` − `now()`); the `FakeClock` never advances here,
-        // so that offset is exactly the full 3600 s pause duration.
-        #expect(until >= before.addingTimeInterval(3599) && until <= after.addingTimeInterval(3601))
+        #expect(coordinator.pausedUntil != nil)
+        #expect(!coordinator.isHUDActive)   // the one thing this ruling changes
 
         coordinator.resume()
         await wait(coordinator) { $0 == .idle }
-        #expect(coordinator.pausedUntilDate == nil)
+        #expect(!coordinator.isHUDActive)
     }
 }
