@@ -52,7 +52,8 @@ struct OnboardingContentView: View {
 
     private var footer: some View {
         HStack {
-            if viewModel.step != .welcome {
+            // M-4: canvas p.10 (ONB-05) has no Back on the final screen, unlike every other step.
+            if viewModel.step != .welcome && viewModel.step != .tryIt {
                 Button("Back") { viewModel.back() }
                     .buttonStyle(.bordered)
             }

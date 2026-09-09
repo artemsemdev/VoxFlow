@@ -23,6 +23,11 @@ final class OnboardingState {
 
     var step: OnboardingStep { didSet { store.set(String(step.rawValue), forKey: Keys.step) } }
     var completed: Bool { didSet { store.set(completed ? "1" : "0", forKey: Keys.completed) } }
+    /// M-8: read only by `OnboardingViewModel.canContinue` — it gates leaving ONB-02a with
+    /// Accessibility ungranted, nothing more. `AccessibilityTextInserter` decides for itself, at
+    /// insertion time, whether to fall back to the clipboard (by actually checking Accessibility
+    /// trust), so this flag does not also gate that; treat it as informational, not a dictation
+    /// behaviour switch.
     var accessibilitySkipped: Bool { didSet { store.set(accessibilitySkipped ? "1" : "0", forKey: Keys.clipboardFallback) } }
 
     init(store: any KeyValueStore) {

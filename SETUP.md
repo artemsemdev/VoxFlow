@@ -61,8 +61,9 @@ settings) if you want a clean slate rather than onboarding alone.
 
 Microphone and Accessibility grants and the history-encryption key (ADR-004) are tied to the app's
 code signing identity, not to these defaults — deleting the keys above does not revoke permissions
-or Keychain access, and a Keychain reset or ad-hoc re-signing can make history unreadable (surfaces
-as `HistoryService.Status.disabled(reason:)`) independently of onboarding. `HistoryService` also
+or Keychain access, and a Keychain reset or ad-hoc re-signing can make history unreadable
+(`HistoryService.Status.disabled(reason:)`, shown on the History page and under the header in
+Settings → Privacy — I-4) independently of onboarding. `HistoryService` also
 opens the store lazily, on first use rather than at construction, specifically so that launching
 the app as the XCTest host never prompts for Keychain access — see #143.
 
