@@ -8,6 +8,12 @@ versioning.
 ### Added
 - Dictation logic: microphone capture, Flow Bar state machine, windowed transcription,
   encrypted history with 30-day retention (no UI yet — phase 3b).
+- Dictation wired end-to-end: hold (or double-tap) fn anywhere to dictate. The floating Flow Bar
+  HUD shows listening/processing/result; recognized text is inserted into the focused field via
+  Accessibility, or copied to the clipboard when there isn't one; finished dictations save to
+  encrypted history (Privacy toggle permitting); the menu bar status line follows dictation state.
+  Requires Microphone and Accessibility permission, granted on first use. Onboarding and the
+  History page follow in phase 3c.
 
 ## 2.0.0 — 2026-09-08
 

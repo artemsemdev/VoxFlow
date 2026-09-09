@@ -39,6 +39,10 @@ targets:
         product: VoxFlowModels
       - package: VoxFlowKit
         product: VoxFlowFiles
+      - package: VoxFlowKit
+        product: VoxFlowDictation
+      - package: VoxFlowKit
+        product: VoxFlowStorage
     info:
       path: VoxFlow/Info.plist
       properties:
@@ -47,6 +51,7 @@ targets:
         NSHumanReadableCopyright: "© 2026 Artem Semenov"
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSMicrophoneUsageDescription: "VoxFlow listens only while you hold fn. Audio never leaves this Mac."
         CFBundleDocumentTypes:
           - CFBundleTypeName: Audio or video
             LSItemContentTypes:
@@ -75,6 +80,10 @@ targets:
         product: VoxFlowModels
       - package: VoxFlowKit
         product: VoxFlowFiles
+      - package: VoxFlowKit
+        product: VoxFlowDictation
+      - package: VoxFlowKit
+        product: VoxFlowStorage
       - package: VoxFlowKit
         product: VoxFlowTestSupport
     settings:

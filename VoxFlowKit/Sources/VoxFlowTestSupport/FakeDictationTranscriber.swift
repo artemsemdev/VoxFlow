@@ -1,10 +1,10 @@
 import Foundation
 import Synchronization
 import VoxFlowCore
-@testable import VoxFlowDictation
+import VoxFlowDictation
 
 /// Collects the feed and returns a scripted result when it ends; `cancelledCount` proves aborts propagate.
-final class FakeDictationTranscriber: DictationTranscribing, Sendable {
+public final class FakeDictationTranscriber: DictationTranscribing, Sendable {
     private struct State {
         var result = DictationResult.empty; var events: [DictationEvent] = []; var calls = 0; var cancelled = 0
         var received: [AudioChunk] = []
@@ -24,19 +24,19 @@ final class FakeDictationTranscriber: DictationTranscribing, Sendable {
     /// cancellation check — is what keeps a torn-down capture's result out of a newer one.
     private let ignoresCancellation: Bool
 
-    init(result: DictationResult, events: [DictationEvent] = [], hold: Gate? = nil, ignoresCancellation: Bool = false) {
+    public init(result: DictationResult, events: [DictationEvent] = [], hold: Gate? = nil, ignoresCancellation: Bool = false) {
         state.withLock { $0.result = result; $0.events = events }
         self.hold = hold
         self.ignoresCancellation = ignoresCancellation
     }
 
-    var calls: Int { state.withLock { $0.calls } }
-    var cancelledCount: Int { state.withLock { $0.cancelled } }
-    var receivedSeconds: TimeInterval { state.withLock { $0.received.reduce(0) { $0 + $1.duration } } }
+    public var calls: Int { state.withLock { $0.calls } }
+    public var cancelledCount: Int { state.withLock { $0.cancelled } }
+    public var receivedSeconds: TimeInterval { state.withLock { $0.received.reduce(0) { $0 + $1.duration } } }
 
     /// Suspends until at least `count` chunks have arrived from the controller's feed — lets a test
     /// synchronize with the controller's own actor-hop before triggering the next event (no sleeps).
-    func waitUntilReceived(_ count: Int) async {
+    public func waitUntilReceived(_ count: Int) async {
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             let ready = state.withLock { s -> Bool in
                 if s.received.count >= count { return true }
@@ -48,7 +48,7 @@ final class FakeDictationTranscriber: DictationTranscribing, Sendable {
 
     /// Suspends until the transcriber has recorded a cancellation — lets a test synchronize with the
     /// controller's own actor-hop before asserting on `cancelledCount` (no sleeps).
-    func waitUntilCancelled() async {
+    public func waitUntilCancelled() async {
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             let ready = state.withLock { s -> Bool in
                 if s.cancelled > 0 { return true }
@@ -61,7 +61,7 @@ final class FakeDictationTranscriber: DictationTranscribing, Sendable {
     /// Suspends until at least `count` `transcribe()` calls have returned (thrown or returned
     /// normally) — for a test that needs to know a specific call has actually finished, rather than
     /// hoping a bare `Task.yield()` happened to schedule far enough (M7).
-    func waitForReturns(_ count: Int) async {
+    public func waitForReturns(_ count: Int) async {
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             let ready = state.withLock { s -> Bool in
                 if s.returned >= count { return true }
@@ -81,7 +81,7 @@ final class FakeDictationTranscriber: DictationTranscribing, Sendable {
         waiters.forEach { $0.resume() }
     }
 
-    func transcribe(_ chunks: AsyncStream<AudioChunk>, options: TranscriptionOptions,
+    public func transcribe(_ chunks: AsyncStream<AudioChunk>, options: TranscriptionOptions,
                     onEvent: @Sendable @escaping (DictationEvent) async -> Void) async throws -> DictationResult {
         state.withLock { $0.calls += 1 }
         for event in state.withLock({ $0.events }) { await onEvent(event) }

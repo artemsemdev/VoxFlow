@@ -25,6 +25,18 @@ any app, style cleanup with a local LLM and an MCP server follow in 2.x (see the
 - Everything on this Mac: audio is processed in memory and discarded; the only network action is a
   model download you start. No account, no analytics.
 
+### Dictation (`develop`, in progress toward 2.1.0)
+
+- Hold fn anywhere to dictate (double-tap for hands-free); a floating Flow Bar HUD shows listening,
+  processing and the result. Recognized text is inserted into the focused field via Accessibility,
+  or copied to the clipboard when there isn't a text field; finished dictations save to encrypted
+  history unless the Privacy toggle turns that off.
+- Needs Microphone and Accessibility permission — macOS prompts for each on first use.
+- VoxFlow's own window is frontmost at launch, so click into the text field you want to dictate
+  into (e.g. TextEdit) before the first fn press, or the dictation lands on the clipboard instead.
+- Onboarding and the History page are not built yet (phase 3c); Settings tabs beyond the defaults
+  follow in 2.2.
+
 ## Roadmap
 
 | Version | Phase | Issue |
@@ -35,9 +47,9 @@ any app, style cleanup with a local LLM and an MCP server follow in 2.x (see the
 | 2.4 | MCP server on localhost | [#113](https://github.com/artemsemdev/VoxFlow/issues/113) |
 | — | Signed and notarized releases | [#115](https://github.com/artemsemdev/VoxFlow/issues/115) |
 
-Dictation's logic half (capture, Flow Bar state machine, windowed transcription, encrypted
-history) is on `develop` (unreleased); the HUD, hotkey monitor and Accessibility
-insertion that make it usable follow next.
+Dictation (capture, Flow Bar state machine and HUD, the fn hotkey, windowed transcription,
+Accessibility insertion, encrypted history) is wired end-to-end on `develop` (unreleased);
+onboarding and the History page follow in phase 3c.
 
 Tracking issue: [#105](https://github.com/artemsemdev/VoxFlow/issues/105). The product design is the
 Claude Design canvas checked in at [design/](design/).

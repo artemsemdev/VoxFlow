@@ -17,7 +17,8 @@ struct LazyModelFileTranscriberTests {
         let store = ModelStore(directory: dir.url, catalog: ModelCatalog.all, downloader: FakeModelDownloader(),
                                freeSpace: FakeFreeSpace(available: 1 << 40), settings: InMemoryKeyValueStore())
         let engine = FakeSpeechEngine(script: [])
-        let transcriber = LazyModelFileTranscriber(store: store, engine: engine, decoder: StubDecoder())
+        let loader = ModelLoader(store: store, engine: engine)
+        let transcriber = LazyModelFileTranscriber(loader: loader, store: store, engine: engine, decoder: StubDecoder())
         await #expect(throws: FileTranscriptionError.noModelInstalled) {
             _ = try await transcriber.transcribe(URL(fileURLWithPath: "/tmp/a.wav"), options: TranscriptionOptions(language: "en")) { _ in }
         }
@@ -36,7 +37,8 @@ struct LazyModelFileTranscriberTests {
                                freeSpace: FakeFreeSpace(available: 1 << 40), settings: InMemoryKeyValueStore())
         for try await _ in await store.install(id: "m") {}
         let engine = FakeSpeechEngine(script: [.segment(TranscriptSegment(start: 0, end: 1, text: "hi")!)])
-        let transcriber = LazyModelFileTranscriber(store: store, engine: engine, decoder: StubDecoder())
+        let loader = ModelLoader(store: store, engine: engine)
+        let transcriber = LazyModelFileTranscriber(loader: loader, store: store, engine: engine, decoder: StubDecoder())
         let url = URL(fileURLWithPath: "/tmp/a.wav")
         let first = try await transcriber.transcribe(url, options: TranscriptionOptions(language: "en")) { _ in }
         let second = try await transcriber.transcribe(url, options: TranscriptionOptions(language: "en")) { _ in }
