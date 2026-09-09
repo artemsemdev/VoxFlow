@@ -1,5 +1,5 @@
-import AppKit
 import ApplicationServices
+import Foundation
 import VoxFlowCore
 
 enum EditableRole {
@@ -16,18 +16,31 @@ final class AccessibilityTextInserter: TextInserting {
     private let pasteboard: any Pasteboard
     private var target: AXUIElement?
     private var appName: String?
+    /// M-1: macOS does not reliably one-shot the Accessibility prompt per process, so without this
+    /// `capture()` would ask again on *every* fn-down — including the ones the machine ignores
+    /// (`.armed`/`.loadingModel` fn-downs). Prompt once per launch; every later capture uses
+    /// `prompt: false`.
+    private var hasPrompted = false
 
     init(permissions: any PermissionChecking, pasteboard: any Pasteboard) {
         self.permissions = permissions
         self.pasteboard = pasteboard
     }
 
-    nonisolated func captureFocus() { Task { @MainActor in self.capture() } }
+    /// I-5: takes the `FrontmostApp` `PreflightBuilder` already read and checked against the
+    /// excluded-apps list, instead of re-reading `NSWorkspace` here — the two reads could disagree
+    /// if the frontmost app changed between the exclusion check and this call. `nonisolated` + `async`
+    /// so a non-actor caller (`PreflightBuilder`, itself `Sendable`) can `await` straight through to
+    /// the `MainActor`-isolated `capture(app:)` — no fire-and-forget `Task` hop.
+    nonisolated func captureFocus(app: FrontmostApp) async { await capture(app: app) }
 
-    private func capture() {
+    private func capture(app: FrontmostApp) {
         target = nil
-        appName = NSWorkspace.shared.frontmostApplication?.localizedName
-        guard permissions.accessibilityTrusted(prompt: true) else { return }
+        appName = app.name
+        let prompt = !hasPrompted
+        let trusted = permissions.accessibilityTrusted(prompt: prompt)
+        if prompt { hasPrompted = true }
+        guard trusted else { return }
         var focused: CFTypeRef?
         let system = AXUIElementCreateSystemWide()
         guard AXUIElementCopyAttributeValue(system, kAXFocusedUIElementAttribute as CFString, &focused) == .success,

@@ -8,7 +8,12 @@ struct PreflightBuilder: Sendable {
     let readiness: @Sendable () async -> ModelReadiness
     let settings: DictationSettingsSnapshot
     /// Called last, only when no gate applies — the inserter remembers the focused element (ruling 2).
-    let captureFocus: @Sendable () -> Void
+    /// Takes the already-read `FrontmostApp` (I-5: the inserter must not re-read `NSWorkspace` itself,
+    /// which can disagree with the app that passed the exclusion check above if the frontmost app
+    /// changed in between) and is `async`+`await`ed here so the capture is structurally guaranteed to
+    /// finish before `preflight()` returns, rather than being a fire-and-forget hop that happens to
+    /// win a race today.
+    let captureFocus: @Sendable (FrontmostApp) async -> Void
 
     func preflight() async -> Preflight {
         let app = frontmost.frontmostApp()
@@ -27,7 +32,7 @@ struct PreflightBuilder: Sendable {
         if case .notInstalled = model {
             return Preflight(excludedApp: nil, secureInput: false, microphone: .granted, model: model)
         }
-        captureFocus()
+        await captureFocus(app)
         return Preflight(excludedApp: nil, secureInput: false, microphone: .granted, model: model)
     }
 }

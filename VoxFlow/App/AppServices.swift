@@ -147,7 +147,7 @@ final class AppServices {
             let builder = PreflightBuilder(frontmost: frontmost, permissions: permissions,
                                            readiness: { await modelLoader.readiness() },
                                            settings: dictationSettings.box.current,
-                                           captureFocus: { inserter.captureFocus() })
+                                           captureFocus: { app in await inserter.captureFocus(app: app) })
             return await builder.preflight()
         }
 
@@ -163,7 +163,7 @@ final class AppServices {
             inserter: inserter,
             clock: SystemMonotonicClock(),
             preflight: preflight,
-            loadModel: { try await modelLoader.ensureLoaded() },
+            loadModel: { _ = try await modelLoader.ensureLoaded() },
             options: { dictationSettings.box.current.options },
             onSave: { result, appName in await historyWriter.save(result, appName: appName) },
             copyToClipboard: { SystemPasteboard().setString($0) }
