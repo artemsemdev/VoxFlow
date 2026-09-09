@@ -41,6 +41,11 @@ final class HistoryService {
     private(set) var database: VoxFlowDatabase?
     private(set) var status: Status = .disabled(reason: HistoryService.notOpenedYetReason)
     let storeBox = HistoryStoreBox()
+    /// Fired after any write that changes what's on disk — `delete`/`deleteAll`/`reinsert` below call
+    /// it directly; `HistoryWriter`'s own insert path (which saves through `storeBox` rather than
+    /// this service) is expected to call `notifyChanged()` too once wired (`AppServices`, Task 5).
+    /// `StatsService.refresh()` is the intended subscriber so Home's numbers stay live.
+    var onChange: (() -> Void)?
 
     private let url: URL
     private let settings: DictationSettings
@@ -126,6 +131,7 @@ final class HistoryService {
         await Task.detached(priority: .userInitiated) {
             do { try store.delete(id: id) } catch { log.error("history delete failed: \(String(describing: error))") }
         }.value
+        notifyChanged()
     }
 
     func deleteAll() async {
@@ -136,7 +142,11 @@ final class HistoryService {
         await Task.detached(priority: .userInitiated) {
             do { try store.deleteAll() } catch { log.error("history deleteAll failed: \(String(describing: error))") }
         }.value
+        notifyChanged()
     }
+
+    /// See `onChange`'s doc comment — called after every write that changes what's on disk.
+    func notifyChanged() { onChange?() }
 
     func count() async -> Int {
         ensureOpened()
@@ -155,10 +165,12 @@ final class HistoryService {
         let draft = DictationDraft(text: record.text, rawText: record.rawText, appName: record.appName, style: record.style,
                                    language: record.language, duration: record.duration, createdAt: record.createdAt)
         let log = Self.log
-        return await Task.detached(priority: .userInitiated) {
+        let inserted: DictationRecord? = await Task.detached(priority: .userInitiated) { () -> DictationRecord? in
             do { return try store.insert(draft) }
             catch { log.error("history reinsert failed: \(String(describing: error))"); return nil }
         }.value
+        if inserted != nil { notifyChanged() }
+        return inserted
     }
 
     private func performOpen() async {

@@ -1,6 +1,29 @@
 import Foundation
 import GRDB
 
+/// Home page stats (design MW-01, ruling 1): `count`/`words`/`duration` of dictations since a cutoff.
+public struct DictationStats: Sendable, Equatable {
+    public var count: Int
+    public var words: Int
+    public var duration: TimeInterval
+    public init(count: Int, words: Int, duration: TimeInterval) {
+        self.count = count
+        self.words = words
+        self.duration = duration
+    }
+}
+
+/// One bucket of `DictationStore.wordsPerDay` — a local calendar day and its word total (0 when
+/// there was no dictation that day).
+public struct DayWords: Sendable, Equatable {
+    public var date: Date
+    public var words: Int
+    public init(date: Date, words: Int) {
+        self.date = date
+        self.words = words
+    }
+}
+
 /// History on SQLite (design §5). `keyProvider == nil` stores plaintext (Privacy toggle off).
 ///
 /// Synchronous and blocking: every call does SQLite I/O, and `search`/`fetch` additionally run
@@ -69,6 +92,61 @@ public final class DictationStore: Sendable {
     }
 
     public func count() throws -> Int { try queue.read { try Int.fetchOne($0, sql: "SELECT COUNT(*) FROM dictations") ?? 0 } }
+
+    /// Home page "Words today" / "Dictations" / "Speaking pace" (design ruling 1). `words`/`duration`
+    /// are plain columns (unlike `text`/`raw_text`), so an unreadable/encrypted row still counts.
+    public func stats(since: Date) throws -> DictationStats {
+        try queue.read { db in
+            guard let row = try Row.fetchOne(db, sql: """
+                SELECT COUNT(*) AS count, COALESCE(SUM(words), 0) AS words, COALESCE(SUM(duration), 0) AS duration
+                FROM dictations WHERE created_at >= ?
+                """, arguments: [since.timeIntervalSince1970]) else {
+                return DictationStats(count: 0, words: 0, duration: 0)
+            }
+            return DictationStats(count: row["count"], words: row["words"], duration: row["duration"])
+        }
+    }
+
+    /// "This week" chart (design ruling 1): exactly `days` entries, oldest first, zero-filled,
+    /// bucketed by `calendar`'s local day — the last entry is `endingAt`'s day.
+    public func wordsPerDay(days: Int, endingAt: Date, calendar: Calendar) throws -> [DayWords] {
+        guard days > 0 else { return [] }
+        let endDay = calendar.startOfDay(for: endingAt)
+        guard let startDay = calendar.date(byAdding: .day, value: -(days - 1), to: endDay),
+              let rangeEnd = calendar.date(byAdding: .day, value: 1, to: endDay) else { return [] }
+        let rows = try queue.read { db in
+            try Row.fetchAll(db, sql: "SELECT created_at, words FROM dictations WHERE created_at >= ? AND created_at < ?",
+                             arguments: [startDay.timeIntervalSince1970, rangeEnd.timeIntervalSince1970])
+        }
+        var buckets: [Date: Int] = [:]
+        for row in rows {
+            let day = calendar.startOfDay(for: Date(timeIntervalSince1970: row["created_at"]))
+            buckets[day, default: 0] += (row["words"] as Int)
+        }
+        return (0..<days).compactMap { offset in
+            calendar.date(byAdding: .day, value: offset, to: startDay).map { DayWords(date: $0, words: buckets[$0] ?? 0) }
+        }
+    }
+
+    /// Consecutive local calendar days ending at `endingAt`'s day with at least one dictation; 0 when
+    /// there's none today (design ruling 1 — "12-day streak", hidden when 0).
+    public func streak(endingAt: Date, calendar: Calendar) throws -> Int {
+        let today = calendar.startOfDay(for: endingAt)
+        guard let rangeEnd = calendar.date(byAdding: .day, value: 1, to: today) else { return 0 }
+        let timestamps = try queue.read { db in
+            try Double.fetchAll(db, sql: "SELECT created_at FROM dictations WHERE created_at < ?", arguments: [rangeEnd.timeIntervalSince1970])
+        }
+        let daysWithDictation = Set(timestamps.map { calendar.startOfDay(for: Date(timeIntervalSince1970: $0)) })
+        var streak = 0
+        var day = today
+        while daysWithDictation.contains(day) {
+            streak += 1
+            guard let previous = calendar.date(byAdding: .day, value: -1, to: day) else { break }
+            day = previous
+        }
+        return streak
+    }
+
     public func delete(id: Int64) throws { try queue.write { try $0.execute(sql: "DELETE FROM dictations WHERE id = ?", arguments: [id]) } }
     public func deleteAll() throws { try queue.write { try $0.execute(sql: "DELETE FROM dictations") } }
 

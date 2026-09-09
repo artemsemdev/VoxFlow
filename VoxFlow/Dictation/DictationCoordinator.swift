@@ -11,7 +11,7 @@ final class DictationCoordinator {
     /// the order they were called, even though `DictationController.fnDown()` suspends internally on
     /// `preflight()` — four independent `Task { await controller… }` call sites would let the actor
     /// reorder them (e.g. a quick tap's `fnUp` overtaking a still-suspended `fnDown`).
-    private enum Command: Sendable { case fn(FnTransition), escape, anyKey, copyRaw }
+    private enum Command: Sendable { case fn(FnTransition), escape, anyKey, copyRaw, pause(seconds: TimeInterval), resume }
 
     static let barCount = 14
     private let controller: DictationController
@@ -66,6 +66,8 @@ final class DictationCoordinator {
                 case .escape: await controller.escape()
                 case .anyKey: await controller.anyKey()
                 case .copyRaw: await controller.copyRaw()
+                case .pause(let seconds): await controller.pause(for: seconds)
+                case .resume: await controller.resume()
                 }
             }
         }
@@ -123,6 +125,15 @@ final class DictationCoordinator {
     func escape() { commands.yield(.escape) }
     func anyKey() { commands.yield(.anyKey) }
     func copyRaw() { commands.yield(.copyRaw) }
+    /// FB-09: menu bar / Flow Bar pill "Pause dictation for 1 hour" and "Resume".
+    func pause(for seconds: TimeInterval) { commands.yield(.pause(seconds: seconds)) }
+    func resume() { commands.yield(.resume) }
+    /// Mirrors `state` — `nil` outside `.paused`. Monotonic (the controller's clock), like
+    /// `DictationController.pausedUntil`; converting to a wall-clock "until 10:41" is the menu
+    /// bar/pill's job (Task 4), not this coordinator's.
+    var pausedUntil: TimeInterval? {
+        if case .paused(let until) = state { until } else { nil }
+    }
 
     /// Called from `MeteredMicrophone.onLevel` (wrapped in `Task { @MainActor in }` by the caller).
     func reportLevel(_ rms: Float) {

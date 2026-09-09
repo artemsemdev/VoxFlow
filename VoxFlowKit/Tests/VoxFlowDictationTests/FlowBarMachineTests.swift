@@ -239,6 +239,50 @@ struct FlowBarMachineTests {
         #expect(loading.state == .loadingModel(Pending(downAt: 0, fnIsDown: true, resolvedMode: nil)))
     }
 
+    @Test("FB-09: pause from idle starts the pauseEnd timer; from a dismissable state it also cancels the pending dismiss")
+    func pauseStarts() {
+        var fromIdle = FlowBarMachine()
+        #expect(fromIdle.handle(.pause(seconds: 3600), now: 0) == [.startTimer(.pauseEnd, seconds: 3600)])
+        #expect(fromIdle.state == .paused(until: 3600))
+
+        var fromDismissable = FlowBarMachine()
+        fromDismissable.state = .copied
+        #expect(fromDismissable.handle(.pause(seconds: 60), now: 10) == [.cancelTimer(.dismiss), .startTimer(.pauseEnd, seconds: 60)])
+        #expect(fromDismissable.state == .paused(until: 70))
+    }
+
+    @Test("FB-09: resume and the pauseEnd timer both return to idle; resume also cancels the still-pending timer")
+    func pauseEnds() {
+        var resumed = FlowBarMachine()
+        resumed.state = .paused(until: 100)
+        #expect(resumed.handle(.resume, now: 50) == [.cancelTimer(.pauseEnd)])
+        #expect(resumed.state == .idle)
+
+        var timedOut = FlowBarMachine()
+        timedOut.state = .paused(until: 100)
+        #expect(timedOut.handle(.timer(.pauseEnd), now: 100).isEmpty)
+        #expect(timedOut.state == .idle)
+    }
+
+    @Test("FB-09: fn-down is ignored while paused (not a retry); pause is ignored mid-dictation; paused isn't dismissable")
+    func pausedIsNotRetriedAndIsNotStackable() {
+        var paused = FlowBarMachine()
+        paused.state = .paused(until: 100)
+        #expect(paused.handle(.fnDown(ok), now: 1).isEmpty)
+        #expect(paused.state == .paused(until: 100))
+        #expect(FlowBarState.paused(until: 100).isDismissable == false)
+
+        var listening = FlowBarMachine.listening(.pushToTalk, at: 0)
+        let listeningBefore = listening.state
+        #expect(listening.handle(.pause(seconds: 60), now: 1).isEmpty)
+        #expect(listening.state == listeningBefore)
+
+        var processing = FlowBarMachine.processing(at: 0)
+        let processingBefore = processing.state
+        #expect(processing.handle(.pause(seconds: 60), now: 1).isEmpty)
+        #expect(processing.state == processingBefore)
+    }
+
     @Test("idle hint follows the default mode")
     func hints() {
         #expect(FlowBarState.idle.hint(mode: .pushToTalk) == "Hold fn to dictate")
