@@ -97,6 +97,7 @@ struct PrivacyViewModelTests {
         #expect(PrivacyViewModel.deleteAllTitle == "Delete all dictation history?")
         #expect(PrivacyViewModel.deleteAllMessage(count: 3) == "3 items will be removed from this Mac. There is no cloud copy, so this can't be undone.")
         #expect(PrivacyViewModel.deleteAllMessage(count: 1) == "1 item will be removed from this Mac. There is no cloud copy, so this can't be undone.")
+        #expect(PrivacyViewModel.deleteAllMessage(count: 1284).hasPrefix("1,284 items will be removed"))
     }
 
     @Test("confirmDeleteAll empties the service and clears the alert")

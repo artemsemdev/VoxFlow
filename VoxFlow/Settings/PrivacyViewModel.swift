@@ -107,6 +107,8 @@ final class PrivacyViewModel {
 
     static let deleteAllTitle = "Delete all dictation history?"
     static func deleteAllMessage(count: Int) -> String {
-        "\(count) item\(count == 1 ? "" : "s") will be removed from this Mac. There is no cloud copy, so this can't be undone."
+        // Grouped like the canvas's "1,284 items" (ST-05d); en_US so the "," separator is stable in tests (POSIX has no grouping).
+        let grouped = count.formatted(.number.grouping(.automatic).locale(Locale(identifier: "en_US")))
+        return "\(grouped) item\(count == 1 ? "" : "s") will be removed from this Mac. There is no cloud copy, so this can't be undone."
     }
 }
