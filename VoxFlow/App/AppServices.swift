@@ -124,7 +124,8 @@ final class AppServices {
         let historyService = HistoryService(url: DictationStore.defaultURL, settings: dictationSettings,
                                             keyProvider: { HistoryKeyProviders.default() }, clock: SystemMonotonicClock())
 
-        let historyWriter = HistoryWriter(storeBox: historyService.storeBox, settings: dictationSettings.box, now: Date.init)
+        let historyWriter = HistoryWriter(storeBox: historyService.storeBox, settings: dictationSettings.box, now: Date.init,
+                                          ready: { await historyService.ready() })
 
         // Built fresh on every fn-down (not once, up front) so a Settings edit to the excluded-apps
         // list or hotkey mode applies to the very next capture rather than only after a relaunch.

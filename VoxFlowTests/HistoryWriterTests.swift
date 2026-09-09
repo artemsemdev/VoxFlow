@@ -3,6 +3,7 @@ import Testing
 import VoxFlowCore
 import VoxFlowDictation
 import VoxFlowStorage
+import VoxFlowTestSupport
 @testable import VoxFlow
 
 @Suite("HistoryWriter")
@@ -35,6 +36,23 @@ struct HistoryWriterTests {
         let on = DictationSettingsBox(DictationSettingsSnapshot(excludedBundleIDs: [], keepHistory: true, options: TranscriptionOptions()))
         await HistoryWriter(storeBox: storeBox, settings: on, now: { Date() }).save(result, appName: "Mail")
         // Nothing to assert on directly (no store to query) — this just must not crash or hang.
+    }
+
+    @Test("save awaits the ready closure before reading the store — a still-opening service doesn't drop the write")
+    func saveWaitsForReady() async throws {
+        let store = try DictationStore(inMemoryWith: nil)
+        let storeBox = HistoryStoreBox(store)
+        let settings = DictationSettingsBox(DictationSettingsSnapshot(excludedBundleIDs: [], keepHistory: true, options: TranscriptionOptions()))
+        let gate = Gate()
+        let writer = HistoryWriter(storeBox: storeBox, settings: settings, now: { Date() }, ready: { await gate.wait() })
+
+        let saveTask = Task { await writer.save(result, appName: "Mail") }
+        await Task.yield()
+        #expect(try store.count() == 0)          // parked on `ready()`: not inserted yet
+
+        await gate.open()
+        await saveTask.value
+        #expect(try store.count() == 1)          // inserted exactly once, after the gate opened
     }
 
     @Test("suppressNext() skips exactly the next save, not the one after it")

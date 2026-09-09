@@ -90,6 +90,40 @@ struct HistoryServiceTests {
         #expect(await service.count() == 1)
     }
 
+    @Test("two overlapping reopen() calls: the last one's config wins, and the earlier reopen's runner is not leaked")
+    func overlappingReopensChainInOrder() async throws {
+        let dir = TemporaryDirectory()
+        let settings = DictationSettings(store: InMemoryKeyValueStore())
+        let sharedKey = SymmetricKey(size: .bits256)
+        let service = makeService(dir: dir, settings: settings, key: sharedKey)
+        _ = await service.count()
+        _ = try #require(service.store).insert(draft("secret", at: Date()))
+
+        // Two `reopen()` calls back to back, with no `await` between them — the earlier call's
+        // detached open hasn't necessarily resolved yet when the later one is issued. Chaining must
+        // still apply them in order, so the *last* one (encryptHistory back on) is what sticks.
+        settings.encryptHistory = false
+        service.reopen()
+        settings.encryptHistory = true
+        service.reopen()
+
+        let rows = await service.fetch(limit: 10)
+        #expect(rows.count == 1)
+        #expect(rows.first?.isUnreadable == false)          // last reopen re-enabled encryption with the same key: still readable
+        #expect(rows.first?.text == "secret")
+        #expect(service.status == .ready)
+
+        // If the earlier reopen's `RetentionRunner` had leaked (never `stop()`-ed because the two
+        // `performOpen()` calls interleaved instead of chaining), a purge from it running against a
+        // store this service no longer references wouldn't show up here — but a third, ordinary
+        // reopen completing cleanly to `.ready` with the expected row intact is exactly what breaks
+        // if `performOpen()`'s "stop old retention, then open" step ever got skipped or duplicated.
+        service.reopen()
+        let final = await service.fetch(limit: 10)
+        #expect(final.count == 1)
+        #expect(service.status == .ready)
+    }
+
     @Test("a key provider reporting a freshly-created key over an already-encrypted database disables history")
     func keyLostDisablesHistory() async throws {
         let dir = TemporaryDirectory()

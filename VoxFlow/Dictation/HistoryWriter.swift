@@ -21,6 +21,12 @@ struct HistoryWriter: Sendable {
     let storeBox: HistoryStoreBox
     let settings: DictationSettingsBox
     let now: @Sendable () -> Date
+    /// Awaited before `storeBox` is read (when history is being saved at all — see `save`): without
+    /// this, a dictation that finishes before `HistoryService`'s first (or a still-in-flight reopen's)
+    /// open resolves would find `storeBox.current == nil` and silently drop the entry. Defaulted to
+    /// a no-op so every existing call site (`HistoryWriter(storeBox:settings:now:)`) keeps compiling
+    /// unchanged; `AppServices` passes `{ await historyService.ready() }`.
+    var ready: @Sendable () async -> Void = {}
     /// Defaulted so every existing call site (`HistoryWriter(storeBox:settings:now:)`) keeps
     /// compiling unchanged; a caller that wants to suppress a save (onboarding's Try It, ONB-05)
     /// holds onto the same `HistoryWriter` value and calls `suppressNext()` on it.
@@ -41,7 +47,9 @@ struct HistoryWriter: Sendable {
     /// runs on a detached task off the caller's actor.
     func save(_ result: DictationResult, appName: String?) async {
         if suppress.consume() { return }
-        guard settings.current.keepHistory, let store = storeBox.current else { return }
+        guard settings.current.keepHistory else { return }
+        await ready()
+        guard let store = storeBox.current else { return }
         let draft = Self.draft(from: result, appName: appName, now: now())
         await Task.detached(priority: .utility) {
             do { _ = try store.insert(draft) } catch { Self.log.error("history insert failed: \(String(describing: error))") }

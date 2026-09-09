@@ -51,8 +51,26 @@ final class HistoryService {
     /// Rebuilds the store with/without the key provider per `settings.encryptHistory`, and restarts
     /// retention. Fire-and-forget by design — callers (including `init`) don't await this; every
     /// public accessor below awaits the resulting `openTask` before touching `store`.
+    ///
+    /// Chains onto the previous `openTask` rather than discarding it: two `reopen()` calls issued
+    /// back to back (e.g. `encryptHistory` and `retentionDays` changing together) would otherwise run
+    /// their `performOpen()`s concurrently, race to write `store`/`storeBox`/`status`/`retention`, and
+    /// could leak whichever `RetentionRunner` loses that race (never `stop()`-ed). Chaining guarantees
+    /// opens run strictly one at a time in call order, so the last `reopen()` always wins and every
+    /// runner but the current one is `stop()`-ed before the next is created.
     func reopen() {
-        openTask = Task { await self.performOpen() }
+        let previous = openTask
+        openTask = Task {
+            _ = await previous?.value
+            await self.performOpen()
+        }
+    }
+
+    /// Awaits the current open/reopen chain without doing anything else — for callers (like
+    /// `HistoryWriter`) that must not read `storeBox` before the first open (or a still-in-flight
+    /// reopen) has resolved.
+    func ready() async {
+        await openTask?.value
     }
 
     func fetch(limit: Int) async -> [DictationRecord] {
