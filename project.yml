@@ -120,4 +120,5 @@ schemes:
         - package: VoxFlowKit/VoxFlowDictationTests
         - package: VoxFlowKit/VoxFlowStorageTests
         - package: VoxFlowKit/VoxFlowStylingTests
+        - package: VoxFlowKit/VoxFlowLLMTests
         - package: VoxFlowKit/VoxFlowMCPTests
