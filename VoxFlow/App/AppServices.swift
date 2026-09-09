@@ -48,6 +48,10 @@ final class AppServices {
     /// Same reasoning as `filesViewModel`: `SettingsPage`/`ModelsSettingsView` read this instead of
     /// each owning their own, so a download started before leaving Settings keeps being tracked.
     let modelsViewModel: ModelsViewModel
+    /// Settings › Audio (ST-04) — built once here so `SettingsPage` keeps reading the same instance.
+    let audioViewModel: AudioViewModel
+    /// Settings › Privacy (ST-05) — same reasoning as `audioViewModel`.
+    let privacyViewModel: PrivacyViewModel
 
     let dictationSettings: DictationSettings
     /// Shared with the Files `LazyModelFileTranscriber` (ruling 9: one place knows which model is loaded).
@@ -70,7 +74,8 @@ final class AppServices {
 
     private init(modelStore: ModelStore, engine: WhisperCppEngine, queue: FileQueue, filesSettings: FilesSettings,
                  durations: AudioDurationReader, exports: ExportCoordinator, navigation: Navigation,
-                 filesViewModel: FilesViewModel, modelsViewModel: ModelsViewModel, dictationSettings: DictationSettings,
+                 filesViewModel: FilesViewModel, modelsViewModel: ModelsViewModel, audioViewModel: AudioViewModel,
+                 privacyViewModel: PrivacyViewModel, dictationSettings: DictationSettings,
                  modelLoader: ModelLoader, historyService: HistoryService, historyViewModel: HistoryViewModel,
                  inserter: AccessibilityTextInserter, dictationController: DictationController,
                  dictation: DictationCoordinator, flowBar: FlowBarPresenter, fnMonitor: FnKeyMonitor,
@@ -84,6 +89,8 @@ final class AppServices {
         self.navigation = navigation
         self.filesViewModel = filesViewModel
         self.modelsViewModel = modelsViewModel
+        self.audioViewModel = audioViewModel
+        self.privacyViewModel = privacyViewModel
         self.dictationSettings = dictationSettings
         self.modelLoader = modelLoader
         self.historyService = historyService
@@ -188,9 +195,13 @@ final class AppServices {
                                                        models: modelsViewModel, dictation: dictation, historyWriter: historyWriter,
                                                        navigation: navigation, clock: SystemMonotonicClock())
 
+        let audioViewModel = AudioViewModel(devices: AVCaptureInputDeviceProvider(), settings: dictationSettings, dictation: dictation)
+        let privacyViewModel = PrivacyViewModel(settings: dictationSettings, history: historyService, apps: WorkspaceInstalledApps())
+
         return AppServices(modelStore: modelStore, engine: engine, queue: queue, filesSettings: filesSettings,
                            durations: durations, exports: exports, navigation: navigation, filesViewModel: filesViewModel,
-                           modelsViewModel: modelsViewModel, dictationSettings: dictationSettings, modelLoader: modelLoader,
+                           modelsViewModel: modelsViewModel, audioViewModel: audioViewModel, privacyViewModel: privacyViewModel,
+                           dictationSettings: dictationSettings, modelLoader: modelLoader,
                            historyService: historyService, historyViewModel: historyViewModel, inserter: inserter,
                            dictationController: dictationController, dictation: dictation, flowBar: flowBar, fnMonitor: fnMonitor,
                            onboardingState: onboardingState, onboardingViewModel: onboardingViewModel)
