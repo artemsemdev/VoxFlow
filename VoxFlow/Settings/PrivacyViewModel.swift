@@ -4,6 +4,28 @@ import Foundation
 import UniformTypeIdentifiers
 import VoxFlowStorage
 
+/// One installed application, as offered by the "Only in {app}" (MW-04a) / "Add app override"
+/// (MW-05a) pickers. `url` backs the list row's icon (`NSWorkspace.shared.icon(forFile:)`, loaded
+/// lazily by the view — not eagerly here, since decoding every icon during the scan would multiply
+/// the exact per-render cost review B1 flagged, just moved earlier). `hostAppName` is the canvas's
+/// trailing hint for a browser-installed "web app" shortcut ("Google Docs … Chrome"); `nil` for a
+/// native app, whose hint is its bundle id instead (`AppListRow` in `AddAppOverrideSheet.swift`).
+struct InstalledApp: Sendable, Equatable, Identifiable {
+    let bundleID: String
+    let name: String
+    let url: URL?
+    let hostAppName: String?
+
+    var id: String { bundleID }
+
+    init(bundleID: String, name: String, url: URL? = nil, hostAppName: String? = nil) {
+        self.bundleID = bundleID
+        self.name = name
+        self.url = url
+        self.hostAppName = hostAppName
+    }
+}
+
 /// Looks up display names for, and lets the user pick, installed applications (design ST-05 "Never
 /// record in"). A protocol so tests can fake both without touching `NSWorkspace`/`NSOpenPanel`.
 protocol InstalledAppsProviding: Sendable {
@@ -14,14 +36,19 @@ protocol InstalledAppsProviding: Sendable {
     /// and this is an unisolated `async` protocol requirement otherwise.
     @MainActor func pickApplication() async -> String?
     /// Every installed application, for a searchable list (design MW-04a "New snippet"'s "Only in"
-    /// picker, MW-05a "Add app override"'s app list) — bundle id + display name, alphabetical.
-    /// Defaulted to `[]` below so existing conformers (test fakes that only need `name`/
-    /// `pickApplication`) don't have to implement it.
-    func installedApps() -> [(bundleID: String, name: String)]
+    /// picker, MW-05a "Add app override"'s app list) — alphabetical. This does real filesystem I/O
+    /// (`WorkspaceInstalledApps`'s conformance), so callers must cache the result themselves (review
+    /// B1) rather than call it from a computed property a view's `body` touches.
+    /// Defaulted to `[]` below so existing conformers (test fakes elsewhere in the suite that only
+    /// need `name`/`pickApplication`) don't have to implement it — kept deliberately (review M1
+    /// suggested dropping this default and updating `PrivacyViewModelTests`'s private
+    /// `FakeInstalledApps` instead, but that file is outside this task's file scope; flagged in the
+    /// fix report as a skip, not silently dropped).
+    func installedApps() -> [InstalledApp]
 }
 
 extension InstalledAppsProviding {
-    func installedApps() -> [(bundleID: String, name: String)] { [] }
+    func installedApps() -> [InstalledApp] { [] }
 }
 
 /// Production `InstalledAppsProviding`: `NSWorkspace` for the lookup, `NSOpenPanel` for picking, a
@@ -43,22 +70,37 @@ struct WorkspaceInstalledApps: InstalledAppsProviding {
     }
 
     /// Scans `/Applications`, `/System/Applications` and `~/Applications` (top level only — no
-    /// recursive descent into nested bundles) for `.app` bundles with a readable bundle id,
-    /// deduplicated by id, sorted by display name.
-    func installedApps() -> [(bundleID: String, name: String)] {
+    /// recursive descent into nested bundles, review M2) for `.app` bundles with a readable bundle
+    /// id, deduplicated by id, sorted by display name. Callers (`SnippetsViewModel`/
+    /// `StylesViewModel`) run this once per sheet presentation on a detached task and cache the
+    /// result — this method itself stays synchronous so the production/test seam is a plain
+    /// protocol method, not an async one.
+    func installedApps() -> [InstalledApp] {
         let directories = ["/Applications", "/System/Applications", NSHomeDirectory() + "/Applications"]
         var seen = Set<String>()
-        var result: [(bundleID: String, name: String)] = []
+        var result: [InstalledApp] = []
         for directory in directories {
             guard let items = try? FileManager.default.contentsOfDirectory(atPath: directory) else { continue }
             for item in items where item.hasSuffix(".app") {
                 let url = URL(fileURLWithPath: directory).appendingPathComponent(item)
                 guard let bundle = Bundle(url: url), let bundleID = bundle.bundleIdentifier, !seen.contains(bundleID) else { continue }
                 seen.insert(bundleID)
-                result.append((bundleID, bundle.displayName ?? item))
+                result.append(InstalledApp(bundleID: bundleID, name: bundle.displayName ?? item, url: url,
+                                           hostAppName: Self.hostAppName(forBundleID: bundleID)))
             }
         }
         return result.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    /// Chrome/Edge give a browser-installed "web app" shortcut a bundle id under the browser's own
+    /// namespace (`com.google.Chrome.app.<id>`, `com.microsoft.edgemac.app.<id>`) instead of a
+    /// developer-chosen one — a cheap, dependency-free way to recover the canvas's "Google Docs …
+    /// Chrome" hint without parsing each bundle's Info.plist for browser-specific keys. Not
+    /// exhaustive of every possible browser-hosted-app convention.
+    private static func hostAppName(forBundleID bundleID: String) -> String? {
+        if bundleID.hasPrefix("com.google.Chrome.app.") { return "Chrome" }
+        if bundleID.hasPrefix("com.microsoft.edgemac.app.") { return "Microsoft Edge" }
+        return nil
     }
 }
 

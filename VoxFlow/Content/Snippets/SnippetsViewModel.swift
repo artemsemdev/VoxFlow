@@ -39,6 +39,12 @@ final class SnippetsViewModel {
     let stylingSettings: StylingSettings
     let installedApps: any InstalledAppsProviding
 
+    /// The installed apps offered by the "Only in {app}" picker — loaded once per sheet
+    /// presentation (`presentNew`/`editExisting`) on a detached task and cached here, rather than
+    /// re-running `installedApps.installedApps()`'s filesystem scan from a computed property `body`
+    /// would touch on every re-render/keystroke (review B1).
+    private(set) var apps: [InstalledApp] = []
+
     init(content: ContentService, stylingSettings: StylingSettings, installedApps: any InstalledAppsProviding) {
         self.content = content
         self.stylingSettings = stylingSettings
@@ -53,15 +59,16 @@ final class SnippetsViewModel {
         set { stylingSettings.snippetSayPrefix = newValue }
     }
 
-    /// The installed apps offered by the "Only in {app}" picker.
-    var apps: [(bundleID: String, name: String)] { installedApps.installedApps() }
-
     // MARK: Validation (ruling 7)
 
-    /// nil while no sheet is up. `.empty` for a blank/whitespace-only trigger (Save disabled, no
-    /// message). `.duplicate` when the trimmed trigger folds to another snippet's trigger — the
-    /// snippet currently being edited (`sheet.editingID`) is excluded. `.invalid` for anything else
-    /// that doesn't start with `/` or contains whitespace.
+    /// nil while no sheet is up. `.empty` for a blank/whitespace-only trigger, **or** a blank/
+    /// whitespace-only Insert body (review M7: an empty body would expand a trigger to nothing, and
+    /// degenerates the duplicate message to `is already used by ""`) — Save disabled, no message
+    /// either way. `.duplicate` when the trimmed trigger folds to another snippet's trigger — the
+    /// snippet currently being edited (`sheet.editingID`) is excluded; checked, like `.invalid`,
+    /// before the body-blank check, so a bad/duplicate trigger is always the reported reason over an
+    /// incidentally-blank body. `.invalid` for anything else that doesn't start with `/` or contains
+    /// whitespace.
     var validation: Validation? {
         guard let sheet else { return nil }
         let trimmed = sheet.trigger.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -76,6 +83,9 @@ final class SnippetsViewModel {
         }
         if !Self.isValidFormat(trimmed) {
             return .invalid(suggestion: Self.suggestion(for: trimmed))
+        }
+        if sheet.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return .empty
         }
         return nil
     }
@@ -118,18 +128,30 @@ final class SnippetsViewModel {
 
     // MARK: Sheet actions
 
-    /// `prefillTrigger` is how the empty state's "Create /sig" opens the sheet pre-filled.
-    func presentNew(prefillTrigger: String = "") {
+    /// `prefillTrigger` is how the empty state's "Create /sig" opens the sheet pre-filled. Scans
+    /// installed apps once for this presentation (review B1) — `async` so callers (`Task { await
+    /// … }` from a button action) can await the scan finishing before e.g. `setOnlyIn(true)` needs
+    /// `apps` populated.
+    func presentNew(prefillTrigger: String = "") async {
         sheet = NewSnippetDraft(trigger: prefillTrigger)
+        await loadApps()
     }
 
-    func editExisting(_ snippet: Snippet) {
+    func editExisting(_ snippet: Snippet) async {
         sheet = NewSnippetDraft(trigger: snippet.trigger, body: snippet.body, onlyIn: snippet.onlyInBundleID != nil,
                                 onlyInBundleID: snippet.onlyInBundleID, onlyInAppName: snippet.onlyInAppName, editingID: snippet.id)
+        await loadApps()
     }
 
     func cancelSheet() {
         sheet = nil
+    }
+
+    /// The one-time-per-presentation scan (review B1): off the main actor, since
+    /// `InstalledAppsProviding.installedApps()` does synchronous filesystem/Info.plist I/O.
+    private func loadApps() async {
+        let provider = installedApps
+        apps = await Task.detached(priority: .utility) { provider.installedApps() }.value
     }
 
     /// Toggling the "Only in {app}" checkbox on picks the first installed app as a starting point
@@ -196,9 +218,13 @@ final class SnippetsViewModel {
         }
     }
 
-    func delete(_ snippet: Snippet) {
+    /// Removes the snippet locally and, on the returned task, from storage — the discardable
+    /// `Task` (review M8) lets a test `await delete(_:).value` deterministically instead of
+    /// busy-polling for the write to land, while production call sites just ignore it.
+    @discardableResult
+    func delete(_ snippet: Snippet) -> Task<Void, Never> {
         snippets.removeAll { $0.id == snippet.id }
-        Task { [content] in
+        return Task { [content] in
             try? await content.snippets.delete(id: snippet.id)
         }
     }

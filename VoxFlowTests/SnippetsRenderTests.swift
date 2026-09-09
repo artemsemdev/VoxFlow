@@ -67,21 +67,21 @@ struct SnippetsRenderTests {
         // 3. MW-04a — blank "New snippet" sheet.
         let addBundle = makeBundle()
         await addBundle.vm.load()
-        addBundle.vm.presentNew()
+        await addBundle.vm.presentNew()
         try Self.render(NewSnippetSheet(viewModel: addBundle.vm), name: "3-sheet-new", directory: directory)
 
         // 4. MW-04v — trigger conflict ("/sig" already used by "Email signature"), Save disabled.
         let validationBundle = makeBundle()
         _ = try? await validationBundle.content.snippets.insert(trigger: "/sig", body: "Email signature\nSent from VoxFlow")
         await validationBundle.vm.load()
-        validationBundle.vm.presentNew()
+        await validationBundle.vm.presentNew()
         validationBundle.vm.sheet?.trigger = "/sig"
         try Self.render(NewSnippetSheet(viewModel: validationBundle.vm), name: "4-validation-duplicate", directory: directory)
 
         // 5. MW-04a — "Only in Slack" checked, with an Insert body.
         let onlyInBundle = makeBundle(apps: FakeInstalledAppsProvider(apps: [("com.tinyspeck.slackmacgap", "Slack")]))
         await onlyInBundle.vm.load()
-        onlyInBundle.vm.presentNew()
+        await onlyInBundle.vm.presentNew()
         onlyInBundle.vm.sheet?.trigger = "/standup"
         onlyInBundle.vm.sheet?.body = "Yesterday: cursor\nToday:\nBlockers: none"
         onlyInBundle.vm.setOnlyIn(true)
@@ -119,21 +119,16 @@ struct SnippetsRenderTests {
 }
 
 /// Renders `SnippetsPageBody`'s content sharing every content-bearing subview with production
-/// (`SnippetsGrid`, `SnippetsEmptyView`, `SnippetsSayPrefixRow`) — same reasoning as
-/// `DictionaryRenderPreview`. No live `ScrollView` (blank under `ImageRenderer`).
+/// (`SnippetsHeader`, `SnippetsGrid`, `SnippetsEmptyView`, `SnippetsSayPrefixRow` — review M6: the
+/// header used to be hand-retyped here, which could drift silently from a copy change in
+/// `SnippetsHeader`) — same reasoning as `DictionaryRenderPreview`. No live `ScrollView` (blank
+/// under `ImageRenderer`).
 private struct SnippetsRenderPreview: View {
     let viewModel: SnippetsViewModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .lastTextBaseline, spacing: 16) {
-                Text("Say a trigger and VoxFlow inserts the full text. Triggers work in every app.")
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: 520, alignment: .leading)
-                Spacer(minLength: 0)
-                Button("+ New snippet") {}
-                    .buttonStyle(.borderedProminent)
-            }
+            SnippetsHeader {}
             if viewModel.isEmpty {
                 SnippetsEmptyView(viewModel: viewModel).frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {

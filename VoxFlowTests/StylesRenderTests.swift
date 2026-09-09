@@ -60,24 +60,42 @@ struct StylesRenderTests {
         ]))
         await overridesBundle.vm.load()
         overridesBundle.vm.defaultStyle = .formal
-        overridesBundle.vm.presentAddApp()
+        await overridesBundle.vm.presentAddApp()
         overridesBundle.vm.selectApp(bundleID: "com.linear", name: "Linear")
         overridesBundle.vm.addAppSheet?.style = .veryCasual
         await overridesBundle.vm.addOverride()
-        overridesBundle.vm.presentAddApp()
+        await overridesBundle.vm.presentAddApp()
         overridesBundle.vm.selectApp(bundleID: "com.google.chrome", name: "Google Docs")
         overridesBundle.vm.addAppSheet?.style = .verbatim
         await overridesBundle.vm.addOverride()
         try Self.render(StylesRenderPreview(viewModel: overridesBundle.vm), name: "2-overrides", directory: directory)
 
-        // 3. MW-05a — "Add app override" sheet, Linear selected (canvas page 8's exact sample).
+        // 3. MW-05a — "Add app override" sheet, Linear selected (canvas page 8's exact sample);
+        // "Google Docs" carries a `hostAppName` ("Chrome") to exercise the browser-hosted-app hint
+        // (design must-fix) the same way the canvas's own "Google Docs … Chrome" row does.
         let addAppBundle = makeBundle(apps: FakeInstalledAppsProvider(apps: [
-            ("com.google.chrome", "Google Docs"), ("com.linear", "Linear"), ("com.notion", "Notion"), ("com.discord", "Discord"),
+            InstalledApp(bundleID: "com.google.chrome", name: "Google Docs", hostAppName: "Chrome"),
+            InstalledApp(bundleID: "com.linear", name: "Linear"),
+            InstalledApp(bundleID: "com.notion", name: "Notion"),
+            InstalledApp(bundleID: "com.discord", name: "Discord"),
         ]))
         await addAppBundle.vm.load()
-        addAppBundle.vm.presentAddApp()
+        await addAppBundle.vm.presentAddApp()
         addAppBundle.vm.selectApp(bundleID: "com.linear", name: "Linear")
         try Self.render(AddAppOverrideSheet(viewModel: addAppBundle.vm), name: "3-sheet-add-app", directory: directory)
+
+        // 4. MW-05a app-list rows on their own (design must-fix), outside the sheet's live
+        // `ScrollView` — that renders blank under `ImageRenderer` (case 3 above), so this is the
+        // only render that actually shows the icon + trailing hint (a browser-hosted "Google Docs
+        // … Chrome" row and a native-app row whose hint is its bundle id).
+        let rowsPreview = VStack(spacing: 0) {
+            AppListRow(app: InstalledApp(bundleID: "com.google.chrome", name: "Google Docs", hostAppName: "Chrome"), isSelected: false) {}
+            Divider()
+            AppListRow(app: InstalledApp(bundleID: "com.company.linear", name: "Linear"), isSelected: true) {}
+        }
+        .frame(width: 320)
+        .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(Color.secondary.opacity(0.2)))
+        try Self.render(rowsPreview.padding(20), name: "4-app-list-rows", directory: directory)
 
         withExtendedLifetime([defaultBundle.dir, overridesBundle.dir, addAppBundle.dir]) {}
     }
@@ -111,33 +129,24 @@ struct StylesRenderTests {
 }
 
 /// Renders `StylesPageBody`'s content sharing every content-bearing subview with production
-/// (`StyleCardView`, `OverridesCard`, `ToggleRow`) — same reasoning as `DictionaryRenderPreview`. No
-/// live `ScrollView` (blank under `ImageRenderer`).
+/// (`StylesIntro`, `StylesSaidBlock`, `StyleCardView`, `OverridesCard`, `StylesToggles` — review M6:
+/// the intro/"You said:"/toggles used to be hand-retyped here, which could drift silently from a
+/// copy change in production) — same reasoning as `DictionaryRenderPreview`. No live `ScrollView`
+/// (blank under `ImageRenderer`).
 private struct StylesRenderPreview: View {
     let viewModel: StylesViewModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("Choose how VoxFlow cleans up what you say. Same words in, different text out — all rewritten by the on-device model.")
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: 560, alignment: .leading)
-            VStack(alignment: .leading, spacing: 4) {
-                Text("You said:").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                Text("\u{201c}\(StylesViewModel.saidSample)\u{201d}").font(.callout).italic()
-            }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            StylesIntro()
+            StylesSaidBlock()
             HStack(alignment: .top, spacing: 16) {
                 ForEach(StylesViewModel.cards, id: \.style) { card in
                     StyleCardView(card: card, isSelected: viewModel.defaultStyle == card.style) {}
                 }
             }
             OverridesCard(viewModel: viewModel)
-            VStack(spacing: 10) {
-                ToggleRow(title: "Remove filler words (um, uh, like)", isOn: .constant(viewModel.removeFillers))
-                ToggleRow(title: "Auto-punctuate and capitalize", isOn: .constant(viewModel.autoPunctuate))
-            }
+            StylesToggles(viewModel: viewModel)
         }
         .padding(20)
         .frame(width: 900, height: 900)

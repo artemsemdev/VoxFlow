@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import VoxFlowCore
 
@@ -30,8 +31,8 @@ struct AddAppOverrideSheet: View {
     private var appList: some View {
         ScrollView {
             VStack(spacing: 0) {
-                ForEach(viewModel.searchableApps, id: \.bundleID) { app in
-                    AppListRow(name: app.name, isSelected: viewModel.addAppSheet?.selectedBundleID == app.bundleID) {
+                ForEach(viewModel.searchableApps) { app in
+                    AppListRow(app: app, isSelected: viewModel.addAppSheet?.selectedBundleID == app.bundleID) {
                         viewModel.selectApp(bundleID: app.bundleID, name: app.name)
                     }
                 }
@@ -65,17 +66,24 @@ struct AddAppOverrideSheet: View {
     }
 }
 
-/// One row in the "Add app override" app list — name, selected checkmark.
+/// One row in the "Add app override" app list (design MW-05a, brief: "list (name + hint)") — app
+/// icon, name, a trailing hint (the hosting browser for a browser-installed "web app" like "Google
+/// Docs … Chrome", or the bundle id in secondary colour for a native app), selected checkmark.
 struct AppListRow: View {
-    let name: String
+    let app: InstalledApp
     let isSelected: Bool
     let select: () -> Void
 
     var body: some View {
         Button(action: select) {
-            HStack {
-                Text(name)
-                Spacer()
+            HStack(spacing: 8) {
+                icon
+                Text(app.name)
+                Spacer(minLength: 8)
+                Text(hint)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
                 if isSelected {
                     Image(systemName: "checkmark").foregroundStyle(.tint)
                 }
@@ -86,5 +94,27 @@ struct AppListRow: View {
         }
         .buttonStyle(.plain)
         .background(isSelected ? Color.accentColor.opacity(0.15) : Color.clear)
+    }
+
+    /// Loaded on demand from `app.url` (not cached in `InstalledApp` — see its doc comment) via
+    /// `NSWorkspace.shared.icon(forFile:)`; falls back to a generic glyph when there's no URL (e.g.
+    /// a fake used in a test/render).
+    private var icon: some View {
+        Group {
+            if let url = app.url {
+                Image(nsImage: NSWorkspace.shared.icon(forFile: url.path))
+                    .resizable()
+            } else {
+                Image(systemName: "app")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(width: 16, height: 16)
+    }
+
+    /// The hosting browser for a browser-installed "web app" ("Chrome", "Microsoft Edge"), or the
+    /// bundle id for a native app (design must-fix: the canvas's "Google Docs … Chrome" row).
+    private var hint: String {
+        app.hostAppName ?? app.bundleID
     }
 }

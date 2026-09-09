@@ -47,6 +47,11 @@ final class StylesViewModel {
     let stylingSettings: StylingSettings
     let installedApps: any InstalledAppsProviding
 
+    /// The installed apps behind `searchableApps` — loaded once per `presentAddApp()` on a
+    /// detached task and cached here, rather than re-running `installedApps.installedApps()`'s
+    /// filesystem scan from `searchableApps` every time `body` re-evaluates it (review B1).
+    private(set) var apps: [InstalledApp] = []
+
     init(content: ContentService, stylingSettings: StylingSettings, installedApps: any InstalledAppsProviding) {
         self.content = content
         self.stylingSettings = stylingSettings
@@ -74,8 +79,12 @@ final class StylesViewModel {
 
     // MARK: "Add app override" sheet (design MW-05a)
 
-    func presentAddApp() {
+    /// Scans installed apps once for this presentation (review B1) — `async` so callers (`Task {
+    /// await … }` from the "+ Add app" button) can await the scan finishing before
+    /// `searchableApps` needs `apps` populated.
+    func presentAddApp() async {
         addAppSheet = AddAppOverrideDraft()
+        await loadApps()
     }
 
     func cancelAddApp() {
@@ -89,14 +98,22 @@ final class StylesViewModel {
 
     var canAddOverride: Bool { addAppSheet?.selectedBundleID != nil }
 
-    /// Apps offered by the search list: every installed app not already overridden, filtered by the
-    /// draft's search text (case-insensitive, matched against the display name).
-    var searchableApps: [(bundleID: String, name: String)] {
+    /// Apps offered by the search list: every cached installed app (see `apps`) not already
+    /// overridden, filtered by the draft's search text (case-insensitive, matched against the
+    /// display name) — filters the cache in-memory, no filesystem access (review B1).
+    var searchableApps: [InstalledApp] {
         let overriddenIDs = Set(overrides.map(\.bundleID))
-        let candidates = installedApps.installedApps().filter { !overriddenIDs.contains($0.bundleID) }
+        let candidates = apps.filter { !overriddenIDs.contains($0.bundleID) }
         let query = (addAppSheet?.search ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !query.isEmpty else { return candidates }
         return candidates.filter { $0.name.lowercased().contains(query) }
+    }
+
+    /// The one-time-per-presentation scan (review B1): off the main actor, since
+    /// `InstalledAppsProviding.installedApps()` does synchronous filesystem/Info.plist I/O.
+    private func loadApps() async {
+        let provider = installedApps
+        apps = await Task.detached(priority: .utility) { provider.installedApps() }.value
     }
 
     func addOverride() async {
@@ -108,9 +125,13 @@ final class StylesViewModel {
 
     // MARK: Override rows
 
-    func removeOverride(_ override: StyleOverride) {
+    /// Removes the override locally and, on the returned task, from storage — the discardable
+    /// `Task` (review M8) lets a test `await removeOverride(_:).value` deterministically instead of
+    /// busy-polling for the write to land, while production call sites just ignore it.
+    @discardableResult
+    func removeOverride(_ override: StyleOverride) -> Task<Void, Never> {
         overrides.removeAll { $0.bundleID == override.bundleID }
-        Task { [content] in
+        return Task { [content] in
             try? await content.overrides.remove(bundleID: override.bundleID)
         }
     }

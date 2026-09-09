@@ -23,7 +23,7 @@ struct SnippetsPageBody: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            header
+            SnippetsHeader { Task { await viewModel.presentNew() } }
             if viewModel.isEmpty {
                 SnippetsEmptyView(viewModel: viewModel)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -38,19 +38,30 @@ struct SnippetsPageBody: View {
         }
     }
 
-    private var header: some View {
+    private var sheetBinding: Binding<Bool> {
+        Binding(get: { viewModel.sheet != nil }, set: { if !$0 { viewModel.cancelSheet() } })
+    }
+}
+
+/// The intro + "+ New snippet" header (design MW-04) — its own view (review M6) so
+/// `SnippetsRenderTests`' preview can share this exact copy with production instead of re-typing it,
+/// which would let a copy change drift out of the design-fidelity gate unnoticed.
+struct SnippetsHeader: View {
+    let newSnippet: () -> Void
+
+    init(newSnippet: @escaping () -> Void) {
+        self.newSnippet = newSnippet
+    }
+
+    var body: some View {
         HStack(alignment: .lastTextBaseline, spacing: 16) {
             Text("Say a trigger and VoxFlow inserts the full text. Triggers work in every app.")
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: 520, alignment: .leading)
             Spacer(minLength: 0)
-            Button("+ New snippet") { viewModel.presentNew() }
+            Button("+ New snippet", action: newSnippet)
                 .buttonStyle(.borderedProminent)
         }
-    }
-
-    private var sheetBinding: Binding<Bool> {
-        Binding(get: { viewModel.sheet != nil }, set: { if !$0 { viewModel.cancelSheet() } })
     }
 }
 
@@ -90,6 +101,10 @@ struct SnippetCardView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(3)
                 .frame(maxWidth: .infinity, alignment: .leading)
+            // "Only in {app}" caption: implementation-authored copy (review M4) — neither the canvas
+            // nor the brief shows a scoped-snippet card caption; flagged for an explicit owner call
+            // rather than silently assumed. Kept because an app-scoped card with no on-card
+            // indication of its scope would be a worse (silently misleading) default.
             if let appName = snippet.onlyInAppName {
                 Text("Only in \(appName)")
                     .font(.caption2)
@@ -119,7 +134,7 @@ struct SnippetCardView: View {
 
     private var actions: some View {
         HStack(spacing: 10) {
-            Button("Edit") { viewModel.editExisting(snippet) }
+            Button("Edit") { Task { await viewModel.editExisting(snippet) } }
                 .buttonStyle(.plain)
                 .foregroundStyle(.tint)
             Button("Delete") { viewModel.delete(snippet) }
@@ -147,7 +162,7 @@ struct SnippetsEmptyView: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 360)
-            Button("Create /sig") { viewModel.presentNew(prefillTrigger: "/sig") }
+            Button("Create /sig") { Task { await viewModel.presentNew(prefillTrigger: "/sig") } }
                 .buttonStyle(.borderedProminent)
         }
     }

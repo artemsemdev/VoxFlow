@@ -40,7 +40,7 @@ struct SnippetsViewModelTests {
         let h = Harness()
         let vm = h.vm()
         await vm.load()
-        vm.presentNew()
+        await vm.presentNew()
         vm.sheet?.trigger = "/sig"
         vm.sheet?.body = "Kind regards,\nAnh"
 
@@ -52,10 +52,10 @@ struct SnippetsViewModelTests {
     }
 
     @Test("validation is .empty for a blank trigger — Save disabled, no message")
-    func emptyValidation() {
+    func emptyValidation() async throws {
         let h = Harness()
         let vm = h.vm()
-        vm.presentNew()
+        await vm.presentNew()
 
         #expect(vm.validation == .empty)
         #expect(vm.canSave == false)
@@ -64,11 +64,29 @@ struct SnippetsViewModelTests {
         #expect(vm.validation == .empty)
     }
 
-    @Test("a trigger missing the leading / is .invalid — Save disabled")
-    func missingSlashIsInvalid() {
+    @Test("a blank Insert body is also .empty — Save disabled (review M7)")
+    func blankBodyIsEmpty() async throws {
         let h = Harness()
         let vm = h.vm()
-        vm.presentNew()
+        await vm.presentNew()
+        vm.sheet?.trigger = "/sig"
+
+        #expect(vm.validation == .empty)
+        #expect(vm.canSave == false)
+
+        vm.sheet?.body = "   "
+        #expect(vm.validation == .empty)
+
+        vm.sheet?.body = "Kind regards"
+        #expect(vm.validation == nil)
+        #expect(vm.canSave == true)
+    }
+
+    @Test("a trigger missing the leading / is .invalid — Save disabled")
+    func missingSlashIsInvalid() async throws {
+        let h = Harness()
+        let vm = h.vm()
+        await vm.presentNew()
         vm.sheet?.trigger = "sig"
 
         guard case .invalid = vm.validation else {
@@ -79,10 +97,10 @@ struct SnippetsViewModelTests {
     }
 
     @Test("a trigger containing whitespace is .invalid — Save disabled")
-    func whitespaceIsInvalid() {
+    func whitespaceIsInvalid() async throws {
         let h = Harness()
         let vm = h.vm()
-        vm.presentNew()
+        await vm.presentNew()
         vm.sheet?.trigger = "/my sig"
 
         guard case .invalid = vm.validation else {
@@ -97,12 +115,12 @@ struct SnippetsViewModelTests {
         let h = Harness()
         let vm = h.vm()
         await vm.load()
-        vm.presentNew()
+        await vm.presentNew()
         vm.sheet?.trigger = "/sig"
         vm.sheet?.body = "Email signature\nSent from VoxFlow"
         await vm.save()
 
-        vm.presentNew()
+        await vm.presentNew()
         vm.sheet?.trigger = "/sig"
 
         guard case .duplicate(let existing, let message, let suggestion) = vm.validation else {
@@ -126,13 +144,13 @@ struct SnippetsViewModelTests {
         let h = Harness()
         let vm = h.vm()
         await vm.load()
-        vm.presentNew()
+        await vm.presentNew()
         vm.sheet?.trigger = "/sig"
         vm.sheet?.body = "Kind regards"
         await vm.save()
         let existing = vm.snippets[0]
 
-        vm.editExisting(existing)
+        await vm.editExisting(existing)
 
         #expect(vm.sheet?.trigger == "/sig")
         #expect(vm.sheet?.body == "Kind regards")
@@ -146,13 +164,13 @@ struct SnippetsViewModelTests {
         let h = Harness()
         let vm = h.vm()
         await vm.load()
-        vm.presentNew()
+        await vm.presentNew()
         vm.sheet?.trigger = "/sig"
         vm.sheet?.body = "Kind regards"
         await vm.save()
         let existing = vm.snippets[0]
 
-        vm.editExisting(existing)
+        await vm.editExisting(existing)
         vm.sheet?.body = "Best,\nAnh"
         await vm.save()
 
@@ -164,10 +182,10 @@ struct SnippetsViewModelTests {
     // MARK: spoken hint (ruling 4 / SnippetExpander spoken form)
 
     @Test("spokenHint derives \"slash <trigger>\" from the trigger")
-    func spokenHintDerivation() {
+    func spokenHintDerivation() async throws {
         let h = Harness()
         let vm = h.vm()
-        vm.presentNew()
+        await vm.presentNew()
 
         #expect(vm.spokenHint == nil)
 
@@ -178,11 +196,11 @@ struct SnippetsViewModelTests {
     // MARK: Empty-state prefill
 
     @Test("presentNew(prefillTrigger:) prefills the sheet — the empty state's Create /sig")
-    func prefillsTrigger() {
+    func prefillsTrigger() async throws {
         let h = Harness()
         let vm = h.vm()
 
-        vm.presentNew(prefillTrigger: "/sig")
+        await vm.presentNew(prefillTrigger: "/sig")
 
         #expect(vm.sheet?.trigger == "/sig")
         #expect(vm.sheet?.editingID == nil)
@@ -191,11 +209,11 @@ struct SnippetsViewModelTests {
     // MARK: Only in {app}
 
     @Test("enabling Only in picks the first installed app as a default")
-    func onlyInPicksFirstApp() {
+    func onlyInPicksFirstApp() async throws {
         let h = Harness()
         let apps = FakeInstalledAppsProvider(apps: [("com.tinyspeck.slackmacgap", "Slack"), ("com.microsoft.teams", "Teams")])
         let vm = h.vm(apps: apps)
-        vm.presentNew()
+        await vm.presentNew()
 
         vm.setOnlyIn(true)
 
@@ -205,11 +223,11 @@ struct SnippetsViewModelTests {
     }
 
     @Test("choosing a different app updates the draft")
-    func chooseOnlyInApp() {
+    func chooseOnlyInApp() async throws {
         let h = Harness()
         let apps = FakeInstalledAppsProvider(apps: [("com.tinyspeck.slackmacgap", "Slack"), ("com.microsoft.teams", "Teams")])
         let vm = h.vm(apps: apps)
-        vm.presentNew()
+        await vm.presentNew()
         vm.setOnlyIn(true)
 
         vm.chooseOnlyInApp(bundleID: "com.microsoft.teams")
@@ -219,11 +237,11 @@ struct SnippetsViewModelTests {
     }
 
     @Test("disabling Only in clears the app selection")
-    func disablingOnlyInClears() {
+    func disablingOnlyInClears() async throws {
         let h = Harness()
         let apps = FakeInstalledAppsProvider(apps: [("com.tinyspeck.slackmacgap", "Slack")])
         let vm = h.vm(apps: apps)
-        vm.presentNew()
+        await vm.presentNew()
         vm.setOnlyIn(true)
 
         vm.setOnlyIn(false)
@@ -239,7 +257,7 @@ struct SnippetsViewModelTests {
         let apps = FakeInstalledAppsProvider(apps: [("com.tinyspeck.slackmacgap", "Slack")])
         let vm = h.vm(apps: apps)
         await vm.load()
-        vm.presentNew()
+        await vm.presentNew()
         vm.sheet?.trigger = "/standup"
         vm.sheet?.body = "Yesterday:\nToday:"
         vm.setOnlyIn(true)
@@ -255,7 +273,7 @@ struct SnippetsViewModelTests {
         let h = Harness()
         let vm = h.vm()
         await vm.load()
-        vm.presentNew()
+        await vm.presentNew()
         vm.sheet?.trigger = "/sig"
         vm.sheet?.body = "Kind regards"
 
@@ -265,13 +283,51 @@ struct SnippetsViewModelTests {
         #expect(vm.snippets[0].onlyInAppName == nil)
     }
 
+    // MARK: Installed-apps scan caching (review B1)
+
+    @Test("presentNew scans installed apps once per presentation — not per subsequent access")
+    func presentNewScansAppsOnce() async throws {
+        let h = Harness()
+        let apps = FakeInstalledAppsProvider(apps: [("com.tinyspeck.slackmacgap", "Slack")])
+        let vm = h.vm(apps: apps)
+
+        await vm.presentNew()
+        // Repeated reads (what a re-rendering `body`, or several keystrokes, would trigger) must
+        // not re-scan — `apps` is a plain cached property now, not a computed pass-through.
+        _ = vm.apps
+        vm.sheet?.trigger = "/s"
+        vm.sheet?.trigger = "/st"
+        _ = vm.apps
+        vm.setOnlyIn(true)
+        vm.chooseOnlyInApp(bundleID: "com.tinyspeck.slackmacgap")
+
+        #expect(apps.scanCount == 1)
+    }
+
+    @Test("editExisting also scans installed apps exactly once")
+    func editExistingScansAppsOnce() async throws {
+        let h = Harness()
+        let apps = FakeInstalledAppsProvider(apps: [("com.tinyspeck.slackmacgap", "Slack")])
+        let vm = h.vm(apps: apps)
+        await vm.load()
+        await vm.presentNew()
+        vm.sheet?.trigger = "/sig"
+        vm.sheet?.body = "Kind regards"
+        await vm.save()
+        let saved = vm.snippets[0]
+
+        await vm.editExisting(saved)
+
+        #expect(apps.scanCount == 2) // one from presentNew above, one from editExisting
+    }
+
     // MARK: Insert cursor placeholder
 
     @Test("insertCursorPlaceholder appends cursor to the body")
-    func insertCursorAppends() {
+    func insertCursorAppends() async throws {
         let h = Harness()
         let vm = h.vm()
-        vm.presentNew()
+        await vm.presentNew()
         vm.sheet?.body = "Yesterday:"
 
         vm.insertCursorPlaceholder()
@@ -280,10 +336,10 @@ struct SnippetsViewModelTests {
     }
 
     @Test("insertCursorPlaceholder on an empty body just inserts cursor")
-    func insertCursorOnEmptyBody() {
+    func insertCursorOnEmptyBody() async throws {
         let h = Harness()
         let vm = h.vm()
-        vm.presentNew()
+        await vm.presentNew()
 
         vm.insertCursorPlaceholder()
 
@@ -297,20 +353,17 @@ struct SnippetsViewModelTests {
         let h = Harness()
         let vm = h.vm()
         await vm.load()
-        vm.presentNew()
+        await vm.presentNew()
         vm.sheet?.trigger = "/sig"
         vm.sheet?.body = "Kind regards"
         await vm.save()
         let snippet = vm.snippets[0]
 
-        vm.delete(snippet)
+        // Awaits the write deterministically (review M8) instead of busy-polling for it to land.
+        await vm.delete(snippet).value
 
         #expect(vm.snippets.isEmpty)
-        var remaining = await h.content.snippets.all()
-        for _ in 0..<2_000 where !remaining.isEmpty {
-            await Task.yield()
-            remaining = await h.content.snippets.all()
-        }
+        let remaining = await h.content.snippets.all()
         #expect(remaining.isEmpty)
     }
 
@@ -334,8 +387,9 @@ struct SnippetsViewModelTests {
         await vm.load()
         #expect(vm.isEmpty == true)
 
-        vm.presentNew()
+        await vm.presentNew()
         vm.sheet?.trigger = "/sig"
+        vm.sheet?.body = "Kind regards"
         await vm.save()
 
         #expect(vm.isEmpty == false)

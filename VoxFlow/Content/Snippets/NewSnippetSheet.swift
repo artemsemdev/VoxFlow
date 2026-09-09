@@ -112,6 +112,10 @@ struct NewSnippetSheet: View {
         }
     }
 
+    /// "Only in an app" (no app chosen yet) is implementation-authored copy (review M4) — the canvas
+    /// only shows the post-selection state ("Only in Slack"); flagged for an explicit owner call
+    /// rather than silently assumed. Kept because the checkbox needs *some* label before a Picker
+    /// selection exists.
     private var onlyInLabel: String {
         if let name = viewModel.sheet?.onlyInAppName { "Only in \(name)" } else { "Only in an app" }
     }

@@ -80,7 +80,7 @@ struct StylesViewModelTests {
         let h = Harness()
         let vm = h.vm()
         await vm.load()
-        vm.presentAddApp()
+        await vm.presentAddApp()
         vm.selectApp(bundleID: "com.linear", name: "Linear")
         vm.addAppSheet?.style = .veryCasual
 
@@ -97,7 +97,7 @@ struct StylesViewModelTests {
         let h = Harness()
         let vm = h.vm()
         await vm.load()
-        vm.presentAddApp()
+        await vm.presentAddApp()
 
         #expect(vm.canAddOverride == false)
 
@@ -112,19 +112,16 @@ struct StylesViewModelTests {
         let h = Harness()
         let vm = h.vm()
         await vm.load()
-        vm.presentAddApp()
+        await vm.presentAddApp()
         vm.selectApp(bundleID: "com.linear", name: "Linear")
         await vm.addOverride()
         let override = vm.overrides[0]
 
-        vm.removeOverride(override)
+        // Awaits the write deterministically (review M8) instead of busy-polling for it to land.
+        await vm.removeOverride(override).value
 
         #expect(vm.overrides.isEmpty)
-        var remaining = await h.content.overrides.all()
-        for _ in 0..<2_000 where !remaining.isEmpty {
-            await Task.yield()
-            remaining = await h.content.overrides.all()
-        }
+        let remaining = await h.content.overrides.all()
         #expect(remaining.isEmpty)
     }
 
@@ -133,7 +130,7 @@ struct StylesViewModelTests {
         let h = Harness()
         let vm = h.vm()
         await vm.load()
-        vm.presentAddApp()
+        await vm.presentAddApp()
         vm.selectApp(bundleID: "com.linear", name: "Linear")
         vm.addAppSheet?.style = .casual
         await vm.addOverride()
@@ -152,15 +149,37 @@ struct StylesViewModelTests {
         let apps = FakeInstalledAppsProvider(apps: [("com.linear", "Linear"), ("com.tinyspeck.slackmacgap", "Slack"), ("com.notion", "Notion")])
         let vm = h.vm(apps: apps)
         await vm.load()
-        vm.presentAddApp()
+        await vm.presentAddApp()
         vm.selectApp(bundleID: "com.linear", name: "Linear")
         await vm.addOverride()
 
-        vm.presentAddApp()
+        await vm.presentAddApp()
         #expect(Set(vm.searchableApps.map(\.name)) == ["Slack", "Notion"])
 
         vm.addAppSheet?.search = "sla"
         #expect(vm.searchableApps.map(\.name) == ["Slack"])
+    }
+
+    // MARK: Installed-apps scan caching (review B1)
+
+    @Test("presentAddApp scans installed apps once per presentation — not on every search keystroke")
+    func presentAddAppScansAppsOnce() async throws {
+        let h = Harness()
+        let apps = FakeInstalledAppsProvider(apps: [("com.linear", "Linear"), ("com.notion", "Notion")])
+        let vm = h.vm(apps: apps)
+        await vm.load()
+
+        await vm.presentAddApp()
+        // Repeated reads through several "keystrokes" (what a re-rendering `body` would trigger)
+        // must not re-scan — `searchableApps` filters the cached `apps`, not the provider directly.
+        vm.addAppSheet?.search = "l"
+        _ = vm.searchableApps
+        vm.addAppSheet?.search = "li"
+        _ = vm.searchableApps
+        vm.addAppSheet?.search = "lin"
+        _ = vm.searchableApps
+
+        #expect(apps.scanCount == 1)
     }
 
     // MARK: Resolver wiring (ruling 2 / ruling 8 — the History meta's style names come from here)
@@ -171,7 +190,7 @@ struct StylesViewModelTests {
         let vm = h.vm()
         await vm.load()
         vm.defaultStyle = .casual
-        vm.presentAddApp()
+        await vm.presentAddApp()
         vm.selectApp(bundleID: "com.linear", name: "Linear")
         vm.addAppSheet?.style = .formal
         await vm.addOverride()
@@ -188,7 +207,7 @@ struct StylesViewModelTests {
         let h = Harness()
         let vm = h.vm()
         await vm.load()
-        vm.presentAddApp()
+        await vm.presentAddApp()
         vm.selectApp(bundleID: "com.linear", name: "Linear")
         vm.addAppSheet?.style = .verbatim
 

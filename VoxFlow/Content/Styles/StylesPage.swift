@@ -25,35 +25,17 @@ struct StylesPageBody: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                intro
-                saidBlock
+                StylesIntro()
+                StylesSaidBlock()
                 cards
                 OverridesCard(viewModel: viewModel)
-                toggles
+                StylesToggles(viewModel: viewModel)
             }
             .padding(20)
         }
         .sheet(isPresented: sheetBinding) {
             AddAppOverrideSheet(viewModel: viewModel)
         }
-    }
-
-    private var intro: some View {
-        Text("Choose how VoxFlow cleans up what you say. Same words in, different text out — all rewritten by the on-device model.")
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: 560, alignment: .leading)
-    }
-
-    private var saidBlock: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("You said:").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-            Text("\u{201c}\(StylesViewModel.saidSample)\u{201d}")
-                .font(.callout)
-                .italic()
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
     private var cards: some View {
@@ -66,15 +48,47 @@ struct StylesPageBody: View {
         }
     }
 
-    private var toggles: some View {
+    private var sheetBinding: Binding<Bool> {
+        Binding(get: { viewModel.addAppSheet != nil }, set: { if !$0 { viewModel.cancelAddApp() } })
+    }
+}
+
+/// The intro line (design MW-05) — its own view (review M6) so `StylesRenderTests`' preview can
+/// share this exact copy with production instead of re-typing it, which would let a copy change
+/// drift out of the design-fidelity gate unnoticed.
+struct StylesIntro: View {
+    var body: some View {
+        Text("Choose how VoxFlow cleans up what you say. Same words in, different text out — all rewritten by the on-device model.")
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: 560, alignment: .leading)
+    }
+}
+
+/// The "You said:" sample block (design MW-05, ruling 8's fixed sample) — same M6 reasoning as
+/// `StylesIntro`.
+struct StylesSaidBlock: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("You said:").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            Text("\u{201c}\(StylesViewModel.saidSample)\u{201d}")
+                .font(.callout)
+                .italic()
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+}
+
+/// The two bottom toggle rows (design MW-05) — same M6 reasoning as `StylesIntro`.
+struct StylesToggles: View {
+    let viewModel: StylesViewModel
+
+    var body: some View {
         VStack(spacing: 10) {
             ToggleRow(title: "Remove filler words (um, uh, like)", isOn: removeFillersBinding)
             ToggleRow(title: "Auto-punctuate and capitalize", isOn: autoPunctuateBinding)
         }
-    }
-
-    private var sheetBinding: Binding<Bool> {
-        Binding(get: { viewModel.addAppSheet != nil }, set: { if !$0 { viewModel.cancelAddApp() } })
     }
 
     private var removeFillersBinding: Binding<Bool> {
@@ -131,18 +145,25 @@ struct OverridesCard: View {
             HStack {
                 Text("Per-app overrides").font(.headline)
                 Spacer()
-                Button("+ Add app") { viewModel.presentAddApp() }
+                Button("+ Add app") { Task { await viewModel.presentAddApp() } }
                     .buttonStyle(.bordered)
             }
             if viewModel.overrides.isEmpty {
+                // Implementation-authored copy (review M4) — neither the canvas nor the brief shows
+                // this empty state; flagged for an explicit owner call rather than silently assumed.
+                // Kept because a blank card with no explanation would be a worse default.
                 Text("No overrides yet — every app uses the default style above.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             } else {
                 VStack(spacing: 0) {
-                    ForEach(viewModel.overrides, id: \.bundleID) { override in
+                    // `Divider()` only between rows, not after the last one (review M5 — a trailing
+                    // rule was left hanging under the final row).
+                    ForEach(Array(viewModel.overrides.enumerated()), id: \.element.bundleID) { index, override in
                         OverrideRow(override: override, viewModel: viewModel)
-                        Divider()
+                        if index < viewModel.overrides.count - 1 {
+                            Divider()
+                        }
                     }
                 }
             }
