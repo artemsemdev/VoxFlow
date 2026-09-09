@@ -5,6 +5,21 @@ import VoxFlowTestSupport
 
 @Suite("FakeClock", .timeLimit(.minutes(1)))
 struct FakeClockTests {
+    @Test("a sleep cancelled while it is registering never parks a sleeper nothing will resume")
+    func cancelRacingRegistration() async throws {
+        // Regression for the `LlamaStyler` timeout race hanging under load: `group.cancelAll()` can land
+        // between `sleep`'s cancellation check and its registration. Race the two many times; every
+        // sleeper must finish (throwing) and none may be left parked.
+        let clock = FakeClock()
+        for _ in 0..<300 {
+            let sleeper = Task { try await clock.sleep(for: 10) }
+            await Task.yield()
+            sleeper.cancel()
+            await #expect(throws: CancellationError.self) { try await sleeper.value }
+        }
+        #expect(clock.sleeperCount == 0)
+    }
+
     @Test("advance resumes sleepers whose deadline passed, in deadline order")
     func advance() async throws {
         let clock = FakeClock()

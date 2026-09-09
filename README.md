@@ -60,6 +60,14 @@ any app, style cleanup with a local LLM and an MCP server follow in 2.x (see the
 - Styles page: pick a rewrite tone (Formal, Casual, Very casual, Verbatim) and per-app overrides;
   rule-based styling (fillers removed, punctuation and capitalization added) runs on every
   dictation before it's inserted — see [ADR-005](docs/adr/005-rule-based-styling-pipeline.md).
+- On-device style cleanup: an optional local LLM (Qwen2.5 3B Instruct via llama.cpp, Settings ›
+  Models) rewrites the tone step for Formal/Casual/Very casual on top of the same rule pass, with
+  automatic fallback to rule-based styling whenever the model is absent, still loading, too slow
+  or produces a bad answer — dictation never waits on it and never loses a result. "Re-style ▾" on
+  a History row rewrites a past dictation into another tone without re-recording and copies the
+  result; Files' result view can "Apply {Style} cleanup" to instantly rewrite every segment of a
+  finished transcript (rule-based only, no re-processing) — see
+  [ADR-007](docs/adr/007-llm-styling-on-llama-cpp.md).
 
 ## Roadmap
 

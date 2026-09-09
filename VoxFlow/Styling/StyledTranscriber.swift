@@ -38,7 +38,14 @@ struct StyledTranscriber: DictationTranscribing {
         let snapshot = settings.current
         let style = StyleResolver.resolve(default: snapshot.defaultStyle, overrides: content.overridesBox.current, bundleID: app?.bundleID)
         let stylingOptions = StylingOptions(style: style, removeFillers: snapshot.removeFillers, autoPunctuate: snapshot.autoPunctuate)
-        let styled = styler.style(result.rawText, options: stylingOptions)
+        let styled: StyledText
+        do {
+            styled = try await styler.style(result.rawText, options: stylingOptions)
+        } catch {
+            // A styling failure must never lose a dictation (ADR-007): fall back to the
+            // deterministic rule-based styler with the same options.
+            styled = RuleStyler().styleSync(result.rawText, options: stylingOptions)
+        }
 
         let expander = SnippetExpander(snippets: content.snippetsBox.current, sayPrefix: snapshot.snippetSayPrefix,
                                        context: (date: now(), clipboard: clipboard(), appName: app?.name, bundleID: app?.bundleID))

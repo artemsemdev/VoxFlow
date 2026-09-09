@@ -67,6 +67,35 @@ Settings → Privacy) independently of onboarding. `HistoryService` also
 opens the store lazily, on first use rather than at construction, specifically so that launching
 the app as the XCTest host never prompts for Keychain access — see #143.
 
+### Style model
+
+The Formal / Casual / Very casual style cleanup (Styles page, Re-style, and the Files result's
+"Apply {Style} cleanup") is rule-based on its own; installing the style model upgrades the
+dictation and Re-style paths to LLM rewrites (Files cleanup stays rule-based either way — see
+[ADR-007](docs/adr/007-llm-styling-on-llama-cpp.md)). Download it from Settings › Models — the
+"Qwen2.5 3B Instruct (4-bit)" row, 2.1 GB, sha256-verified before it counts as installed, same
+download/pause/resume/remove flow as the speech models. It's saved to
+
+```
+~/Library/Application Support/VoxFlow/Models/qwen2.5-3b-instruct-q4_k_m.gguf
+```
+
+Without it (not yet downloaded, still downloading, or removed), styling falls back to the
+deterministic rule pipeline (`RuleStyler`) automatically — dictation, Re-style and Files cleanup
+all keep working, just without the LLM's tone rewriting. First launch after installing the model
+pays a one-time Metal shader compile (~20 s), which runs in the background right after dictation
+starts, not on your first dictation's critical path.
+
+`VoxFlowLLMTests`' integration test (tagged `.requiresModel`) exercises the real model and needs
+it installed at the path above, or `VOXFLOW_STYLE_MODEL` set to a GGUF file elsewhere:
+
+```bash
+cd VoxFlowKit && VOXFLOW_STYLE_MODEL=/path/to/qwen2.5-3b-instruct-q4_k_m.gguf swift test --filter LlamaEngineIntegrationTests
+```
+
+Without either, it prints `skipped: style model not installed` and returns — this is why it's
+absent from CI.
+
 ### Contacts permission
 
 VoxFlow does not ask for Contacts access at launch. It prompts only if you turn on "Learn names

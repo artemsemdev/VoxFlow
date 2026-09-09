@@ -8,6 +8,7 @@ struct HistoryRowView: View {
     let record: DictationRecord
     let model: HistoryViewModel
     @State private var isHovering = false
+    @State private var isRestyleShown = false
 
     private var isExpanded: Bool { model.expandedID == record.id }
 
@@ -52,20 +53,29 @@ struct HistoryRowView: View {
             Button("Copy") { model.copy(record) }
                 .buttonStyle(.plain)
                 .foregroundStyle(.tint)
-            // Re-style rewrites locally via the phase-5 on-device LLM cleanup — not built yet.
-            Button {} label: {
+            // Re-style (design 2e, MW-02s): opens a popover of the four styles under the button.
+            // SwiftUI's `.popover` already fades in/out and dismisses on outside click/Esc — no
+            // custom animation here.
+            Button { isRestyleShown = true } label: {
                 HStack(spacing: 2) {
                     Text("Re-style")
-                    Image(systemName: "chevron.down").font(.caption2)
+                    if model.restylingID == record.id {
+                        ProgressView().controlSize(.mini)
+                    } else {
+                        Image(systemName: "chevron.down").font(.caption2)
+                    }
                 }
             }
             .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .disabled(true)
+            .foregroundStyle(.tint)
+            .popover(isPresented: $isRestyleShown, arrowEdge: .bottom) {
+                RestyleMenuView(record: record, model: model)
+            }
             Button("Delete") { model.delete(record) }
                 .buttonStyle(.plain)
                 .foregroundStyle(.red)
         }
         .font(.callout)
+        .disabled(model.restylingID != nil)
     }
 }

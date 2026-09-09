@@ -26,7 +26,13 @@ public struct RuleStyler: TextStyler, Sendable {
 
     public init() {}
 
-    public func style(_ raw: String, options: StylingOptions) -> StyledText {
+    /// `TextStyler` conformance: wraps `styleSync` so a purely rule-based caller can still be
+    /// used behind the `async throws` protocol (and as the fallback for `LlamaStyler`).
+    public func style(_ raw: String, options: StylingOptions) async throws -> StyledText {
+        styleSync(raw, options: options)
+    }
+
+    public func styleSync(_ raw: String, options: StylingOptions) -> StyledText {
         guard options.style != .verbatim else {
             return StyledText(text: raw, fillersRemoved: 0, cursorOffset: nil)
         }

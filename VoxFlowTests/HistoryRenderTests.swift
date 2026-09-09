@@ -105,6 +105,29 @@ struct HistoryRenderTests {
         }
     }
 
+    /// Renders `RestyleMenuView` on its own (design 2e's open "Re-style ▾" popover) for a record with
+    /// `veryCasual` — the style whose checkmark row this exercises — separately from `render()`'s
+    /// full-page states, since the popover is never part of the page's own layout.
+    @Test("renders the Re-style popover for design-fidelity comparison")
+    func renderRestyleMenu() async throws {
+        let directory = Self.rendersDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let bundle = makeBundle()
+        let record = DictationRecord(id: 1,
+                                     text: "can we push the meeting to thurs afternoon? need the numbers from finance first",
+                                     rawText: "um so can we uh push the meeting to like thursday afternoon I mean I need the numbers from finance first",
+                                     appName: "Slack", style: "veryCasual", language: "en", duration: 9, words: 15, createdAt: Date())
+        let renderer = ImageRenderer(content: RestyleMenuView(record: record, model: bundle.vm)
+            .background(Color(nsColor: .windowBackgroundColor)))
+        renderer.scale = 2
+        guard let image = renderer.nsImage else {
+            Issue.record("Failed to render the Re-style popover")
+            return
+        }
+        try Self.writePNG(image, to: directory.appendingPathComponent("History-restyle-menu.png"))
+    }
+
     private static func rendersDirectory() -> URL {
         URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()   // VoxFlowTests/

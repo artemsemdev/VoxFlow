@@ -157,6 +157,29 @@ public final class DictationStore: Sendable {
         return streak
     }
 
+    /// Re-style: replaces the inserted text and its style, recomputing `words`; `raw_text` and
+    /// `created_at` are semantically untouched — `created_at` is never written, and `raw_text` keeps
+    /// its original *content*, but its on-disk *encoding* is re-sealed alongside `text` under this
+    /// store's current cipher (fix round 1, C1). `encrypted` is a single flag covering both columns
+    /// (`record(from:)` decodes both with the one flag) — re-stamping it while leaving `raw_text`
+    /// encoded under the row's old flag would desync the two and blank the row. Returns nil when the
+    /// row no longer exists, or exists but this store can't currently decode it (encrypted with no
+    /// cipher available): re-styling a row we can't read would silently destroy it rather than
+    /// update it, so this leaves it byte-for-byte untouched instead.
+    public func updateStyled(id: Int64, text: String, style: String) throws -> DictationRecord? {
+        let words = DictationRecord.wordCount(text)
+        return try queue.write { db in
+            guard let row = try Row.fetchOne(db, sql: "SELECT * FROM dictations WHERE id = ?", arguments: [id]) else { return nil }
+            let existing = self.record(from: row)
+            guard !existing.isUnreadable else { return nil }
+            let encodedText = try self.encode(text)
+            let encodedRaw = try self.encode(existing.rawText)
+            try db.execute(sql: "UPDATE dictations SET text = ?, raw_text = ?, style = ?, words = ?, encrypted = ? WHERE id = ?",
+                           arguments: [encodedText, encodedRaw, style, words, self.cipher != nil, id])
+            return try Row.fetchOne(db, sql: "SELECT * FROM dictations WHERE id = ?", arguments: [id]).map(self.record(from:))
+        }
+    }
+
     public func delete(id: Int64) throws { try queue.write { try $0.execute(sql: "DELETE FROM dictations WHERE id = ?", arguments: [id]) } }
     public func deleteAll() throws { try queue.write { try $0.execute(sql: "DELETE FROM dictations") } }
 

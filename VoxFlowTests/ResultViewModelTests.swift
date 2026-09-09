@@ -30,10 +30,13 @@ struct ResultViewModelTests {
     static func makeVM(document: TranscriptDocument = smallDoc(), format: OutputFormat = .txt, timestamps: Bool = false,
                        autoDetectedLanguage: Bool = false, modelDisplayName: String = "m", savedURL: URL? = nil,
                        exportDirectory: URL = TemporaryDirectory().url,
+                       cleanupStyle: TextStyle = .casual,
+                       cleanupOptions: StylingOptions = StylingOptions(style: .casual, removeFillers: false, autoPunctuate: false),
                        pasteboard: any Pasteboard = FakePasteboard(), revealer: any FileRevealing = FakeRevealer()) -> ResultViewModel {
         ResultViewModel(document: document, format: format, timestamps: timestamps, autoDetectedLanguage: autoDetectedLanguage,
                         modelDisplayName: modelDisplayName, savedURL: savedURL,
-                        exporter: { TranscriptExporter(directory: exportDirectory) }, pasteboard: pasteboard, revealer: revealer)
+                        exporter: { TranscriptExporter(directory: exportDirectory) }, cleanupStyle: cleanupStyle, cleanupOptions: cleanupOptions,
+                        pasteboard: pasteboard, revealer: revealer)
     }
 
     @Test("rendered text changes with the selected format")
@@ -172,5 +175,65 @@ struct ResultViewModelTests {
         #expect(noSaved.exportMessage == nil)
         noSaved.reveal()
         #expect(freshRevealer.revealed.isEmpty)
+    }
+
+    // MARK: - "Apply {Style} cleanup" (design 2f, plan ruling 6)
+
+    @Test("cleanupLabel uses the default style's display name")
+    func cleanupLabelUsesDefaultStyle() {
+        let vm = Self.makeVM(cleanupStyle: .veryCasual)
+        #expect(vm.cleanupLabel == "Apply Very casual cleanup")
+    }
+
+    @Test("applyCleanup defaults to off; visibleSegments show the raw, unstyled text")
+    func cleanupOffKeepsRawSegments() {
+        let vm = Self.makeVM()
+        #expect(vm.applyCleanup == false)
+        #expect(vm.visibleSegments.map(\.text) == ["Hello there", "This needs your attention", "Goodbye now"])
+        #expect(vm.rendered.contains("Hello there"))
+    }
+
+    @Test("applyCleanup on rewrites every segment through RuleStyler and feeds rendered/exportAlso; turning it back off restores the raw document")
+    func cleanupOnRewritesEverySegmentAndExports() throws {
+        let segments = [TranscriptSegment(start: 0, end: 2, text: "um so we start")!]
+        let document = TranscriptDocument(sourceURL: URL(fileURLWithPath: "/tmp/a.m4a"), transcript: Transcript(segments: segments, language: "en"),
+                                          modelID: "m", audioDuration: 2, processingTime: 1, createdAt: Date(timeIntervalSince1970: 0))
+        let dir = TemporaryDirectory()
+        let vm = Self.makeVM(document: document, exportDirectory: dir.url,
+                             cleanupOptions: StylingOptions(style: .casual, removeFillers: true, autoPunctuate: true))
+        #expect(vm.visibleSegments.map(\.text) == ["um so we start"])
+
+        vm.applyCleanup = true
+        #expect(vm.visibleSegments.map(\.text) == ["So we start."])
+        // start/end are unchanged by cleanup — only the text is rewritten.
+        #expect(vm.visibleIndexedSegments.map { $0.segment.start } == [0])
+        #expect(vm.visibleIndexedSegments.map { $0.segment.end } == [2])
+        #expect(vm.rendered.contains("So we start."))
+        let exported = try vm.exportAlso(.srt)
+        let contents = try String(contentsOf: exported, encoding: .utf8)
+        #expect(contents.contains("So we start."))
+
+        vm.applyCleanup = false
+        #expect(vm.visibleSegments.map(\.text) == ["um so we start"])
+        #expect(vm.rendered.contains("um so we start"))
+    }
+
+    @Test("cleanedDocument stays fast even for 5,000 segments (< 1 s, ContinuousClock — the only timing assertion allowed)")
+    func cleanupIsFast() {
+        var segments: [TranscriptSegment] = []
+        segments.reserveCapacity(5_000)
+        for i in 0..<5_000 {
+            let start = TimeInterval(i)
+            segments.append(TranscriptSegment(start: start, end: start + 1, text: "um so we start")!)
+        }
+        let document = TranscriptDocument(sourceURL: URL(fileURLWithPath: "/tmp/big.m4a"), transcript: Transcript(segments: segments, language: "en"),
+                                          modelID: "m", audioDuration: 5_000, processingTime: 1, createdAt: Date(timeIntervalSince1970: 0))
+        let vm = Self.makeVM(document: document, cleanupOptions: StylingOptions(style: .casual, removeFillers: true, autoPunctuate: true))
+        let clock = ContinuousClock()
+        let elapsed = clock.measure {
+            vm.applyCleanup = true
+            _ = vm.visibleSegments.count
+        }
+        #expect(elapsed < .seconds(1))
     }
 }

@@ -19,6 +19,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // XCTest" rule.
         if LaunchEnvironment.isRunningTests() == false {
             AppServices.shared.dictation.start()
+            // Phase 5: warm the style LLM into memory now (Metal shaders + weights) so the first
+            // dictation after launch doesn't pay that cost — `StyleModelLoader.warmUp()` is a no-op
+            // once already loaded, and never blocks dictation itself (`.utility`, unawaited here).
+            Task(priority: .utility) { await AppServices.shared.styleModelLoader.warmUp() }
             AppServices.shared.flowBar.bind(to: AppServices.shared.dictation)
             AppServices.shared.fnMonitor.start()
             // MB-03/MB-04 (ruling 8): never starts under XCTest, same reasoning as everything else

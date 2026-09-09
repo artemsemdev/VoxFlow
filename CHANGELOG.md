@@ -59,6 +59,19 @@ versioning.
   posts a system notification while VoxFlow's window isn't the frontmost one — never for an
   error — and clicking it opens Settings › Models or the Files result. See
   [ADR-006](docs/adr/006-menu-bar-and-notifications.md).
+- On-device style cleanup (Qwen2.5 3B Instruct via llama.cpp, Settings › Models): the Formal,
+  Casual and Very casual tones are rewritten by a local LLM on top of the existing rule pass
+  (fillers, auto-punctuation), with deterministic (greedy) sampling and automatic fallback to
+  rule-based styling whenever the model is absent, still loading, the text is too long, generation
+  is slow, or the output fails validation. The model loads lazily and warms up once at launch,
+  off the critical path of the first dictation. See
+  [ADR-007](docs/adr/007-llm-styling-on-llama-cpp.md).
+- "Re-style ▾" on History rows: pick Formal, Casual, Very casual or Verbatim from a popover to
+  rewrite a past dictation into another tone without re-recording; the row updates in place and
+  the result is copied to the clipboard.
+- Files result view: "Apply {Style} cleanup" checkbox rewrites every segment of a finished
+  transcript through the rule-based pipeline (instant, no re-processing) — the preview, Copy,
+  Save as… and "Also export" all reflect the cleaned text while it's checked.
 
 ### Fixed
 - Settings › General's appearance and Flow Bar position now apply at launch, not only once

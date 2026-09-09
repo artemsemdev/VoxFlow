@@ -147,6 +147,21 @@ final class HistoryService {
         notifyChanged()
     }
 
+    /// Re-style (MW-02s): replaces a stored row's text/style in place. Nil when the row no longer
+    /// exists (same "on success" notify rule as `reinsert`, below).
+    func updateStyled(id: Int64, text: String, style: String) async -> DictationRecord? {
+        ensureOpened()
+        await openTask?.value
+        guard let store else { return nil }
+        let log = Self.log
+        let updated: DictationRecord? = await Task.detached(priority: .userInitiated) { () -> DictationRecord? in
+            do { return try store.updateStyled(id: id, text: text, style: style) }
+            catch { log.error("history updateStyled failed: \(String(describing: error))"); return nil }
+        }.value
+        if updated != nil { notifyChanged() }
+        return updated
+    }
+
     /// See `onChange`'s doc comment — called after every write that changes what's on disk.
     func notifyChanged() { onChange?() }
 
