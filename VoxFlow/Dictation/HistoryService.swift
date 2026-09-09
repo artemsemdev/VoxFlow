@@ -45,7 +45,17 @@ final class HistoryService {
         self.settings = settings
         self.keyProvider = keyProvider
         self.clock = clock
-        reopen()
+        // Deliberately no `reopen()` here: opening touches the Keychain (history key), and every
+        // ad-hoc rebuild is a new code identity to macOS, so an open at construction would prompt on
+        // every launch of the test host too (#143). The store opens on first use instead; Task 5's
+        // launch wiring calls `ready()` once at launch when not running under XCTest.
+    }
+
+    /// Starts the first open if nothing has opened yet. Every accessor calls this before awaiting
+    /// `openTask`, so the Keychain is only touched once history is actually used.
+    private func ensureOpened() {
+        guard openTask == nil else { return }
+        openTask = Task { await self.performOpen() }
     }
 
     /// Rebuilds the store with/without the key provider per `settings.encryptHistory`, and restarts
@@ -59,9 +69,12 @@ final class HistoryService {
     /// opens run strictly one at a time in call order, so the last `reopen()` always wins and every
     /// runner but the current one is `stop()`-ed before the next is created.
     func reopen() {
-        let previous = openTask
+        // Settings changed before the first open: nothing to rebuild — the eventual first open
+        // reads the current settings anyway, and forcing an open here would touch the Keychain
+        // just because a toggle moved.
+        guard let previous = openTask else { return }
         openTask = Task {
-            _ = await previous?.value
+            _ = await previous.value
             await self.performOpen()
         }
     }
@@ -70,34 +83,40 @@ final class HistoryService {
     /// `HistoryWriter`) that must not read `storeBox` before the first open (or a still-in-flight
     /// reopen) has resolved.
     func ready() async {
+        ensureOpened()
         await openTask?.value
     }
 
     func fetch(limit: Int) async -> [DictationRecord] {
+        ensureOpened()
         await openTask?.value
         guard let store else { return [] }
         return await Task.detached(priority: .userInitiated) { (try? store.fetch(limit: limit)) ?? [] }.value
     }
 
     func search(_ query: String) async -> [DictationRecord] {
+        ensureOpened()
         await openTask?.value
         guard let store else { return [] }
         return await Task.detached(priority: .userInitiated) { (try? store.search(query)) ?? [] }.value
     }
 
     func delete(id: Int64) async {
+        ensureOpened()
         await openTask?.value
         guard let store else { return }
         await Task.detached(priority: .userInitiated) { try? store.delete(id: id) }.value
     }
 
     func deleteAll() async {
+        ensureOpened()
         await openTask?.value
         guard let store else { return }
         await Task.detached(priority: .userInitiated) { try? store.deleteAll() }.value
     }
 
     func count() async -> Int {
+        ensureOpened()
         await openTask?.value
         guard let store else { return 0 }
         return await Task.detached(priority: .userInitiated) { (try? store.count()) ?? 0 }.value
@@ -107,6 +126,7 @@ final class HistoryService {
     /// `createdAt` rather than stamping it with "now".
     @discardableResult
     func reinsert(_ record: DictationRecord) async -> DictationRecord? {
+        ensureOpened()
         await openTask?.value
         guard let store else { return nil }
         let draft = DictationDraft(text: record.text, rawText: record.rawText, appName: record.appName, style: record.style,
