@@ -35,6 +35,15 @@ struct FlowBarPresenterTests {
         #expect(!panel.isVisible && panel.hides == 1)
     }
 
+    @Test("M-10: idle at launch (panel never shown) schedules no hide")
+    func idleAtLaunchSchedulesNoHide() {
+        let panel = FakePanel(), scheduler = FakeScheduler()
+        let presenter = FlowBarPresenter(panel: panel, scheduler: scheduler, idleHideDelay: 6)
+        presenter.stateChanged(to: .idle)
+        #expect(scheduler.pending == nil)
+        #expect(panel.shows == 0 && panel.hides == 0)
+    }
+
     @Test("FlowBarPanel.show() cancels an in-flight hide (C1): show(), hide(), show() leaves it fully visible")
     func panelCancellableHide() {
         let content = FlowBarContent.make(state: .idle, elapsed: 0, mode: .pushToTalk)

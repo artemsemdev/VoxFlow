@@ -47,6 +47,10 @@ final class FlowBarPanel: NSPanel, FlowBarPanelling, NSWindowDelegate {
         level = .statusBar
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         isFloatingPanel = true
+        // M-6: with `.nonactivatingPanel`, clicking a pill control (Open Settings / Download / Copy
+        // raw) could otherwise make the panel key and steal key status from the target app — one
+        // line of insurance now that more controls land in the pill.
+        becomesKeyOnlyIfNeeded = true
         hidesOnDeactivate = false
         isOpaque = false
         backgroundColor = .clear

@@ -65,6 +65,9 @@ final class FlowBarPresenter {
             if !panel.isVisible { panel.show() }
             return
         }
+        // M-10: says what is meant — a never-shown panel (e.g. the `.idle` state at launch) has
+        // nothing to hide, so don't schedule a hide for it.
+        guard panel.isVisible else { return }
         hasPendingHide = true
         scheduler.schedule(after: idleHideDelay) { [weak self] in
             guard let self else { return }
