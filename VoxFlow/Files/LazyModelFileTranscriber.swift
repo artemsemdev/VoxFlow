@@ -19,8 +19,9 @@ actor LazyModelFileTranscriber: FileTranscribing {
 
     func transcribe(_ url: URL, options: TranscriptionOptions,
                     progress: @Sendable @escaping (Double) -> Void) async throws -> TranscriptDocument {
-        try await loader.ensureLoaded()
-        guard let model = await store.defaultModel(role: .speech) else { throw FileTranscriptionError.noModelInstalled }
+        // M-9: use the model `ensureLoaded()` itself ensured, rather than looking the default up a
+        // second time — the two could disagree if the default changed between the two calls.
+        let model = try await loader.ensureLoaded()
         return try await FileTranscriber(decoder: decoder, engine: engine, modelID: model.id)
             .transcribe(url, options: options, progress: progress)
     }

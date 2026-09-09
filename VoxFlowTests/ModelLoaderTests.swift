@@ -38,8 +38,12 @@ struct ModelLoaderTests {
         let (present, presentDir) = try await store(installed: true)
         let loader = ModelLoader(store: present, engine: engine)
         #expect(await loader.readiness() == .installedNotLoaded)
-        try await loader.ensureLoaded()
-        try await loader.ensureLoaded()
+        // M-9: `ensureLoaded()` returns the `ModelDescriptor` it ensured — callers that need to know
+        // which model is loaded (e.g. `LazyModelFileTranscriber`) shouldn't have to look it up again.
+        let defaultModel = ModelCatalog.all.first { $0.role == .speech && $0.isDefault }!
+        let first = try await loader.ensureLoaded()
+        let second = try await loader.ensureLoaded()
+        #expect(first.id == defaultModel.id && second.id == defaultModel.id)
         #expect(await loader.readiness() == .loaded)
         #expect(await engine.loadedModelURL?.lastPathComponent == "ggml-large-v3-turbo.bin")
         _ = missingDir

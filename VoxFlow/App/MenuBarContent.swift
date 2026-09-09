@@ -10,7 +10,7 @@ struct MenuBarContent: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 6) {
-                Circle().fill(Palette.onDevice).frame(width: 8, height: 8)
+                Circle().fill(MenuBarStatus.dotColor(for: dictation.state)).frame(width: 8, height: 8)
                 Text(MenuBarStatus.text(for: dictation.state))
             }
             Text(MenuBarStatus.hotkeyLine(for: dictation.hotkeyMode))
