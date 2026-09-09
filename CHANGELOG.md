@@ -3,7 +3,7 @@
 All notable changes to VoxFlow are recorded here. The format follows Conventional Commits and semantic
 versioning.
 
-## Unreleased
+## 2.1.0 — unreleased (release branch)
 
 ### Added
 - Dictation logic: microphone capture, Flow Bar state machine, windowed transcription,

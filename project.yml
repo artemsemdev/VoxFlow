@@ -13,7 +13,7 @@ settings:
     # Signing lives in Signing.xcconfig (ad-hoc by default; Local.xcconfig overrides it on a
     # developer's Mac — see SETUP.md). Developer ID signing is configured in phase 7.
     SWIFT_TREAT_WARNINGS_AS_ERRORS: YES
-    MARKETING_VERSION: "2.0.0"
+    MARKETING_VERSION: "2.1.0"
     CURRENT_PROJECT_VERSION: "1"
 packages:
   VoxFlowKit:
