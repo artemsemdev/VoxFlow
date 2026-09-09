@@ -50,12 +50,14 @@ struct DictationControllerTests {
         var states: AsyncStream<FlowBarState>.Iterator
 
         init(result: DictationResult = DictationResult(text: "hello there world", rawText: "hello there world", segments: [], language: nil, duration: 2, lowConfidence: false),
-             preflight: Preflight = Preflight(excludedApp: nil, secureInput: false, microphone: .granted, model: .loaded)) async {
+             preflight: Preflight = Preflight(excludedApp: nil, secureInput: false, microphone: .granted, model: .loaded),
+             ephemeral: @escaping @Sendable () -> Bool = { false }) async {
             transcriber = FakeDictationTranscriber(result: result)
             controller = DictationController(config: FlowBarConfig(), microphone: mic, transcriber: transcriber, inserter: inserter, clock: clock,
                                              preflight: { preflight }, loadModel: {}, options: { TranscriptionOptions() },
                                              onSave: { [saved] r, app in saved.append((r, app)) },
-                                             copyToClipboard: { [clipboard] t in clipboard.append(t) })
+                                             copyToClipboard: { [clipboard] t in clipboard.append(t) },
+                                             ephemeral: ephemeral)
             states = await controller.states().makeAsyncIterator()
         }
 
@@ -311,5 +313,74 @@ struct DictationControllerTests {
         #expect(inserter.insertedTexts.count == 1)
         await saved.waitUntilCount(1)
         #expect(saved.items.count == 1)
+    }
+
+    // MARK: ephemeral (I-1/I-2/I-3) — a per-capture decision, not a shared suppression flag
+
+    @Test("ephemeral: { true } — a full happy-path capture never calls onSave")
+    func ephemeralCaptureNeverSaves() async throws {
+        let h = await Harness(ephemeral: { true })
+        await h.controller.fnDown()
+        #expect(await h.next() == .armed(Pending(downAt: 0, fnIsDown: true, resolvedMode: nil)))
+        await h.mic.waitUntilCapturing()
+        await h.clock.waitForSleepers(1)
+        await h.clock.advance(by: 0.25)
+        #expect(await h.next() == .listening(Listening(mode: .pushToTalk, startedAt: 0, language: nil)))
+        h.mic.emit(rms: 0.3, seconds: 1)
+        await h.transcriber.waitUntilReceived(1)
+        await h.controller.fnUp()
+        guard case .processing = await h.next() else { Issue.record("expected processing"); return }
+        await h.mic.waitUntilStopped()
+        #expect(await h.next() == .inserted(appName: "Mail", words: 3, limitReached: false))
+        await h.clock.waitForSleepers(1)                 // dismiss
+        await h.clock.advance(by: 1.5)
+        #expect(await h.next() == .idle)
+        // No `saved.waitUntilCount` — an ephemeral capture never schedules the save task at all, so
+        // there is nothing to wait for; the assertion below is the whole point.
+        #expect(h.saved.items.isEmpty)
+    }
+
+    @Test("ephemeral: { false } — a full happy-path capture calls onSave exactly once")
+    func nonEphemeralCaptureSavesOnce() async throws {
+        let h = await Harness(ephemeral: { false })
+        await h.controller.fnDown()
+        _ = await h.next()
+        await h.mic.waitUntilCapturing()
+        await h.clock.waitForSleepers(1)
+        await h.clock.advance(by: 0.25)
+        _ = await h.next()
+        h.mic.emit(rms: 0.3, seconds: 1)
+        await h.transcriber.waitUntilReceived(1)
+        await h.controller.fnUp()
+        guard case .processing = await h.next() else { Issue.record("expected processing"); return }
+        await h.mic.waitUntilStopped()
+        _ = await h.next()
+        await h.saved.waitUntilCount(1)
+        #expect(h.saved.items.count == 1)
+    }
+
+    @Test("ephemeral is read once at capture start, not at save time — flipping it mid-capture doesn't un-suppress the save")
+    func ephemeralEvaluatedAtCaptureStartNotSaveTime() async throws {
+        let flag = Mutex(true)
+        let h = await Harness(ephemeral: { flag.withLock { $0 } })
+        await h.controller.fnDown()
+        #expect(await h.next() == .armed(Pending(downAt: 0, fnIsDown: true, resolvedMode: nil)))
+        await h.mic.waitUntilCapturing()
+        // The capture has started (and already read `ephemeral()` == true) — flipping the flag now
+        // must not retroactively un-suppress this capture's save.
+        flag.withLock { $0 = false }
+        await h.clock.waitForSleepers(1)
+        await h.clock.advance(by: 0.25)
+        #expect(await h.next() == .listening(Listening(mode: .pushToTalk, startedAt: 0, language: nil)))
+        h.mic.emit(rms: 0.3, seconds: 1)
+        await h.transcriber.waitUntilReceived(1)
+        await h.controller.fnUp()
+        guard case .processing = await h.next() else { Issue.record("expected processing"); return }
+        await h.mic.waitUntilStopped()
+        #expect(await h.next() == .inserted(appName: "Mail", words: 3, limitReached: false))
+        await h.clock.waitForSleepers(1)
+        await h.clock.advance(by: 1.5)
+        #expect(await h.next() == .idle)
+        #expect(h.saved.items.isEmpty)
     }
 }

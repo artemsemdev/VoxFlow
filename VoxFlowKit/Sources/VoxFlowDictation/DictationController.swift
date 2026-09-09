@@ -15,6 +15,13 @@ public actor DictationController {
     private let options: @Sendable () -> TranscriptionOptions
     private let onSave: SaveHandler
     private let copyToClipboard: @Sendable (String) -> Void
+    /// Decides, once per capture, whether that capture's result should be treated as ephemeral (e.g.
+    /// onboarding's Try It step or a History "scratchpad") — an ephemeral capture's `.saveHistory`
+    /// effect is a no-op. Read exactly once, in `startCapture()`, and cached in `captureIsEphemeral`:
+    /// a caller flipping the underlying condition mid-capture must not retroactively change what an
+    /// already-in-flight capture does when it finishes. Defaulted so every existing call site keeps
+    /// compiling unchanged.
+    private let ephemeral: @Sendable () -> Bool
 
     private var feed: AsyncStream<AudioChunk>.Continuation?
     private var captureTask: Task<Void, Never>?
@@ -36,6 +43,10 @@ public actor DictationController {
     /// next transitions to `.idle`, so a change to e.g. `silenceStop` never affects the timer
     /// already ticking for the dictation in progress.
     private var pendingConfig: FlowBarConfig?
+    /// This capture's ephemeral decision, evaluated once by `startCapture()` (see `ephemeral`) and
+    /// consulted by the `.saveHistory` effect. Reset by `teardown()` (so also by `startCapture()`,
+    /// which calls it first) so a stale `true` can never leak into the next capture's save.
+    private var captureIsEphemeral = false
 
     public init(config: FlowBarConfig, microphone: any MicrophoneCapturing, transcriber: any DictationTranscribing,
                 inserter: any TextInserting, clock: any MonotonicClock,
@@ -43,7 +54,8 @@ public actor DictationController {
                 loadModel: @escaping @Sendable () async throws -> Void,
                 options: @escaping @Sendable () -> TranscriptionOptions,
                 onSave: @escaping SaveHandler,
-                copyToClipboard: @escaping @Sendable (String) -> Void) {
+                copyToClipboard: @escaping @Sendable (String) -> Void,
+                ephemeral: @escaping @Sendable () -> Bool = { false }) {
         machine = FlowBarMachine(config: config)
         self.microphone = microphone
         self.transcriber = transcriber
@@ -54,6 +66,7 @@ public actor DictationController {
         self.options = options
         self.onSave = onSave
         self.copyToClipboard = copyToClipboard
+        self.ephemeral = ephemeral
     }
 
     public var state: FlowBarState { machine.state }
@@ -150,8 +163,10 @@ public actor DictationController {
         case .copyToClipboard(let text): copyToClipboard(text)
         case .saveHistory:
             // Snapshot `lastAppName` now: it's read again (and reset) by the *next* `startCapture`,
-            // which must not change what this already-in-flight save reports.
-            if let result = lastResult {
+            // which must not change what this already-in-flight save reports. An ephemeral capture
+            // (Try It, a History scratchpad) skips the save entirely — silently, not logged: this is
+            // the expected, common path for those captures, not an error condition.
+            if let result = lastResult, !captureIsEphemeral {
                 let appName = lastAppName
                 Task { await self.onSave(result, appName) }
             }
@@ -174,6 +189,8 @@ public actor DictationController {
     private func startCapture() {
         teardown()
         lastAppName = nil
+        // Evaluated exactly once per capture, alongside `captureID` — see `ephemeral`'s doc comment.
+        captureIsEphemeral = ephemeral()
         let id = captureID
         let (stream, continuation) = AsyncStream<AudioChunk>.makeStream(bufferingPolicy: .unbounded)
         feed = continuation
@@ -227,6 +244,7 @@ public actor DictationController {
 
     private func teardown() {
         captureID &+= 1   // invalidates every callback still in flight from the old capture
+        captureIsEphemeral = false
         captureTask?.cancel(); captureTask = nil
         transcribeTask?.cancel(); transcribeTask = nil
         feed?.finish(); feed = nil
