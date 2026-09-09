@@ -215,4 +215,63 @@ struct DictationStoreTests {
         #expect(try reopened.count() == 1)
         #expect(try reopened.fetch(limit: 1).first?.text == "secret")
     }
+
+    // MARK: updateStyled (Re-style, MW-02s)
+
+    @Test("updateStyled round-trips through fetch on an encrypted store: new text/style/words, rawText and createdAt untouched")
+    func updateStyledRoundTripsOnEncryptedStore() throws {
+        let store = try DictationStore(inMemoryWith: FakeKeyProvider())
+        let original = try store.insert(draft("um send this over", at: Date(timeIntervalSince1970: 42)))
+        #expect(original.style == nil)
+
+        let updated = try store.updateStyled(id: original.id, text: "Please send this over.", style: "formal")
+
+        #expect(updated?.id == original.id)
+        #expect(updated?.text == "Please send this over.")
+        #expect(updated?.style == "formal")
+        #expect(updated?.words == 4)
+        #expect(updated?.rawText == original.rawText)
+        #expect(updated?.createdAt == original.createdAt)
+
+        let refetched = try store.fetch(limit: 10).first
+        #expect(refetched?.text == "Please send this over.")
+        #expect(refetched?.style == "formal")
+        #expect(refetched?.words == 4)
+        #expect(refetched?.rawText == original.rawText)
+    }
+
+    @Test("updateStyled on an unknown id returns nil and touches nothing")
+    func updateStyledUnknownIdReturnsNil() throws {
+        let store = try DictationStore(inMemoryWith: nil)
+        _ = try store.insert(draft("a", at: Date(timeIntervalSince1970: 1)))
+
+        let result = try store.updateStyled(id: 999, text: "new text", style: "casual")
+
+        #expect(result == nil)
+        #expect(try store.fetch(limit: 10).map(\.text) == ["a"])
+    }
+
+    @Test("updateStyled on one row does not touch an unreadable (key-lost) row")
+    func updateStyledLeavesUnreadableRowsUntouched() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("voxflow.sqlite")
+
+        let keyed = try DictationStore(databaseURL: url, keyProvider: FakeKeyProvider())
+        let encryptedRow = try keyed.insert(draft("secret one", at: Date(timeIntervalSince1970: 1)))
+
+        // Reopen without a cipher: `encryptedRow` is now unreadable, but plaintext inserts on this
+        // same (unencrypted) connection stay readable.
+        let reopened = try DictationStore(databaseURL: url, keyProvider: nil)
+        let plainRow = try reopened.insert(draft("plain two", at: Date(timeIntervalSince1970: 2)))
+
+        let updated = try reopened.updateStyled(id: plainRow.id, text: "Plain two, updated.", style: "casual")
+        #expect(updated?.text == "Plain two, updated.")
+
+        let all = try reopened.fetch(limit: 10)
+        let untouched = try #require(all.first { $0.id == encryptedRow.id })
+        #expect(untouched.isUnreadable == true)
+        #expect(untouched.text.isEmpty)
+    }
 }

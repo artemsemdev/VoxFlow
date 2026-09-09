@@ -140,6 +140,32 @@ struct HistoryServiceTests {
         #expect(await service.count() == 1)
     }
 
+    @Test("updateStyled replaces text/style and notifies change; an unknown id returns nil without notifying")
+    func updateStyledReplacesTextAndNotifies() async throws {
+        let dir = TemporaryDirectory()
+        let settings = DictationSettings(store: InMemoryKeyValueStore())
+        let service = makeService(dir: dir, settings: settings)
+        _ = await service.count()
+        let original = try #require(service.store).insert(draft("um restyle me", at: Date(timeIntervalSince1970: 700)))
+
+        var changeCount = 0
+        service.onChange = { changeCount += 1 }
+
+        let updated = await service.updateStyled(id: original.id, text: "Restyle me.", style: "formal")
+        #expect(updated?.text == "Restyle me.")
+        #expect(updated?.style == "formal")
+        #expect(updated?.rawText == original.rawText)
+        #expect(changeCount == 1)
+
+        let rows = await service.fetch(limit: 10)
+        #expect(rows.first?.text == "Restyle me.")
+        #expect(rows.first?.style == "formal")
+
+        let missing = await service.updateStyled(id: 999_999, text: "nope", style: "casual")
+        #expect(missing == nil)
+        #expect(changeCount == 1)   // no spurious notification for a no-op update
+    }
+
     @Test("two overlapping reopen() calls: the last one's config wins, and the earlier reopen's runner is not leaked")
     func overlappingReopensChainInOrder() async throws {
         let dir = TemporaryDirectory()

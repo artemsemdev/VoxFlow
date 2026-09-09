@@ -157,6 +157,20 @@ public final class DictationStore: Sendable {
         return streak
     }
 
+    /// Re-style: replaces the inserted text and its style, recomputing `words`; `raw_text` and
+    /// `created_at` are untouched. Returns nil when the row no longer exists.
+    public func updateStyled(id: Int64, text: String, style: String) throws -> DictationRecord? {
+        let words = DictationRecord.wordCount(text)
+        let encoded = try encode(text)
+        let changed = try queue.write { db in
+            try db.execute(sql: "UPDATE dictations SET text = ?, style = ?, words = ?, encrypted = ? WHERE id = ?",
+                           arguments: [encoded, style, words, cipher != nil, id])
+            return db.changesCount
+        }
+        guard changed > 0 else { return nil }
+        return try queue.read { db in try Row.fetchOne(db, sql: "SELECT * FROM dictations WHERE id = ?", arguments: [id]) }.map(record(from:))
+    }
+
     public func delete(id: Int64) throws { try queue.write { try $0.execute(sql: "DELETE FROM dictations WHERE id = ?", arguments: [id]) } }
     public func deleteAll() throws { try queue.write { try $0.execute(sql: "DELETE FROM dictations") } }
 

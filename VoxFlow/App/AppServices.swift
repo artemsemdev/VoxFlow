@@ -5,6 +5,7 @@ import VoxFlowAudio
 import VoxFlowCore
 import VoxFlowDictation
 import VoxFlowFiles
+import VoxFlowLLM
 import VoxFlowModels
 import VoxFlowSpeech
 import VoxFlowStorage
@@ -106,6 +107,13 @@ final class AppServices {
     /// The default style plus fillers/auto-punctuate/snippet-prefix/learn-from-contacts toggles
     /// (design MW-05 Styles page) — read by `StyledTranscriber` via `stylingSettings.box`.
     let stylingSettings: StylingSettings
+    /// Lazy owner of the on-device style LLM (phase 5, plan ruling 4) — `LlamaStyler`'s `LLMBackend`
+    /// in the live dictation path; `AppDelegate` also `warmUp()`s it right after `dictation.start()`
+    /// so the model is already in memory before the first fn-down.
+    let styleModelLoader: StyleModelLoader
+    /// History's Re-style action (design MW-02s) — rewrites a stored raw transcript into another
+    /// tone through the same styler dictation uses (LLM when ready, rules otherwise).
+    let restyler: Restyler
     /// Dictionary/Snippets/Styles page content (design MW-03/04/05), built on `historyService`'s
     /// shared database — `StyledTranscriber` reads its snapshot boxes to expand snippets and feed
     /// the dictionary into `TranscriptionOptions.vocabulary`.
@@ -156,7 +164,8 @@ final class AppServices {
                  privacyViewModel: PrivacyViewModel, dictationSettings: DictationSettings,
                  modelLoader: ModelLoader, historyService: HistoryService, historyViewModel: HistoryViewModel,
                  statsService: StatsService, homeViewModel: HomeViewModel,
-                 stylingSettings: StylingSettings, contentService: ContentService, dictionaryViewModel: DictionaryViewModel,
+                 stylingSettings: StylingSettings, styleModelLoader: StyleModelLoader, restyler: Restyler,
+                 contentService: ContentService, dictionaryViewModel: DictionaryViewModel,
                  snippetsViewModel: SnippetsViewModel, stylesViewModel: StylesViewModel,
                  inserter: AccessibilityTextInserter, ephemeralScope: EphemeralScope, dictationController: DictationController,
                  dictation: DictationCoordinator, flowBar: FlowBarPresenter, fnMonitor: FnKeyMonitor,
@@ -182,6 +191,8 @@ final class AppServices {
         self.statsService = statsService
         self.homeViewModel = homeViewModel
         self.stylingSettings = stylingSettings
+        self.styleModelLoader = styleModelLoader
+        self.restyler = restyler
         self.contentService = contentService
         self.dictionaryViewModel = dictionaryViewModel
         self.snippetsViewModel = snippetsViewModel
@@ -257,7 +268,24 @@ final class AppServices {
         let contentSnapshots = ContentSnapshots(vocabularyBox: contentService.vocabularyBox, snippetsBox: contentService.snippetsBox,
                                                 overridesBox: contentService.overridesBox,
                                                 noteUses: { text, snippets in usesSink.note(text: text, snippets: snippets) })
-        let styledTranscriber = StyledTranscriber(base: WindowedTranscriber(engine: engine), styler: RuleStyler(),
+
+        // One instance, shared with `dictation` below (review fix, Task 4): `SystemMonotonicClock`
+        // captures its own `origin` at `init` — two separate instances disagree about "now" by
+        // however long apart they were created, which would throw off `DictationCoordinator`'s
+        // wall-clock projection of `pausedUntil` (`MenuBarViewModel.pausedUntilText`, MB-02
+        // "Paused until 10:41"). Also handed to `LlamaStyler` below, whose generation-timeout race
+        // (ADR-007 ruling 2/3) needs the same monotonic origin as everything else built from it.
+        let clock = SystemMonotonicClock()
+        // Phase 5 (plan ruling 4): on-device style LLM. `styleModelLoader` lazily loads/unloads the
+        // default `.style` model behind `LLMBackend`; `LlamaStyler` falls back to `RuleStyler` on
+        // every failure path (not ready, over the word cap, timeout, unacceptable output), so a
+        // styling failure never loses a dictation. `restyler` (History's Re-style, MW-02s) reuses the
+        // very same styler instance dictation does.
+        let styleEngine = LlamaEngine()
+        let styleModelLoader = StyleModelLoader(store: modelStore, engine: styleEngine)
+        let styler = LlamaStyler(backend: styleModelLoader, clock: clock)
+        let restyler = Restyler(styler: styler, settings: stylingSettings.box)
+        let styledTranscriber = StyledTranscriber(base: WindowedTranscriber(engine: engine), styler: styler,
                                                   settings: stylingSettings.box, content: contentSnapshots, frontmost: frontmostBox,
                                                   clipboard: { NSPasteboard.general.string(forType: .string) }, now: Date.init)
 
@@ -281,12 +309,6 @@ final class AppServices {
         // start of every capture below so an onboarding/scratchpad dictation is never written to
         // History (I-1/I-2/I-3), replacing the old shared `HistoryWriter` suppression flag.
         let ephemeralScope = EphemeralScope()
-        // One instance, shared with `dictation` below (review fix, Task 4): `SystemMonotonicClock`
-        // captures its own `origin` at `init` — two separate instances disagree about "now" by
-        // however long apart they were created, which would throw off `DictationCoordinator`'s
-        // wall-clock projection of `pausedUntil` (`MenuBarViewModel.pausedUntilText`, MB-02
-        // "Paused until 10:41").
-        let clock = SystemMonotonicClock()
         let dictationController = DictationController(
             config: dictationSettings.flowBarConfig,
             microphone: MeteredMicrophone(base: MicrophoneSource()) { rms in levelSink.report(rms) },
@@ -404,7 +426,8 @@ final class AppServices {
                            dictationSettings: dictationSettings, modelLoader: modelLoader,
                            historyService: historyService, historyViewModel: historyViewModel,
                            statsService: statsService, homeViewModel: homeViewModel,
-                           stylingSettings: stylingSettings, contentService: contentService, dictionaryViewModel: dictionaryViewModel,
+                           stylingSettings: stylingSettings, styleModelLoader: styleModelLoader, restyler: restyler,
+                           contentService: contentService, dictionaryViewModel: dictionaryViewModel,
                            snippetsViewModel: snippetsViewModel, stylesViewModel: stylesViewModel,
                            inserter: inserter,
                            ephemeralScope: ephemeralScope, dictationController: dictationController, dictation: dictation,

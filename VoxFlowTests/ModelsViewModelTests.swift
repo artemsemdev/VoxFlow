@@ -383,6 +383,56 @@ struct ModelsViewModelTests {
         #expect(model.speechRows.first { $0.id == "small" }?.isDefault == true)
     }
 
+    // MARK: 8. styleModelIsDownloadable (phase 5, Task 3 — the pinned Qwen entry ships with a real
+    // checksum now, so a `.style` row is downloadable like any speech row, not stuck `isAvailable == false`).
+
+    @Test("a .style row with a real checksum downloads and installs like any other model")
+    func styleModelIsDownloadable() async throws {
+        let payload = Self.payload(9, count: 50_000)
+        let styleModel = Self.descriptor(id: "style-real", role: .style, payload: payload, isDefault: true)
+        let catalog = [Self.big, styleModel]
+        let downloader = FakeModelDownloader()
+        await downloader.serve(payload, at: styleModel.downloadURL)
+        let store = ModelStore(directory: TemporaryDirectory().url, catalog: catalog, downloader: downloader,
+                               freeSpace: FakeFreeSpace(available: 10_000_000_000), settings: InMemoryKeyValueStore())
+        let model = ModelsViewModel(store: store, catalog: catalog)
+        await model.refresh()
+        #expect(model.styleRows.first?.isAvailable == true)   // a real sha256 makes the row downloadable
+
+        await model.download(styleModel)
+
+        #expect(model.alert == nil)
+        #expect(model.styleRows.first { $0.id == "style-real" }?.state == .installed)
+    }
+
+    // MARK: 9. removingOnlyStyleModelNeverBlocked
+
+    @Test("removing the only installed style model is never blocked (unlike speech), and its alert carries no fallback-model clause")
+    func removingOnlyStyleModelNeverBlocked() async throws {
+        let payload = Self.payload(9, count: 50_000)
+        let styleModel = Self.descriptor(id: "style-real", role: .style, payload: payload, isDefault: true)
+        let catalog = [styleModel]
+        let downloader = FakeModelDownloader()
+        await downloader.serve(payload, at: styleModel.downloadURL)
+        let store = ModelStore(directory: TemporaryDirectory().url, catalog: catalog, downloader: downloader,
+                               freeSpace: FakeFreeSpace(available: 10_000_000_000), settings: InMemoryKeyValueStore())
+        let model = ModelsViewModel(store: store, catalog: catalog)
+        await model.refresh()
+        await model.download(styleModel)
+
+        await model.requestRemove(styleModel)
+
+        // `requestRemove` only blocks removal for `.speech` models with nothing else installed — a
+        // style model always goes straight to `.removeModel`, even as the only one installed, and
+        // `keeps: nil` (existing `removeMessage` behaviour) omits the "Dictation keeps using …" clause.
+        #expect(model.alert == .removeModel(styleModel, keeps: nil))
+        #expect(!ModelsViewModel.removeMessage(styleModel, keeps: nil).contains("Dictation keeps using"))
+
+        await model.confirmRemove()
+        #expect(model.alert == nil)
+        #expect(model.styleRows.first { $0.id == "style-real" }?.state == .notInstalled)
+    }
+
     // MARK: Alert copy (controller ruling 5)
 
     @Test("SYS-DISK alert copy uses gigabytes for both numbers")
