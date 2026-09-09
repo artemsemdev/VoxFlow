@@ -1,0 +1,139 @@
+import Foundation
+
+/// A user-defined text snippet (phase 4a plan, ruling 4). `trigger` includes the leading
+/// `/` (e.g. `"/sig"`); `onlyInBundleID` restricts expansion to one app.
+public struct SnippetRule: Sendable, Equatable {
+    public var trigger: String
+    public var body: String
+    public var onlyInBundleID: String?
+
+    public init(trigger: String, body: String, onlyInBundleID: String? = nil) {
+        self.trigger = trigger
+        self.body = body
+        self.onlyInBundleID = onlyInBundleID
+    }
+}
+
+/// Expands snippet triggers inside already-styled text (ruling 4). Matches `/sig` or its
+/// spoken form `slash sig` (case-insensitive, whole word); with `sayPrefix` the trigger must
+/// additionally be preceded by the spoken word "snippet" (which is consumed too). A rule whose
+/// `onlyInBundleID` does not match `context.bundleID` is skipped — its trigger text is left as
+/// typed. Body placeholders `cursor`, `date`, `clipboard`, `app` are whole-word, case-insensitive.
+public struct SnippetExpander: Sendable {
+    public let snippets: [SnippetRule]
+    public let sayPrefix: Bool
+    public let context: (date: Date, clipboard: String?, appName: String?, bundleID: String?)
+
+    public init(
+        snippets: [SnippetRule],
+        sayPrefix: Bool,
+        context: (date: Date, clipboard: String?, appName: String?, bundleID: String?)
+    ) {
+        self.snippets = snippets
+        self.sayPrefix = sayPrefix
+        self.context = context
+    }
+
+    public func expand(_ text: String) -> (text: String, cursorOffset: Int?, used: [String]) {
+        let applicable = snippets.filter { rule in
+            guard let only = rule.onlyInBundleID else { return true }
+            return only == context.bundleID
+        }
+        guard !applicable.isEmpty else {
+            return (text, nil, [])
+        }
+
+        var matches: [(range: Range<String.Index>, rule: SnippetRule)] = []
+        for rule in applicable {
+            guard let pattern = triggerPattern(for: rule) else { continue }
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { continue }
+            let nsRange = NSRange(text.startIndex..., in: text)
+            for match in regex.matches(in: text, options: [], range: nsRange) {
+                guard let range = Range(match.range, in: text) else { continue }
+                matches.append((range, rule))
+            }
+        }
+        guard !matches.isEmpty else {
+            return (text, nil, [])
+        }
+        matches.sort { $0.range.lowerBound < $1.range.lowerBound }
+
+        var accepted: [(range: Range<String.Index>, rule: SnippetRule)] = []
+        var lastEnd = text.startIndex
+        for match in matches where match.range.lowerBound >= lastEnd {
+            accepted.append(match)
+            lastEnd = match.range.upperBound
+        }
+
+        var result = ""
+        var used: [String] = []
+        var cursorOffset: Int?
+        var cursor = text.startIndex
+        for match in accepted {
+            result += text[cursor..<match.range.lowerBound]
+            let (expanded, localCursor) = expandBody(match.rule.body)
+            if let localCursor, cursorOffset == nil {
+                cursorOffset = result.count + localCursor
+            }
+            result += expanded
+            used.append(match.rule.trigger)
+            cursor = match.range.upperBound
+        }
+        result += text[cursor...]
+
+        return (result, cursorOffset, used)
+    }
+
+    // MARK: - Matching
+
+    private func triggerPattern(for rule: SnippetRule) -> String? {
+        let noSlash = rule.trigger.hasPrefix("/") ? String(rule.trigger.dropFirst()) : rule.trigger
+        guard !noSlash.isEmpty else { return nil }
+        let escaped = NSRegularExpression.escapedPattern(for: noSlash)
+
+        if sayPrefix {
+            return "\\bsnippet\\s+(?:/\(escaped)\\b|slash\\s+\(escaped)\\b)"
+        }
+        return "(?:(?<![A-Za-z0-9_])/\(escaped)\\b|\\bslash\\s+\(escaped)\\b)"
+    }
+
+    // MARK: - Body placeholders
+
+    private func expandBody(_ body: String) -> (text: String, cursorOffset: Int?) {
+        var result = body
+        result = replaceWord(result, "date", with: formattedDate())
+        result = replaceWord(result, "clipboard", with: context.clipboard ?? "")
+        result = replaceWord(result, "app", with: context.appName ?? "")
+
+        var cursorOffset: Int?
+        if let range = firstWordRange(result, "cursor") {
+            cursorOffset = result.distance(from: result.startIndex, to: range.lowerBound)
+            result.removeSubrange(range)
+            result = result.replacingOccurrences(of: "  ", with: " ")
+        }
+        return (result, cursorOffset)
+    }
+
+    private func formattedDate() -> String {
+        let formatter = DateFormatter()
+        formatter.locale = .current
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        return formatter.string(from: context.date)
+    }
+
+    private func replaceWord(_ text: String, _ word: String, with value: String) -> String {
+        guard let range = firstWordRange(text, word) else { return text }
+        var result = text
+        result.replaceSubrange(range, with: value)
+        return result
+    }
+
+    private func firstWordRange(_ text: String, _ word: String) -> Range<String.Index>? {
+        let pattern = "\\b\(NSRegularExpression.escapedPattern(for: word))\\b"
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return nil }
+        let nsRange = NSRange(text.startIndex..., in: text)
+        guard let match = regex.firstMatch(in: text, options: [], range: nsRange) else { return nil }
+        return Range(match.range, in: text)
+    }
+}
