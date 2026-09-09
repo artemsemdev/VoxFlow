@@ -1,35 +1,17 @@
 import Foundation
-import VoxFlowModels
 
-/// Composition root for the menu bar (design MB-00…02) — a separate singleton from `AppServices`
-/// for now (same reasoning as `SettingsServices`: another task in this plan is editing
-/// `AppServices.swift`; a later controller task folds this in). Built lazily over
-/// `AppServices.shared`'s own dependencies, mirroring `SettingsServices`.
+/// Thin forwarder to `AppServices.shared` (design MB-00…02) plus MB-00's hint-panel machinery,
+/// which stays here rather than moving into `AppServices` — it's `NSPanel`-backed UI state
+/// (`hintPanel`) tied to the menu bar scene, not one of the plain service/view-model instances the
+/// controller task folded in. Used to build its own `MenuBarViewModel` (a separate composition root
+/// from `AppServices`, for the same reason `SettingsServices` used to); `viewModel` now just reads
+/// the one instance `AppServices` builds, so `MenuBarContent`'s existing `MenuBarServices.shared.viewModel`
+/// call site keeps compiling unchanged.
 @MainActor
 final class MenuBarServices {
     static let shared = MenuBarServices()
 
-    /// `modelsOnDisk` for `viewModel`, below — a standalone, explicitly-typed `@Sendable` function
-    /// (not an inline closure literal in the initializer call) so the type checker resolves its
-    /// isolation on its own instead of alongside the whole `MenuBarViewModel(...)` call, which left
-    /// it ambiguous ("default argument cannot be both main actor-isolated and actor-isolated" /
-    /// spurious "no 'async' operations" on the `installedModels` calls below).
-    nonisolated private static func countModelsOnDisk() async -> Int {
-        let modelStore = await AppServices.shared.modelStore
-        let speech = await modelStore.installedModels(role: .speech).count
-        let style = await modelStore.installedModels(role: .style).count
-        return speech + style
-    }
-
-    lazy var viewModel = MenuBarViewModel(
-        dictation: AppServices.shared.dictation,
-        settings: AppServices.shared.dictationSettings,
-        stats: AppServices.shared.statsService,
-        models: AppServices.shared.modelsViewModel,
-        modelsOnDisk: Self.countModelsOnDisk,
-        navigation: AppServices.shared.navigation,
-        now: Date.init
-    )
+    var viewModel: MenuBarViewModel { AppServices.shared.menuBarViewModel }
 
     /// Non-nil exactly while MB-00's hint panel is on screen — `nil` once dismissed (by "Got it",
     /// the 10 s timer, or the first `.armed`/`.listening`), which also makes `dismissHint()` and a
@@ -38,9 +20,8 @@ final class MenuBarServices {
 
     private init() {}
 
-    /// MB-00: shown once, right after onboarding finishes (`OnboardingViewModel.finish()`'s
-    /// `onFinished` hook, wired up wherever this task's plan folds `MenuBarServices` into
-    /// `AppServices`) — no-ops if it's already been shown.
+    /// MB-00: shown once, right after onboarding finishes (`OnboardingViewModel.onFinished`, wired
+    /// to this from `OnboardingWindow.onAppear`) — no-ops if it's already been shown.
     func showHintIfNeeded() {
         guard hintPanel == nil, MenuBarHintPolicy.shouldShow(hintShown: AppServices.shared.onboardingState.hintShown) else { return }
         let panel = MenuBarHintPanel(onGotIt: { [weak self] in self?.dismissHint() })

@@ -21,6 +21,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             AppServices.shared.dictation.start()
             AppServices.shared.flowBar.bind(to: AppServices.shared.dictation)
             AppServices.shared.fnMonitor.start()
+            // MB-03/MB-04 (ruling 8): never starts under XCTest, same reasoning as everything else
+            // in this block — a test run must not touch the real Notification Center either.
+            AppServices.shared.notifications.start()
             // `HistoryService` opens lazily (Keychain access deferred to first use) — run that open
             // once here at a real launch so retention (design §5) runs at launch as the spec says,
             // rather than waiting for the first History read/write to trigger it implicitly.
