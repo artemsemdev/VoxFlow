@@ -37,8 +37,25 @@ public struct TranscriptionOptions: Sendable, Equatable {
         self.promptContext = promptContext
     }
 
+    /// I2: whisper's initial-prompt budget is small (~`n_text_ctx/2` tokens); `promptContext` (the
+    /// phase-3 window continuation) goes first and is truncated to its last 200 characters so it
+    /// always survives, then `vocabulary` words are appended in order up to a 400-character budget
+    /// — a word that would push the vocabulary section past that budget is dropped, along with every
+    /// word after it, rather than truncating mid-word.
     public var initialPrompt: String? {
-        let parts = [vocabulary.isEmpty ? nil : vocabulary.joined(separator: ", "), promptContext].compactMap { $0 }
+        let contextTail = 200
+        let vocabularyBudget = 400
+
+        let context = promptContext.map { String($0.suffix(contextTail)) }.flatMap { $0.isEmpty ? nil : $0 }
+
+        var vocabularySection = ""
+        for word in vocabulary {
+            let candidate = vocabularySection.isEmpty ? word : "\(vocabularySection), \(word)"
+            guard candidate.count <= vocabularyBudget else { break }
+            vocabularySection = candidate
+        }
+
+        let parts = [context, vocabularySection.isEmpty ? nil : vocabularySection].compactMap { $0 }
         return parts.isEmpty ? nil : parts.joined(separator: "\n")
     }
 }

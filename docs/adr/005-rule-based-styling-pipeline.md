@@ -45,6 +45,11 @@ ripple through storage, History or the dictation path.
   candidate for `TranscriptionOptions.vocabulary`, capped at the 64 most-used words (falling
   back to alphabetical) — whisper's prompt has a limited budget, so `DictionaryStore.vocabulary
   (limit:)` does the ranking in SQL rather than handing the whole table to the engine.
+  `TranscriptionOptions.initialPrompt` caps by *characters* as well as count: `promptContext`
+  (the phase-3 window continuation) goes first, truncated to its last 200 characters, then
+  vocabulary words are appended in order up to a 400-character budget — a word that would push
+  the vocabulary section past that budget is dropped, so 64 long Contacts-imported names can no
+  longer crowd out the continuation the whisper window depends on.
 
 ## Consequences
 
@@ -65,3 +70,8 @@ ripple through storage, History or the dictation path.
 - `dictionary`, `snippets` and `app_style_overrides` live in the same SQLite file as dictation
   history (`VoxFlowDatabase`, one `DatabaseQueue`) but are not encrypted — only dictation text
   is sensitive (ADR-004); words, snippet bodies and per-app style choices are not.
+- History's app and style can disagree: `appName` on a saved row comes from the *insertion*
+  result, while the style was resolved from the app captured at fn-down. Holding fn in Slack and
+  releasing over Mail correctly styles by Slack's rule (the app that was frontmost when styling
+  must be decided, per the ruling above) but can save a row reading "Mail · … · Very casual" —
+  this is the intended trade-off, not a bug.
