@@ -28,4 +28,7 @@ public enum StorageError: Error, Equatable, Sendable {
     /// rows: the original key material is gone (Keychain reset, re-signing, SE→Keychain provider
     /// switch), so decrypting them would silently fail rather than the key silently regenerating.
     case keyLost
+    /// A dictionary word / snippet trigger insert collided with an existing row's folded key
+    /// (`word_folded` / `trigger_folded`); `existingID` is the row already holding that key.
+    case duplicate(existingID: Int64)
 }

@@ -46,13 +46,13 @@ struct HistoryRenderTests {
         let store = bundle.service.store!
         _ = try! store.insert(draft("can we push the meeting to thursday afternoon I need the numbers from finance first",
                                     raw: "um so can we uh push the meeting to like thursday afternoon I mean I need the numbers from finance first",
-                                    appName: "Slack", style: "Very casual", language: "en", duration: 9, minutesAgo: 14))
+                                    appName: "Slack", style: "veryCasual", language: "en", duration: 9, minutesAgo: 14))
         _ = try! store.insert(draft("Hi Priya, attaching the signed NDA. Let me know if legal needs anything else.",
-                                    appName: "Mail", style: "Formal", language: "en", duration: 12, minutesAgo: 2))
+                                    appName: "Mail", style: "formal", language: "en", duration: 12, minutesAgo: 2))
         _ = try! store.insert(draft("Ideas for the Q4 roadmap: batch transcription for the research team, a shared style library",
-                                    appName: "Notes", style: "Casual", language: "en", duration: 18, minutesAgo: 60))
+                                    appName: "Notes", style: "casual", language: "en", duration: 18, minutesAgo: 60))
         _ = try! store.insert(draft("Refactor the audio buffer so the ring buffer is allocated once, then reused across takes",
-                                    appName: "Xcode", style: "Verbatim", language: "en", duration: 15, minutesAgo: 180))
+                                    appName: "Xcode", style: "verbatim", language: "en", duration: 15, minutesAgo: 180))
     }
 
     private struct RenderCase {

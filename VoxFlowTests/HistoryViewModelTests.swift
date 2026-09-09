@@ -32,7 +32,7 @@ struct HistoryViewModelTests {
                        keyProvider: { FakeHistoryKeyProvider() }, clock: clock)
     }
 
-    static func draft(_ text: String, appName: String = "Slack", style: String? = "Very casual", language: String? = "en",
+    static func draft(_ text: String, appName: String = "Slack", style: String? = "veryCasual", language: String? = "en",
                       duration: TimeInterval = 9, at date: Date) -> DictationDraft {
         DictationDraft(text: text, rawText: text + " raw", appName: appName, style: style, language: language, duration: duration, createdAt: date)
     }
@@ -89,7 +89,7 @@ struct HistoryViewModelTests {
         var components = DateComponents()
         components.year = 2026; components.month = 3; components.day = 2; components.hour = 9; components.minute = 26
         let date = Calendar.current.date(from: components)!
-        let record = DictationRecord(id: 1, text: "hi", rawText: "hi", appName: "Slack", style: "Very casual",
+        let record = DictationRecord(id: 1, text: "hi", rawText: "hi", appName: "Slack", style: "veryCasual",
                                      language: "en", duration: 9, words: 15, createdAt: date)
 
         #expect(HistoryViewModel.metaLine(for: record) == "Slack · 9:26 AM · 0:09 · 15 words · Very casual · EN")
@@ -280,13 +280,22 @@ struct HistoryViewModelTests {
 
     @Test("M2: detailHeader includes the uppercased style when present, plain \"INSERTED\" otherwise")
     func detailHeaderVariants() {
-        let styled = DictationRecord(id: 1, text: "hi", rawText: "hi", appName: "Mail", style: "Very casual",
+        let styled = DictationRecord(id: 1, text: "hi", rawText: "hi", appName: "Mail", style: "veryCasual",
                                      language: "en", duration: 3, words: 4, createdAt: Date())
         let unstyled = DictationRecord(id: 2, text: "hi", rawText: "hi", appName: "Mail", style: nil,
                                        language: "en", duration: 3, words: 4, createdAt: Date())
 
         #expect(HistoryViewModel.detailHeader(for: styled) == "INSERTED · VERY CASUAL")
         #expect(HistoryViewModel.detailHeader(for: unstyled) == "INSERTED")
+    }
+
+    @Test("I1: styleLabel maps every TextStyle rawValue to its display name, and passes through an unrecognized value as-is")
+    func styleLabelMapsRawToDisplayName() {
+        #expect(HistoryViewModel.styleLabel("formal") == "Formal")
+        #expect(HistoryViewModel.styleLabel("casual") == "Casual")
+        #expect(HistoryViewModel.styleLabel("veryCasual") == "Very casual")
+        #expect(HistoryViewModel.styleLabel("verbatim") == "Verbatim")
+        #expect(HistoryViewModel.styleLabel("somethingUnknown") == "somethingUnknown")
     }
 
     @Test("footer text: encrypted on, 30 days")

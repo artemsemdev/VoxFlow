@@ -30,6 +30,15 @@ final class HistoryService {
     static let notOpenedYetReason = "not opened yet"
 
     private(set) var store: DictationStore?
+    /// The shared `VoxFlowDatabase` behind `store` — `nil` until the database *file* has opened, and
+    /// again only if opening that file itself fails. Deliberately independent of `store`/`status`:
+    /// dictionary/snippets/style overrides live on the same connection but need neither the history
+    /// key nor a working `DictationStore` (a `.keyLost`/other `DictationStore` failure disables
+    /// history alone, via `store`/`status`, and must not take `database` down with it — otherwise
+    /// `ContentService` dies whenever history does, for a table that isn't even encrypted). Once
+    /// non-nil, `reopen()` reuses this same instance rather than reopening the file again.
+    /// `ContentService` builds its three stores from this rather than opening a second connection.
+    private(set) var database: VoxFlowDatabase?
     private(set) var status: Status = .disabled(reason: HistoryService.notOpenedYetReason)
     let storeBox = HistoryStoreBox()
 
@@ -160,9 +169,33 @@ final class HistoryService {
         let url = self.url
         let useKey = settings.encryptHistory
         let makeKeyProvider = keyProvider
+
+        // Step 1: open the database *file* — independent of the history key. Reuses `database` across
+        // a `reopen()` (only the key/cipher choice or retention window changed, never `url`) instead
+        // of reopening the file every time; only a fresh failure to open the file itself clears it.
+        let openedDatabase: VoxFlowDatabase
+        if let database {
+            openedDatabase = database
+        } else {
+            do {
+                openedDatabase = try await Task.detached(priority: .userInitiated) { try VoxFlowDatabase(url: url) }.value
+            } catch {
+                store = nil
+                database = nil
+                storeBox.set(nil)
+                status = .disabled(reason: String(describing: error))
+                Self.log.error("history database unavailable, history and content disabled: \(String(describing: error))")
+                return
+            }
+            database = openedDatabase
+        }
+
+        // Step 2: build the (possibly-encrypted) `DictationStore` on top of it. A failure here —
+        // `.keyLost` included — disables history alone: `database` stays published so `ContentService`
+        // (dictionary/snippets/style overrides, none of them encrypted) keeps working.
         do {
             let newStore = try await Task.detached(priority: .userInitiated) {
-                try DictationStore(databaseURL: url, keyProvider: useKey ? makeKeyProvider() : nil)
+                try DictationStore(database: openedDatabase, keyProvider: useKey ? makeKeyProvider() : nil)
             }.value
             store = newStore
             storeBox.set(newStore)
@@ -178,12 +211,12 @@ final class HistoryService {
             store = nil
             storeBox.set(nil)
             status = .disabled(reason: "history key lost")
-            Self.log.error("history key lost — history disabled")
+            Self.log.error("history key lost — history disabled (content database stays open)")
         } catch {
             store = nil
             storeBox.set(nil)
             status = .disabled(reason: String(describing: error))
-            Self.log.error("history store unavailable, history disabled: \(String(describing: error))")
+            Self.log.error("history store unavailable, history disabled (content database stays open): \(String(describing: error))")
         }
     }
 }

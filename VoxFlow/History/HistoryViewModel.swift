@@ -201,11 +201,19 @@ final class HistoryViewModel {
         record.isUnreadable ? unreadableMessage : record.rawText
     }
 
-    /// The expanded detail's "INSERTED" column header — the style, uppercased, appended when the
-    /// record has one ("INSERTED · VERY CASUAL"), "INSERTED" alone otherwise.
+    /// The expanded detail's "INSERTED" column header — the style's display name, uppercased,
+    /// appended when the record has one ("INSERTED · VERY CASUAL"), "INSERTED" alone otherwise.
     static func detailHeader(for record: DictationRecord) -> String {
         guard let style = record.style, !style.isEmpty else { return "INSERTED" }
-        return "INSERTED · \(style.uppercased())"
+        return "INSERTED · \(styleLabel(style).uppercased())"
+    }
+
+    /// I1: `record.style` stores `TextStyle.rawValue` (e.g. `"veryCasual"`); rows must show the
+    /// human display name (`"Very casual"`) instead. Falls back to the raw value itself for a style
+    /// string `TextStyle` no longer recognizes, so an unrecognized value degrades to "shown as-is"
+    /// rather than disappearing.
+    static func styleLabel(_ raw: String) -> String {
+        TextStyle(rawValue: raw)?.displayName ?? raw
     }
 
     /// "App · h:mm a · m:ss · N words · Style · LANG" (style omitted when there is none). Time uses
@@ -217,7 +225,7 @@ final class HistoryViewModel {
         parts.append(timeFormatter.string(from: record.createdAt))
         parts.append(TimeCode.short(record.duration))
         parts.append("\(record.words) words")
-        if let style = record.style, !style.isEmpty { parts.append(style) }
+        if let style = record.style, !style.isEmpty { parts.append(styleLabel(style)) }
         if let language = record.language, !language.isEmpty { parts.append(language.uppercased()) }
         return parts.joined(separator: " · ")
     }

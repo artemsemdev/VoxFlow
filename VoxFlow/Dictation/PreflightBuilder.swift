@@ -14,6 +14,14 @@ struct PreflightBuilder: Sendable {
     /// finish before `preflight()` returns, rather than being a fire-and-forget hop that happens to
     /// win a race today.
     let captureFocus: @Sendable (FrontmostApp) async -> Void
+    /// Fired only on the clean path (no exclusion/secure-input/permission/model gate applies), right
+    /// after `captureFocus` — lets `StyledTranscriber` read the fn-down frontmost app later (from its
+    /// `FrontmostBox`) without re-querying `NSWorkspace` itself, which could disagree with the app
+    /// that passed the checks above if the frontmost app changed mid-capture. Defaulted to a no-op so
+    /// every existing `PreflightBuilder(...)` call site keeps compiling unchanged. `var`, not `let`:
+    /// the synthesized memberwise init only turns a defaulted stored property into an overridable
+    /// parameter when it's a `var` — a defaulted `let` is baked in and can't be passed at all.
+    var onFrontmostCaptured: @Sendable (FrontmostApp) -> Void = { _ in }
 
     func preflight() async -> Preflight {
         let app = frontmost.frontmostApp()
@@ -33,6 +41,7 @@ struct PreflightBuilder: Sendable {
             return Preflight(excludedApp: nil, secureInput: false, microphone: .granted, model: model)
         }
         await captureFocus(app)
+        onFrontmostCaptured(app)
         return Preflight(excludedApp: nil, secureInput: false, microphone: .granted, model: model)
     }
 }

@@ -9,21 +9,31 @@ public enum DictationEvent: Sendable, Equatable {
 
 public struct DictationResult: Sendable, Equatable {
     public var text: String
-    /// Engine output before any cleanup. Identical to `text` until phase 5 adds styles.
+    /// Engine output before any cleanup. Identical to `text` until `StyledTranscriber` (phase 4a) styles it.
     public var rawText: String
     public var segments: [TranscriptSegment]
     public var language: LanguageDetection?
     public var duration: TimeInterval
     public var lowConfidence: Bool
+    /// The resolved `TextStyle.rawValue` (phase 4a), set by `StyledTranscriber`; `nil` on a base
+    /// transcriber's own result (before styling runs) or in a test fixture that never sets it.
+    public var style: String?
+    /// Where the snippet `cursor` placeholder landed in `text`, if a snippet expansion placed one.
+    public var cursorOffset: Int?
+    /// How many filler occurrences were removed producing `text` from `rawText`.
+    public var fillersRemoved: Int
 
     public init(text: String, rawText: String, segments: [TranscriptSegment], language: LanguageDetection?,
-                duration: TimeInterval, lowConfidence: Bool) {
+                duration: TimeInterval, lowConfidence: Bool, style: String? = nil, cursorOffset: Int? = nil, fillersRemoved: Int = 0) {
         self.text = text
         self.rawText = rawText
         self.segments = segments
         self.language = language
         self.duration = duration
         self.lowConfidence = lowConfidence
+        self.style = style
+        self.cursorOffset = cursorOffset
+        self.fillersRemoved = fillersRemoved
     }
 
     public var wordCount: Int { text.wordCount }

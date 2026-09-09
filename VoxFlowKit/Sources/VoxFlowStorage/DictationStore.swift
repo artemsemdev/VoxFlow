@@ -9,22 +9,18 @@ public final class DictationStore: Sendable {
     private let queue: DatabaseQueue
     private let cipher: DictationCipher?
 
-    public static var defaultURL: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("VoxFlow/voxflow.sqlite")
-    }
+    public static var defaultURL: URL { VoxFlowDatabase.defaultURL }
 
     public convenience init(databaseURL: URL, keyProvider: (any HistoryKeyProviding)?) throws {
-        try FileManager.default.createDirectory(at: databaseURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try self.init(queue: DatabaseQueue(path: databaseURL.path), keyProvider: keyProvider)
+        try self.init(database: VoxFlowDatabase(url: databaseURL), keyProvider: keyProvider)
     }
 
     public convenience init(inMemoryWith keyProvider: (any HistoryKeyProviding)?) throws {
-        try self.init(queue: DatabaseQueue(), keyProvider: keyProvider)
+        try self.init(database: VoxFlowDatabase.inMemory(), keyProvider: keyProvider)
     }
 
-    private init(queue: DatabaseQueue, keyProvider: (any HistoryKeyProviding)?) throws {
-        self.queue = queue
+    public init(database: VoxFlowDatabase, keyProvider: (any HistoryKeyProviding)?) throws {
+        self.queue = database.queue
         var isNewlyCreated = false
         if let keyProvider {
             let historyKey = try keyProvider.historyKey()
@@ -33,16 +29,6 @@ public final class DictationStore: Sendable {
         } else {
             cipher = nil
         }
-        var migrator = DatabaseMigrator()
-        migrator.registerMigration("v1") { db in
-            try db.execute(sql: """
-                CREATE TABLE dictations (
-                  id INTEGER PRIMARY KEY AUTOINCREMENT, created_at DOUBLE NOT NULL, app_name TEXT, style TEXT, language TEXT,
-                  duration DOUBLE NOT NULL, words INTEGER NOT NULL, encrypted BOOLEAN NOT NULL, text BLOB NOT NULL, raw_text BLOB NOT NULL);
-                CREATE INDEX dictations_created_at ON dictations(created_at);
-                """)
-        }
-        try migrator.migrate(queue)
 
         // A key provider that just generated (rather than re-derived/re-read) the key it handed back,
         // over a database that already has encrypted rows, means the original key material is gone —

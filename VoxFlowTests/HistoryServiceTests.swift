@@ -44,6 +44,53 @@ struct HistoryServiceTests {
         #expect(service.status == .ready)
     }
 
+    @Test("database is nil until the first open resolves, then set alongside store")
+    func databaseExposedAfterOpen() async throws {
+        let dir = TemporaryDirectory()
+        let settings = DictationSettings(store: InMemoryKeyValueStore())
+        let service = makeService(dir: dir, settings: settings)
+        #expect(service.database == nil)
+        _ = await service.count()                                     // force the open to finish
+        #expect(service.database != nil)
+        #expect(service.status == .ready)
+    }
+
+    @Test("a key-lost open failure disables history but keeps the database open (dictionary/snippets/styles aren't encrypted)")
+    func databaseStaysOpenWhenKeyLost() async throws {
+        let dir = TemporaryDirectory()
+        let url = dir.file("voxflow.sqlite")
+        let sharedKey = SymmetricKey(size: .bits256)
+        _ = try DictationStore(databaseURL: url, keyProvider: FakeHistoryKeyProvider(key: sharedKey)).insert(draft("secret", at: Date()))
+
+        let settings = DictationSettings(store: InMemoryKeyValueStore())
+        let service = HistoryService(url: url, settings: settings,
+                                     keyProvider: { FakeHistoryKeyProvider(key: SymmetricKey(size: .bits256), isNew: true) }, clock: FakeClock())
+        _ = await service.count()
+
+        #expect(service.status == .disabled(reason: "history key lost"))
+        #expect(service.store == nil)
+        #expect(service.database != nil)
+    }
+
+    @Test("a database file that can never be opened leaves both store and database nil")
+    func databaseNilWhenFileUnopenable() async throws {
+        // A path inside a location that doesn't exist and can't be created (a file, not a directory,
+        // sits where a parent directory is needed) — `VoxFlowDatabase.init(url:)`'s own
+        // `createDirectory` fails, so the database never opens at all.
+        let dir = TemporaryDirectory()
+        let blocker = dir.file("blocker")
+        try Data().write(to: blocker)
+        let url = blocker.appendingPathComponent("nested").appendingPathComponent("voxflow.sqlite")
+
+        let settings = DictationSettings(store: InMemoryKeyValueStore())
+        let service = HistoryService(url: url, settings: settings, keyProvider: { FakeHistoryKeyProvider() }, clock: FakeClock())
+        _ = await service.count()
+
+        #expect(service.store == nil)
+        #expect(service.database == nil)
+        if case .disabled = service.status {} else { Issue.record("expected .disabled, got \(service.status)") }
+    }
+
     @Test("reopening with encryption off flags previously-encrypted rows as unreadable")
     func reopenWithoutEncryption() async throws {
         let dir = TemporaryDirectory()
