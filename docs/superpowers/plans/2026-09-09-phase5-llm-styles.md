@@ -697,14 +697,28 @@ static let restyleOrder: [TextStyle] = [.formal, .casual, .veryCasual, .verbatim
 **Interfaces:**
 - Consumes: `RuleStyler.styleSync`, `StylingSettings.snapshot` (Task 2, existing).
 
-- [ ] Tests → RED → implementation → GREEN; render the result view (`VOXFLOW_RENDER=1`, `FilesRenderTests` if present, else add one for `TranscriptResultView` with the checkbox on) and compare with page 7.
-- [ ] Commit: `feat(app): "Apply {Style} cleanup" on the Files result (2f)`; `docs: ADR-007 LLM styling; README/CHANGELOG/SETUP; phase 5 checklist`
+- [x] Tests → RED → implementation → GREEN; render the result view (`VOXFLOW_RENDER=1`, `FilesRenderTests` if present, else add one for `TranscriptResultView` with the checkbox on) and compare with page 7.
+- [x] Commit: `feat(app): "Apply {Style} cleanup" on the Files result (2f)`; `docs: ADR-007 LLM styling; README/CHANGELOG/SETUP; phase 5 checklist`
 
 ---
 
 ## Manual checklist (owner)
 
-Filled in by Task 5 (see above) — run after the PR merges into `develop`.
+Run after the PR merges into `develop`.
+
+- [ ] Download Qwen in Settings › Models: progress bar shown, checksum verified, row reads
+      "Installed" when done.
+- [ ] Dictate the same sentence with Formal / Casual / Very casual selected on the Styles page —
+      each tone's output is visibly different and style-appropriate (not just the fixed rule
+      transforms).
+- [ ] Remove the model from Settings › Models — dictation still works (falls back to rule-based
+      styling; no crash, no hang).
+- [ ] History → pick a row → "Re-style ▾" → choose a different tone — the row updates in place and
+      the clipboard has the new text.
+- [ ] Files → open a result → check "Apply Casual cleanup" — segments change, and "Save as…" writes
+      the cleaned text (not the original raw transcript).
+- [ ] First launch after installing the model: no beachball / UI freeze while the model warms up in
+      the background.
 
 ## Self-review
 
