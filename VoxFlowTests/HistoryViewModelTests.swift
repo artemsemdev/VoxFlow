@@ -248,6 +248,7 @@ struct HistoryViewModelTests {
 
         #expect(vm.records.isEmpty)
         #expect(vm.emptyState == .unavailable(reason: "The history key could not be found in your Keychain"))
+        withExtendedLifetime(dir) {}   // the temp dir must outlive the service's open attempt
     }
 
     @Test("I-4: emptyState does not treat the service's transient not-opened-yet placeholder as unavailable")
