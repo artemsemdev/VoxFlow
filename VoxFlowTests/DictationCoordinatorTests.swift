@@ -10,13 +10,16 @@ import VoxFlowTestSupport
 struct DictationCoordinatorTests {
     /// `gate`, when given, makes the controller's `preflight()` suspend on it before returning —
     /// lets a test hold `fnDown()` open past its `await preflight()` to prove command ordering.
-    func make(preflight: Preflight = Preflight(excludedApp: nil, secureInput: false, microphone: .granted, model: .loaded), gate: Gate? = nil)
+    func make(preflight: Preflight = Preflight(excludedApp: nil, secureInput: false, microphone: .granted, model: .loaded), gate: Gate? = nil,
+              permissionsMicrophone: PermissionState = .granted, permissionsRequestResult: PermissionState = .granted,
+              loadModel: @escaping @Sendable () async throws -> Void = {})
         -> (DictationCoordinator, FakeMicrophone, FakeClock, FakePermissions, Navigation) {
-        let mic = FakeMicrophone(), clock = FakeClock(), permissions = FakePermissions(microphone: .granted, requestResult: .granted, accessibility: true)
+        let mic = FakeMicrophone(), clock = FakeClock()
+        let permissions = FakePermissions(microphone: permissionsMicrophone, requestResult: permissionsRequestResult, accessibility: true)
         let transcriber = FakeDictationTranscriber(result: DictationResult(text: "hi there", rawText: "hi there", segments: [], language: nil, duration: 1, lowConfidence: false))
         let controller = DictationController(config: FlowBarConfig(), microphone: mic, transcriber: transcriber, inserter: FakeTextInserter(), clock: clock,
                                              preflight: { if let gate { await gate.wait() }; return preflight },
-                                             loadModel: {}, options: { TranscriptionOptions() },
+                                             loadModel: loadModel, options: { TranscriptionOptions() },
                                              onSave: { _, _ in }, copyToClipboard: { _ in })
         let settings = DictationSettings(store: InMemoryKeyValueStore())
         let navigation = Navigation()
@@ -65,6 +68,24 @@ struct DictationCoordinatorTests {
         await wait(c) { if case .tapped(_) = $0 { true } else { false } }
     }
 
+    @Test("first-use microphone prompt: notDetermined fn-down requests access instead of enqueuing; the matching fn-up is swallowed; a later fn-down proceeds normally")
+    func firstUseMicrophonePrompt() async {
+        let (c, mic, _, perms, _) = make(permissionsMicrophone: .notDetermined, permissionsRequestResult: .granted)
+        c.fn(.down)
+        c.fn(.up)
+        while perms.requests == 0 { await Task.yield() }
+        // Give the (would-be, wrongly) swallowed fn-up plenty of chances to reach the controller.
+        for _ in 0..<50 { await Task.yield() }
+        #expect(c.state == .idle)
+        #expect(mic.startCount == 0)
+        #expect(perms.requests == 1)
+
+        // The next press is a normal, un-suspended one now that the grant landed.
+        c.fn(.down)
+        c.fn(.up)
+        await wait(c) { if case .tapped(_) = $0 { true } else { false } }
+    }
+
     @Test("open settings routes by state: mic denied → Microphone pane; model missing → Settings › Models")
     func openSettings() async {
         let (denied, _, _, perms, _) = make(preflight: Preflight(excludedApp: nil, secureInput: false, microphone: .denied, model: .loaded))
@@ -78,5 +99,15 @@ struct DictationCoordinatorTests {
         await wait(missing) { $0 == .modelNotInstalled(sizeBytes: 1) }
         missing.openSettingsForCurrentError()
         #expect(nav.page == .settings && nav.settingsTab == .models && nav.requestMainWindow)
+
+        // `.error` (e.g. a failed model load) has nothing to do with Accessibility — it routes to
+        // Settings › Models, same destination as `.modelNotInstalled` (I-2).
+        struct LoadFailed: Error {}
+        let (errored, _, _, _, errNav) = make(preflight: Preflight(excludedApp: nil, secureInput: false, microphone: .granted, model: .installedNotLoaded),
+                                              loadModel: { throw LoadFailed() })
+        errored.fn(.down)
+        await wait(errored) { if case .error = $0 { true } else { false } }
+        errored.openSettingsForCurrentError()
+        #expect(errNav.page == .settings && errNav.settingsTab == .models && errNav.requestMainWindow)
     }
 }

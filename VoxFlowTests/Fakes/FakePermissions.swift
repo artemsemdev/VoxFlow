@@ -27,8 +27,11 @@ final class FakePermissions: PermissionChecking, Sendable {
 
     func microphone() -> PermissionState { state.withLock { $0.microphone } }
 
+    /// Mirrors `SystemPermissions.requestMicrophone()`'s real-world effect: the OS grant/denial the
+    /// user just made is reflected in the *next* `microphone()` read, not just in this call's return
+    /// value — needed to express "notDetermined → granted, and a later `microphone()` reflects it".
     func requestMicrophone() async -> PermissionState {
-        state.withLock { $0.requests += 1; return $0.requestResult }
+        state.withLock { $0.requests += 1; $0.microphone = $0.requestResult; return $0.requestResult }
     }
 
     func accessibilityTrusted(prompt: Bool) -> Bool {

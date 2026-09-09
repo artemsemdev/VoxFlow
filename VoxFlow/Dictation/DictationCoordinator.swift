@@ -26,6 +26,11 @@ final class DictationCoordinator {
     private let commands: AsyncStream<Command>.Continuation
     private let commandStream: AsyncStream<Command>
     private var ticker: Task<Void, Never>?
+    /// True from the moment a `.notDetermined` fn-down triggers the Microphone request until it
+    /// resolves — while true, `fn(_:)` neither enqueues the down (avoids `preflight()` suspending
+    /// on the OS dialog inside the command queue, see I-1) nor the matching up (which belongs to
+    /// the prompt, not a dictation, and must not be replayed against the very next armed state).
+    private var isRequestingMicrophoneAccess = false
 
     private(set) var state: FlowBarState = .idle
     private(set) var levels: [Float] = Array(repeating: 0, count: DictationCoordinator.barCount)
@@ -97,7 +102,24 @@ final class DictationCoordinator {
     }
     private func stopTicker() { ticker?.cancel(); ticker = nil }
 
-    func fn(_ t: FnTransition) { commands.yield(.fn(t)) }
+    /// I-1: a `.notDetermined` fn-down is diverted here instead of reaching the command queue, whose
+    /// single consumer would otherwise suspend inside `DictationController.fnDown()`'s `preflight()`
+    /// for as long as the human takes to answer the TCC dialog — during which a released fn queues up
+    /// behind it and replays the instant the dialog resolves, ending a dictation that never started
+    /// (the owner's very first manual e2e). The prompt runs outside the queue instead, and the fn-up
+    /// that belongs to it is swallowed rather than forwarded.
+    func fn(_ t: FnTransition) {
+        if case .down = t, !isRequestingMicrophoneAccess, permissions.microphone() == .notDetermined {
+            isRequestingMicrophoneAccess = true
+            Task { @MainActor [weak self, permissions] in
+                _ = await permissions.requestMicrophone()
+                self?.isRequestingMicrophoneAccess = false
+            }
+            return
+        }
+        guard !isRequestingMicrophoneAccess else { return }
+        commands.yield(.fn(t))
+    }
     func escape() { commands.yield(.escape) }
     func anyKey() { commands.yield(.anyKey) }
     func copyRaw() { commands.yield(.copyRaw) }
@@ -111,8 +133,10 @@ final class DictationCoordinator {
     func openSettingsForCurrentError() {
         switch state {
         case .micUnavailable(.denied), .micUnavailable(.noDevice): permissions.openMicrophoneSettings()
-        case .error: permissions.openAccessibilitySettings()
-        case .modelNotInstalled:
+        case .error, .modelNotInstalled:
+            // `.error` (model-load / transcription failure) has nothing to do with Accessibility —
+            // Settings › Models is where it can actually help (I-2). `openAccessibilitySettings()` is
+            // reserved for a future Accessibility-denied state (see the Accessibility-denied follow-up issue).
             navigation.settingsTab = .models
             navigation.page = .settings
             navigation.requestMainWindow = true
