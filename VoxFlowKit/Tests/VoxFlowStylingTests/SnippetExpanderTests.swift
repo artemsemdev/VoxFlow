@@ -100,6 +100,36 @@ struct SnippetExpanderTests {
         #expect(result.cursorOffset == 6)
     }
 
+    @Test("date placeholder replaces every occurrence in the body")
+    func datePlaceholderReplacesAllOccurrences() {
+        let rule = SnippetRule(trigger: "/today", body: "date to date")
+        let expected = DateFormatter.localizedString(from: fixedDate, dateStyle: .medium, timeStyle: .none)
+        let result = expander(snippets: [rule]).expand("/today")
+        #expect(result.text == "\(expected) to \(expected)")
+    }
+
+    @Test("clipboard placeholder replaces every occurrence in the body")
+    func clipboardPlaceholderReplacesAllOccurrences() {
+        let rule = SnippetRule(trigger: "/paste", body: "clipboard and clipboard again")
+        let result = expander(snippets: [rule], clipboard: "hi").expand("/paste")
+        #expect(result.text == "hi and hi again")
+    }
+
+    @Test("app placeholder replaces every occurrence in the body")
+    func appPlaceholderReplacesAllOccurrences() {
+        let rule = SnippetRule(trigger: "/where", body: "app told app")
+        let result = expander(snippets: [rule], appName: "Notes").expand("/where")
+        #expect(result.text == "Notes told Notes")
+    }
+
+    @Test("a second cursor occurrence is removed from the output; the first sets the offset")
+    func secondCursorOccurrenceIsRemoved() {
+        let rule = SnippetRule(trigger: "/greet", body: "Hi cursor, thanks cursor!")
+        let result = expander(snippets: [rule]).expand("/greet")
+        #expect(result.text == "Hi , thanks !")
+        #expect(result.cursorOffset == 3)
+    }
+
     @Test("date placeholder expands to a medium-style date")
     func datePlaceholder() {
         let rule = SnippetRule(trigger: "/today", body: "Today is date")

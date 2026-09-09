@@ -100,17 +100,19 @@ public struct SnippetExpander: Sendable {
     // MARK: - Body placeholders
 
     private func expandBody(_ body: String) -> (text: String, cursorOffset: Int?) {
-        var result = body
-        result = replaceWord(result, "date", with: formattedDate())
-        result = replaceWord(result, "clipboard", with: context.clipboard ?? "")
-        result = replaceWord(result, "app", with: context.appName ?? "")
+        var result = replaceAllOccurrences(of: "date", with: formattedDate(), in: body)
+        result = replaceAllOccurrences(of: "clipboard", with: context.clipboard ?? "", in: result)
+        result = replaceAllOccurrences(of: "app", with: context.appName ?? "", in: result)
 
-        var cursorOffset: Int?
-        if let range = firstWordRange(result, "cursor") {
-            cursorOffset = result.distance(from: result.startIndex, to: range.lowerBound)
-            result.removeSubrange(range)
-            result = result.replacingOccurrences(of: "  ", with: " ")
+        let cursorRanges = wordRanges(result, "cursor")
+        guard let first = cursorRanges.first else {
+            return (result, nil)
         }
+        let cursorOffset = result.distance(from: result.startIndex, to: first.lowerBound)
+        for range in cursorRanges.reversed() {
+            result.removeSubrange(range)
+        }
+        result = result.replacingOccurrences(of: "  ", with: " ")
         return (result, cursorOffset)
     }
 
@@ -122,18 +124,20 @@ public struct SnippetExpander: Sendable {
         return formatter.string(from: context.date)
     }
 
-    private func replaceWord(_ text: String, _ word: String, with value: String) -> String {
-        guard let range = firstWordRange(text, word) else { return text }
+    /// Replaces every whole-word, case-insensitive occurrence of `word` in `text` with `value`.
+    private func replaceAllOccurrences(of word: String, with value: String, in text: String) -> String {
         var result = text
-        result.replaceSubrange(range, with: value)
+        for range in wordRanges(result, word).reversed() {
+            result.replaceSubrange(range, with: value)
+        }
         return result
     }
 
-    private func firstWordRange(_ text: String, _ word: String) -> Range<String.Index>? {
+    /// All whole-word, case-insensitive ranges of `word` in `text`, in left-to-right order.
+    private func wordRanges(_ text: String, _ word: String) -> [Range<String.Index>] {
         let pattern = "\\b\(NSRegularExpression.escapedPattern(for: word))\\b"
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return nil }
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return [] }
         let nsRange = NSRange(text.startIndex..., in: text)
-        guard let match = regex.firstMatch(in: text, options: [], range: nsRange) else { return nil }
-        return Range(match.range, in: text)
+        return regex.matches(in: text, options: [], range: nsRange).compactMap { Range($0.range, in: text) }
     }
 }

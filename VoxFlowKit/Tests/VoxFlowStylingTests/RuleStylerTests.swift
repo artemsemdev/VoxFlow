@@ -125,6 +125,24 @@ struct RuleStylerTests {
         #expect(result.text == "are you free?")
     }
 
+    // MARK: Unicode safety
+
+    @Test("capitalizing a German ß does not trap even though its uppercase form is two characters")
+    func capitalizesMultiGraphemeUppercase() {
+        let result = styler.style("ß is a letter", options: options(autoPunctuate: true))
+        #expect(result.text == "SS is a letter.")
+    }
+
+    @Test("capitalizing text starting with an emoji or a combining mark does not trap")
+    func capitalizesEmojiOrCombiningMarkSafely() {
+        let emojiResult = styler.style("👍 great job", options: options(autoPunctuate: true))
+        #expect(emojiResult.text == "👍 great job.")
+
+        let combining = "e\u{0301}llo there" // "é" as e + combining acute accent, decomposed
+        let combiningResult = styler.style(combining, options: options(autoPunctuate: true))
+        #expect(combiningResult.text == "Éllo there.")
+    }
+
     // MARK: verbatim
 
     @Test("verbatim ignores both toggles and returns raw text unchanged")

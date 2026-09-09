@@ -84,20 +84,25 @@ public struct RuleStyler: TextStyler, Sendable {
     }
 
     private static func capitalizeSentences(_ text: String) -> String {
-        var chars = Array(text)
+        // Built as a String (not `[Character]`) because `Character.uppercased()` can yield more
+        // than one grapheme cluster (e.g. German "ß" -> "SS"); `Character(_:)` traps on that.
+        var result = ""
+        result.reserveCapacity(text.count)
         var shouldCapitalize = true
-        for i in chars.indices {
-            let c = chars[i]
+        for c in text {
             if shouldCapitalize, c.isLetter {
-                chars[i] = Character(c.uppercased())
+                result += c.uppercased()
                 shouldCapitalize = false
-            } else if c == "." || c == "?" || c == "!" {
-                shouldCapitalize = true
-            } else if !c.isWhitespace {
-                shouldCapitalize = false
+            } else {
+                result.append(c)
+                if c == "." || c == "?" || c == "!" {
+                    shouldCapitalize = true
+                } else if !c.isWhitespace {
+                    shouldCapitalize = false
+                }
             }
         }
-        return String(chars)
+        return result
     }
 
     // MARK: - Formal
