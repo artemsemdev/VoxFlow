@@ -25,6 +25,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // once here at a real launch so retention (design §5) runs at launch as the spec says,
             // rather than waiting for the first History read/write to trigger it implicitly.
             Task { await AppServices.shared.historyService.ready() }
+            // C1: `ContentService` also opens lazily, and was previously only ever opened by a
+            // Dictionary/Snippets/Styles page (or by `noteUses` *after* the first dictation) —
+            // meaning the first dictation of every cold launch ignored the dictionary, snippets and
+            // per-app overrides. Opening it here, in parallel with history, means its snapshot boxes
+            // are already populated (or racing to be) before fn is ever pressed.
+            Task { await AppServices.shared.contentService.ready() }
 
             // First launch (or onboarding never finished): show it instead of the main window —
             // closing whatever SwiftUI already opened for `MainWindowID.main` so the two don't both

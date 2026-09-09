@@ -128,7 +128,7 @@ struct ContentServiceTests {
         _ = try await content.dictionary.insert(word: "Kubernetes", soundsLike: nil, type: .term, fixTyping: false)
         _ = try await content.snippets.insert(trigger: "/sig", body: "Best, Artem")
 
-        await content.noteUses(words: ["We", "deployed", "Kubernetes", "today"], snippets: ["/sig"])
+        await content.noteUses(text: "We deployed Kubernetes today", snippets: ["/sig"])
 
         let entry = try #require(await content.dictionary.find(word: "Kubernetes"))
         #expect(entry.uses == 1)
@@ -136,6 +136,45 @@ struct ContentServiceTests {
         #expect(snippet.uses == 1)
         // Most-used-first ordering means the bumped snippet still refreshes into the box.
         #expect(content.snippetsBox.current.contains(SnippetRule(trigger: "/sig", body: "Best, Artem", onlyInBundleID: nil)))
+    }
+
+    @Test("I3: noteUses bumps a multi-word dictionary entry (a Contacts full name) matched inside the dictated text")
+    func noteUsesBumpsMultiWordEntry() async throws {
+        let content = makeContent(dir: TemporaryDirectory())
+        _ = try await content.dictionary.insert(word: "Priya Raghunathan", soundsLike: nil, type: .name, fixTyping: false, source: "contacts")
+
+        await content.noteUses(text: "hi priya raghunathan here", snippets: [])
+
+        let entry = try #require(await content.dictionary.find(word: "priya raghunathan"))
+        #expect(entry.uses == 1)
+    }
+
+    // MARK: - C1: ready() at launch must see rows written before ContentService ever existed
+
+    /// C1: `AppDelegate` calls `contentService.ready()` at launch, next to `historyService.ready()`
+    /// — this proves that alone is enough for the first dictation of a launch to see stored
+    /// vocabulary/snippets/overrides, by seeding directly through the stores (never through a
+    /// `DictionaryAPI`/`SnippetsAPI`/`OverridesAPI` wrapper, which is what every other test above
+    /// does and what used to be the only thing that ever triggered `open()`).
+    @Test("ready() alone (no wrapper call) populates the boxes from rows already in storage")
+    func readyPopulatesBoxesFromExistingStorage() async throws {
+        let dir = TemporaryDirectory()
+        let settings = DictationSettings(store: InMemoryKeyValueStore())
+        settings.encryptHistory = false
+        let history = HistoryService(url: dir.file("voxflow.sqlite"), settings: settings,
+                                     keyProvider: { DummyKeyProvider() }, clock: FakeClock())
+        await history.ready()
+        let database = try #require(history.database)
+        _ = try DictionaryStore(database: database).insert(word: "Kubernetes", soundsLike: nil, type: .term, fixTyping: false)
+        _ = try SnippetStore(database: database).insert(trigger: "/sig", body: "Best, Artem")
+        try StyleOverrideStore(database: database).set(bundleID: "com.apple.mail", appName: "Mail", style: .formal)
+
+        let content = ContentService(history: history)
+        await content.ready()
+
+        #expect(content.vocabularyBox.current.contains("Kubernetes"))
+        #expect(content.snippetsBox.current.contains(SnippetRule(trigger: "/sig", body: "Best, Artem", onlyInBundleID: nil)))
+        #expect(content.overridesBox.current["com.apple.mail"] == .formal)
     }
 
     // MARK: - Unavailable database
@@ -162,7 +201,7 @@ struct ContentServiceTests {
         #expect(inserted == nil)
         #expect(await content.snippets.all().isEmpty)
         #expect(await content.overrides.all().isEmpty)
-        await content.noteUses(words: ["hello"], snippets: ["/sig"])   // must not crash or hang
+        await content.noteUses(text: "hello", snippets: ["/sig"])   // must not crash or hang
     }
 
     @Test("content stays available when history alone is disabled (key lost) — dictionary/snippets/styles aren't encrypted")
