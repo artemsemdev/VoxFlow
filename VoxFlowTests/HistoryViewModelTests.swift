@@ -47,6 +47,7 @@ struct HistoryViewModelTests {
 
         init(keepHistory: Bool = true) {
             settings = DictationSettings(store: InMemoryKeyValueStore())
+            settings.retentionDays = 0   // seeded rows use epoch dates; keep the live retention purge out of the way
             settings.keepHistory = keepHistory
             service = HistoryViewModelTests.makeService(dir: dir, settings: settings, clock: clock)
         }
@@ -241,6 +242,7 @@ struct HistoryViewModelTests {
             .insert(HistoryViewModelTests.draft("secret", at: Date()))
 
         let settings = DictationSettings(store: InMemoryKeyValueStore())
+        settings.retentionDays = 0
         let brokenService = HistoryService(url: url, settings: settings, keyProvider: { FakeFreshKeyProvider() }, clock: FakeClock())
         let vm = HistoryViewModel(service: brokenService, settings: settings, navigation: Navigation(), clock: FakeClock())
 

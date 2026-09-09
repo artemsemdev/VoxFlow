@@ -24,7 +24,10 @@ struct HistoryServiceTests {
     }
 
     func makeService(dir: TemporaryDirectory, settings: DictationSettings, key: SymmetricKey = SymmetricKey(size: .bits256), isNew: Bool = false) -> HistoryService {
-        HistoryService(url: dir.file("voxflow.sqlite"), settings: settings,
+        // Test rows carry epoch-era dates; a live 30-day retention purge (which runs on every open,
+        // on a detached task) would race the inserts — CI lost that race once. "Never" keeps it out.
+        settings.retentionDays = 0
+        return HistoryService(url: dir.file("voxflow.sqlite"), settings: settings,
                        keyProvider: { FakeHistoryKeyProvider(key: key, isNew: isNew) }, clock: FakeClock())
     }
 
