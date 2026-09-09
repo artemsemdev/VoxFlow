@@ -143,13 +143,22 @@ final class DictationCoordinator {
     }
 
     /// This coordinator's own monotonic "now" (`clock.now()`) — what `FlowBarView` passes as
-    /// `FlowBarContent.make(now:)` for the `.paused` pill's "N min left" countdown (Task 4).
+    /// `FlowBarContent.make(now:)` for the `.paused` pill's "N min left" countdown (Task 4). Not
+    /// `@Observable` state: a plain function call, read only when SwiftUI re-renders for some other
+    /// reason (see review M4 at `FlowBarView.content`'s `.coordinator` case) — the countdown is a
+    /// snapshot at render time, not a live ticker.
     func now() -> TimeInterval { clock.now() }
 
     /// Wall-clock projection of `pausedUntil` for the menu bar's "Paused until 10:41" (design MB-02)
     /// — `nil` outside `.paused`. `pausedUntil` and `now()` share this coordinator's monotonic
     /// timeline, so `pausedUntil - now()` is "seconds from this instant", added onto the real
     /// wall-clock `Date()` to get the wall-clock moment the pause ends.
+    ///
+    /// Review M9: `MenuBarViewModel.pausedUntilText` deliberately does *not* call this — it
+    /// recomputes the same projection from its own injected `now`/`locale` so the exact string is
+    /// test-deterministic, which leaves this property with the same formula duplicated. Left as-is;
+    /// unifying the two (and the coordinator/controller's separate `SystemMonotonicClock` instances)
+    /// is routed to whichever task next touches `AppServices.swift`.
     var pausedUntilDate: Date? {
         guard let pausedUntil else { return nil }
         return Date().addingTimeInterval(pausedUntil - now())

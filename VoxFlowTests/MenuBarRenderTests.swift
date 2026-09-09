@@ -101,31 +101,34 @@ struct MenuBarRenderTests {
                                        languagesSummary: "test", isDefault: false)
         let downloader = FakeModelDownloader()
         await downloader.serve(parakeetPayload, at: parakeet.downloadURL)
-        await downloader.setBlockAfterBytes(Int64(Double(parakeetPayload.count) * 0.62))
+        // M2 (Task 4 review): block at *exactly* 62 % of the payload and poll for that *exact* byte
+        // count (not merely "any `.downloading` state", which the consumer can observe far earlier,
+        // at whatever partial chunk had landed when this loop first got a turn) — same technique
+        // `ModelsViewModelTests.downloadStates` uses.
+        let blockAfterBytes = Int64(Double(parakeetPayload.count) * 0.62)
+        await downloader.setBlockAfterBytes(blockAfterBytes)
         let modelStore = ModelStore(directory: TemporaryDirectory().url, catalog: [parakeet], downloader: downloader,
                                     freeSpace: FakeFreeSpace(available: 100_000_000_000), settings: InMemoryKeyValueStore())
         let downloadingModels = ModelsViewModel(store: modelStore, catalog: [parakeet])
         await downloadingModels.refresh()
         let downloadTask = Task { await downloadingModels.download(parakeet) }
         await downloader.waitUntilBlocked()
+        let expectedState = ModelState.downloading(bytesWritten: blockAfterBytes, total: Int64(parakeetPayload.count))
         var midState = downloadingModels.speechRows.first?.state
-        for _ in 0..<1_000 where !Self.isDownloading(midState) {
+        for _ in 0..<10_000 where midState != expectedState {
             await Task.yield()
             midState = downloadingModels.speechRows.first?.state
         }
         let downloadingStats = try await makeStats(words: 0, minutes: 0, at: Date())
         let downloadingViewModel = MenuBarViewModel(dictation: makeCoordinator(clock: FakeClock()), settings: DictationSettings(store: InMemoryKeyValueStore()),
                                                     stats: downloadingStats, models: downloadingModels, modelsOnDisk: { 3 }, navigation: Navigation())
+        await downloadingViewModel.refresh()   // M2: populate "3 models on disk" (the footer was reading modelsOnDisk's un-refreshed default 0)
         try Self.render(MenuBarView(viewModel: downloadingViewModel), name: "3-downloading", to: directory)
         await downloader.release()
         _ = await downloadTask.value
 
         // 4. MB-00 hint (canvas.pdf page 4): "VoxFlow lives here" / body / "Got it".
         try Self.render(MenuBarHintView(onGotIt: {}).frame(width: 300, height: 110), name: "4-hint", to: directory)
-    }
-
-    private static func isDownloading(_ state: ModelState?) -> Bool {
-        if case .downloading = state { true } else { false }
     }
 
     private static func render(_ view: some View, name: String, to directory: URL) throws {

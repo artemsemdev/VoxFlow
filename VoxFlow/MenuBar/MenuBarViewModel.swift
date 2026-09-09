@@ -28,6 +28,15 @@ final class MenuBarViewModel {
     private let modelsOnDiskProvider: @Sendable () async -> Int
     private let navigation: Navigation
     private let now: () -> Date
+    /// "Quit VoxFlow" (review M7) — injected, like every other outward action here, instead of
+    /// `quit()` reaching into `NSApplication` directly; defaults to the real thing so production
+    /// wiring doesn't need to pass anything.
+    private let terminate: () -> Void
+    /// `pausedUntilText`'s locale (review B1) — a fixed `dateFormat` with no locale inherits
+    /// whatever the current process happens to run under, which is only deterministic in a test if
+    /// the test also pins it; defaults to `.current` so a 24-hour-clock user sees "22:41" and a
+    /// 12-hour-clock user sees "10:41 AM", not a Latin-digit assumption baked into the app.
+    private let locale: Locale
 
     /// Refreshed by `refresh()` (an actor hop away, via `modelsOnDiskProvider`) rather than read
     /// synchronously — the dropdown's `.task { await viewModel.refresh() }` populates it each time
@@ -35,7 +44,8 @@ final class MenuBarViewModel {
     private(set) var modelsOnDisk = 0
 
     init(dictation: DictationCoordinator, settings: DictationSettings, stats: StatsService, models: ModelsViewModel,
-         modelsOnDisk: @escaping @Sendable () async -> Int, navigation: Navigation, now: @escaping () -> Date = { Date() }) {
+         modelsOnDisk: @escaping @Sendable () async -> Int, navigation: Navigation, now: @escaping () -> Date = { Date() },
+         locale: Locale = .current, terminate: @escaping () -> Void = { NSApplication.shared.terminate(nil) }) {
         self.dictation = dictation
         self.settings = settings
         self.stats = stats
@@ -43,6 +53,8 @@ final class MenuBarViewModel {
         self.modelsOnDiskProvider = modelsOnDisk
         self.navigation = navigation
         self.now = now
+        self.locale = locale
+        self.terminate = terminate
     }
 
     func refresh() async {
@@ -72,7 +84,7 @@ final class MenuBarViewModel {
     var pausedUntilText: String? {
         guard let until = dictation.pausedUntil else { return nil }
         let wallClockEnd = now().addingTimeInterval(until - dictation.now())
-        return Self.timeFormatter.string(from: wallClockEnd)
+        return timeFormatter.string(from: wallClockEnd)
     }
 
     // MARK: Hands-free toggle
@@ -135,17 +147,25 @@ final class MenuBarViewModel {
         navigation.page = .settings
         navigation.requestMainWindow = true
     }
-    func quit() { NSApplication.shared.terminate(nil) }
+    func quit() { terminate() }
 
-    /// "10:41" — no AM/PM (design copy is bare, unlike `HistoryViewModel`'s "h:mm a").
-    private static let timeFormatter: DateFormatter = {
+    /// "10:41" (24-hour locales) / "10:41 AM" (12-hour locales) — built from the `"jmm"` skeleton
+    /// (hour-without-leading-zero + minutes) against `locale`, not a bare `"h:mm"` (review B1):
+    /// a fixed format string is only deterministic under a fixed locale, and `"h:mm"` also silently
+    /// dropped AM/PM on a 24-hour-clock reader with no way to tell 10:41 from 22:41. An instance
+    /// property (not `static`), since `locale` is now injected per view model.
+    private var timeFormatter: DateFormatter {
         let formatter = DateFormatter()
-        formatter.dateFormat = "h:mm"
+        formatter.locale = locale
+        formatter.dateFormat = DateFormatter.dateFormat(fromTemplate: "jmm", options: 0, locale: locale) ?? "H:mm"
         return formatter
-    }()
+    }
 
+    /// "1,240" — the canvas's exact grouping ("," not locale-dependent); deliberate per design copy,
+    /// same reasoning `ResultViewModel.wordCountFormatter` documents for its own fixed "13,842" (review M8).
     private static let numberFormatter: NumberFormatter = {
         let formatter = NumberFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.numberStyle = .decimal
         formatter.usesGroupingSeparator = true
         formatter.groupingSeparator = ","

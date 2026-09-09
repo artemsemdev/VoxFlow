@@ -40,6 +40,13 @@ struct FlowBarView: View {
         switch source {
         case .fixed(let content, levels: _): content
         case .coordinator(let coordinator):
+            // M4 (Task 4 review): `coordinator.now()` is a plain function call, not `@Observable`
+            // state, so it only actually gets re-read (and `.paused`'s "N min left" only actually
+            // ticks) when SwiftUI re-renders this `body` for some *other* reason — `state`/`elapsed`/
+            // `hotkeyMode` changing. None of those change while merely paused, so the pill's countdown
+            // is really a snapshot taken when `.paused` was entered, not a live clock. Harmless today
+            // (`FlowBarPresenter.pausedHideDelay` hides the pill again after 3 s), but would go stale
+            // if that delay ever grew, or if the pill started reappearing on menu-bar hover.
             FlowBarContent.make(state: coordinator.state, elapsed: coordinator.elapsed, mode: coordinator.hotkeyMode, now: coordinator.now())
         }
     }

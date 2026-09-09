@@ -52,12 +52,13 @@ struct MenuBarViewModelTests {
 
     func makeViewModel(dir: TemporaryDirectory, coordinator: DictationCoordinator, settings: DictationSettings? = nil,
                        stats injectedStats: StatsService? = nil, modelsOnDisk: @escaping @Sendable () async -> Int = { 0 },
-                       navigation: Navigation? = nil, now: @escaping () -> Date = Date.init) async throws -> MenuBarViewModel {
+                       navigation: Navigation? = nil, now: @escaping () -> Date = Date.init, locale: Locale = .current,
+                       terminate: @escaping () -> Void = {}) async throws -> MenuBarViewModel {
         let settings = settings ?? DictationSettings(store: InMemoryKeyValueStore())
         let stats: StatsService
         if let injectedStats { stats = injectedStats } else { stats = try await makeStats(dir: dir, words: 0, minutes: 0) }
         return MenuBarViewModel(dictation: coordinator, settings: settings, stats: stats, models: ModelsViewModel(store: makeEmptyModelStore()),
-                                modelsOnDisk: modelsOnDisk, navigation: navigation ?? Navigation(), now: now)
+                                modelsOnDisk: modelsOnDisk, navigation: navigation ?? Navigation(), now: now, locale: locale, terminate: terminate)
     }
 
     func makeEmptyModelStore() -> ModelStore {
@@ -106,7 +107,7 @@ struct MenuBarViewModelTests {
         #expect(!vm.isPaused)
     }
 
-    @Test("pausedUntilText / statusText format the wall-clock 'until' time as 'h:mm', no AM/PM")
+    @Test("pausedUntilText / statusText format the wall-clock 'until' time from the injected locale (review B1), not a bare fixed 'h:mm'")
     func pausedUntilFormatting() async throws {
         let clock = FakeClock()
         let coordinator = makeCoordinator(clock: clock)
@@ -114,7 +115,9 @@ struct MenuBarViewModelTests {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = .current
         let wallNow = calendar.date(from: DateComponents(year: 2026, month: 9, day: 7, hour: 9, minute: 41))!
-        let vm = try await makeViewModel(dir: dir, coordinator: coordinator, now: { wallNow })
+        // en_GB: 24-hour clock, no AM/PM — matches the canvas's bare "10:41" deterministically,
+        // regardless of whatever locale the machine running this test happens to be set to.
+        let vm = try await makeViewModel(dir: dir, coordinator: coordinator, now: { wallNow }, locale: Locale(identifier: "en_GB"))
 
         vm.pauseOneHour()   // 3600 s — 9:41 + 1 h = 10:41 (design MB-02's exact example)
         await wait(coordinator) { if case .paused = $0 { true } else { false } }
@@ -122,6 +125,25 @@ struct MenuBarViewModelTests {
         #expect(vm.pausedUntilText == "10:41")
         #expect(vm.statusText == "Paused until 10:41")
         #expect(vm.statusColor == Palette.amber)
+    }
+
+    @Test("B1: a 12-hour locale renders AM/PM instead of silently dropping it")
+    func pausedUntilFormattingTwelveHourLocale() async throws {
+        let clock = FakeClock()
+        let coordinator = makeCoordinator(clock: clock)
+        let dir = TemporaryDirectory()
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .current
+        let wallNow = calendar.date(from: DateComponents(year: 2026, month: 9, day: 7, hour: 9, minute: 41))!
+        let vm = try await makeViewModel(dir: dir, coordinator: coordinator, now: { wallNow }, locale: Locale(identifier: "en_US"))
+
+        vm.pauseOneHour()
+        await wait(coordinator) { if case .paused = $0 { true } else { false } }
+
+        // ICU renders "10:41 AM" with a narrow no-break space (U+202F) before "AM", not a plain
+        // space — normalize before comparing so this pins the digits/AM-PM, not that formatting detail.
+        let normalized = vm.pausedUntilText?.replacingOccurrences(of: "\u{202F}", with: " ")
+        #expect(normalized == "10:41 AM")
     }
 
     @Test("handsFree reads/writes DictationSettings.hotkeyMode")
@@ -189,6 +211,16 @@ struct MenuBarViewModelTests {
 
         vm.openSettings()
         #expect(navigation.page == .settings && navigation.requestMainWindow)
+    }
+
+    @Test("M7: quit() calls the injected terminate seam, not NSApplication directly")
+    func quitCallsInjectedSeam() async throws {
+        final class Box { var called = false }
+        let box = Box()
+        let dir = TemporaryDirectory()
+        let vm = try await makeViewModel(dir: dir, coordinator: makeCoordinator(clock: FakeClock()), terminate: { box.called = true })
+        vm.quit()
+        #expect(box.called)
     }
 
     @Test("downloading(in:) finds the first actively-downloading row, speech before style, with a rounded percent")

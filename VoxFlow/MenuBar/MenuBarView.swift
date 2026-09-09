@@ -9,11 +9,12 @@ struct MenuBarView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
+            // M5 (Task 4 review): the canvas has no divider between the hands-free toggle and the
+            // stats row directly beneath it — only between that pair and whatever comes next.
             if viewModel.isPaused {
                 resumeButton
             } else if !viewModel.isCondensed {
                 handsFreeRow
-                Divider().padding(.horizontal, 14)
                 statsRow
             }
             if let downloading = viewModel.downloading {
@@ -22,10 +23,17 @@ struct MenuBarView: View {
             }
             Divider().padding(.horizontal, 14)
             items
-            Divider().padding(.horizontal, 14)
+            // M5: the canvas's condensed MB-02 list ("Open VoxFlow" straight into "Settings…") has no
+            // divider between them — only the full MB-01 list does (History/Pause/Language above it).
+            if !viewModel.isCondensed {
+                Divider().padding(.horizontal, 14)
+            }
             settingsAndQuit
-            Divider().padding(.horizontal, 14)
-            footer
+            // M5: the canvas's condensed MB-02 dropdown has no footer line at all.
+            if !viewModel.isCondensed {
+                Divider().padding(.horizontal, 14)
+                footer
+            }
         }
         .frame(width: 280)
         .task { await viewModel.refresh() }
