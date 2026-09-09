@@ -20,11 +20,15 @@ struct ModelStepView: View {
                 ProgressView().frame(height: 96)
             }
             if let smaller = viewModel.smallerModel {
-                (Text("Have an 8 GB Mac? ").foregroundStyle(.secondary)
-                 + Text("Use the \(ModelsViewModel.gigabytes(smaller.sizeInBytes)) model instead.")
-                     .foregroundStyle(Color.accentColor))
-                    .font(.system(size: 12))
-                    .onTapGesture { viewModel.useSmallerModel() }
+                Button {
+                    viewModel.useSmallerModel()
+                } label: {
+                    (Text("Have an 8 GB Mac? ").foregroundStyle(.secondary)
+                     + Text("Use the \(ModelsViewModel.gigabytes(smaller.sizeInBytes)) model instead.")
+                         .foregroundStyle(Color.accentColor))
+                        .font(.system(size: 12))
+                }
+                .buttonStyle(.plain)
             }
             Text("You can start dictating as soon as it finishes — no sign-in, no internet needed after this.")
                 .font(.system(size: 11))
@@ -33,6 +37,65 @@ struct ModelStepView: View {
                 .frame(maxWidth: 420)
         }
         .frame(maxWidth: 480)
+        // ONB-04a: the same alerts Settings › Models presents (SYS-DISK, offline, download failed) —
+        // duplicated here rather than extracted into a shared modifier since `ModelsSettingsView.swift`
+        // is outside this task's touched files; the mapping (title/message/buttons) matches it exactly.
+        .alert(alertTitle, isPresented: alertIsPresented, presenting: viewModel.models.alert) { alert in
+            alertButtons(alert)
+        } message: { alert in
+            Text(alertMessage(alert))
+        }
+    }
+
+    // MARK: Alerts (ONB-04a) — mirrors ModelsSettingsView's alert mapping
+
+    private var alertIsPresented: Binding<Bool> {
+        Binding(get: { viewModel.models.alert != nil }, set: { isPresented in if !isPresented { viewModel.models.dismissAlert() } })
+    }
+
+    private var alertTitle: String {
+        switch viewModel.models.alert {
+        case .insufficientSpace: ModelsViewModel.insufficientSpaceTitle
+        case .removeModel(let m, _): ModelsViewModel.removeTitle(m)
+        case .cannotRemoveOnlyModel: ModelsViewModel.cannotRemoveOnlyModelTitle
+        case .downloadFailed(let m, _): m.displayName
+        case .offline: ModelsViewModel.offlineTitle
+        case nil: ""
+        }
+    }
+
+    private func alertMessage(_ alert: ModelsViewModel.Alert) -> String {
+        switch alert {
+        case .insufficientSpace(let m, _, let available): ModelsViewModel.insufficientSpaceMessage(m, available: available)
+        case .removeModel(let m, let keeps): ModelsViewModel.removeMessage(m, keeps: keeps)
+        case .cannotRemoveOnlyModel: ModelsViewModel.cannotRemoveOnlyModelMessage
+        case .downloadFailed(_, let reason): reason
+        case .offline(_, let written, let total, let dictationKeepsWorking):
+            ModelsViewModel.offlineMessage(bytesWritten: written, total: total, dictationKeepsWorking: dictationKeepsWorking)
+        }
+    }
+
+    @ViewBuilder
+    private func alertButtons(_ alert: ModelsViewModel.Alert) -> some View {
+        switch alert {
+        case .insufficientSpace(let failed, _, _):
+            if let smaller = viewModel.models.smallerSpeechModel(than: failed) {
+                Button("Use the \(ModelsViewModel.gigabytes(smaller.sizeInBytes)) model") { Task { await viewModel.useSmallerModelInsufficientSpace() } }
+            }
+            Button("Free up space…") { viewModel.models.openStorageSettings() }
+            Button("Cancel", role: .cancel) { viewModel.models.dismissAlert() }
+        case .removeModel:
+            Button("Remove", role: .destructive) { Task { await viewModel.models.confirmRemove() } }
+            Button("Cancel", role: .cancel) { viewModel.models.dismissAlert() }
+        case .cannotRemoveOnlyModel:
+            Button("OK", role: .cancel) { viewModel.models.dismissAlert() }
+        case .downloadFailed(let failed, _):
+            Button("Retry download") { Task { await viewModel.models.download(failed) } }
+            Button("Cancel", role: .cancel) { viewModel.models.dismissAlert() }
+        case .offline(let paused, _, _, _):
+            Button("OK", role: .cancel) { viewModel.models.dismissAlert() }
+            Button("Cancel download") { Task { await viewModel.models.discardDownload(paused) } }
+        }
     }
 
     private func modelCard(_ row: ModelsViewModel.Row) -> some View {

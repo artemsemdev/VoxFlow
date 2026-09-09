@@ -10,32 +10,38 @@ import VoxFlowTestSupport
 @testable import VoxFlow
 
 /// Design-fidelity renders (Task 2 Step 4) — gated behind `VOXFLOW_RENDER` so normal test runs never
-/// touch disk. Run with `VOXFLOW_RENDER=1 xcodebuild … -only-testing:VoxFlowTests/OnboardingRenderTests`,
-/// then compare the PNGs in `.superpowers/design/renders/` against `canvas.pdf` pages 10–12.
+/// touch disk. Run with `TEST_RUNNER_VOXFLOW_RENDER=1 xcodebuild … -only-testing:VoxFlowTests/OnboardingRenderTests`
+/// (xcodebuild does not forward a plain `VOXFLOW_RENDER=1` prefix into the xctest host process — see
+/// the task report), then compare the PNGs in `.superpowers/design/renders/` against `canvas.pdf`
+/// pages 10–12.
 @Suite(.enabled(if: ProcessInfo.processInfo.environment["VOXFLOW_RENDER"] != nil))
 @MainActor
 struct OnboardingRenderTests {
     static func payload(_ seed: UInt8, count: Int) -> Data { Data((0..<count).map { UInt8(($0 &+ Int(seed)) % 256) }) }
-    static let bigPayload = payload(1, count: 1_624_555_275 / 3_000)   // scaled down; only the byte count matters here
-    static func descriptor(id: String, displayName: String, payload: Data, isDefault: Bool) -> ModelDescriptor {
-        ModelDescriptor(id: id, displayName: displayName, role: .speech,
+    /// A small dummy payload for the checksum — never actually served/downloaded in any render case,
+    /// so its byte *content* doesn't need to match `sizeInBytes` (which is a separate, explicit field
+    /// below). M-7: this used to derive `sizeInBytes` from the payload itself, scaled down to ~0.5 MB
+    /// for `big` while `small` stayed at its real 487 MB — inverting the two and silently hiding the
+    /// "Have an 8 GB Mac?" hint from every render.
+    static func descriptor(id: String, displayName: String, sizeInBytes: Int64, isDefault: Bool) -> ModelDescriptor {
+        let dummy = payload(1, count: 4_096)
+        return ModelDescriptor(id: id, displayName: displayName, role: .speech,
                         downloadURL: URL(string: "https://example.com/\(id).bin")!,
-                        sizeInBytes: Int64(payload.count),
-                        sha256: SHA256.hash(data: payload).map { String(format: "%02x", $0) }.joined(),
+                        sizeInBytes: sizeInBytes,
+                        sha256: SHA256.hash(data: dummy).map { String(format: "%02x", $0) }.joined(),
                         languagesSummary: "99 languages · best accuracy on M-series", isDefault: isDefault)
     }
-    static let big = descriptor(id: "whisper-large-v3-turbo", displayName: "Whisper large-v3-turbo", payload: bigPayload, isDefault: true)
-    static let small = ModelDescriptor(id: "whisper-small", displayName: "Whisper small", role: .speech,
-                                       downloadURL: URL(string: "https://example.com/small.bin")!,
-                                       sizeInBytes: 487_601_967, sha256: "", languagesSummary: "99 languages · for 8 GB Macs", isDefault: false)
+    static let big = descriptor(id: "whisper-large-v3-turbo", displayName: "Whisper large-v3-turbo",
+                                sizeInBytes: 1_624_555_275, isDefault: true)
+    static let small = descriptor(id: "whisper-small", displayName: "Whisper small",
+                                  sizeInBytes: 487_601_967, isDefault: false)
     static let catalog = [big, small]
 
     /// Everything one render case might need to drive: the view model plus its collaborators that
-    /// aren't otherwise reachable through it (the downloader, to park a mid-download state; the
-    /// dictation coordinator and clock, to drive a Try It capture through to `.inserted`).
+    /// aren't otherwise reachable through it (the dictation coordinator and clock, to drive a Try It
+    /// capture through to `.inserted`).
     private struct Bundle {
         let vm: OnboardingViewModel
-        let downloader: FakeModelDownloader
         let dictation: DictationCoordinator
         let clock: FakeClock
     }
@@ -69,7 +75,7 @@ struct OnboardingRenderTests {
         state.step = step
         let vm = OnboardingViewModel(state: state, permissions: permissions, settings: dictationSettings, models: models,
                                      dictation: dictation, historyWriter: historyWriter, navigation: navigation, clock: clock)
-        return Bundle(vm: vm, downloader: downloader, dictation: dictation, clock: clock)
+        return Bundle(vm: vm, dictation: dictation, clock: clock)
     }
 
     private struct RenderCase {
@@ -79,18 +85,44 @@ struct OnboardingRenderTests {
         let configure: @MainActor (Bundle) async -> Void
     }
 
+    private static func isArmed(_ state: FlowBarState) -> Bool { if case .armed = state { true } else { false } }
+    private static func isListening(_ state: FlowBarState) -> Bool { if case .listening = state { true } else { false } }
+
     private static let cases: [RenderCase] = [
         RenderCase(name: "1-welcome", step: .welcome) { _ in },
         RenderCase(name: "2-permissions", step: .permissions) { bundle in await bundle.vm.requestMicrophone() },
         RenderCase(name: "2a-accessibility-denied", step: .permissions, accessibility: false) { bundle in
             await bundle.vm.requestMicrophone()
             bundle.vm.openAccessibilitySettings()
+            // M-4: the denied variant only appears after a poll comes back still untrusted, not on
+            // the click itself — advance one poll interval so the render shows ONB-02a, not ONB-02.
+            await bundle.clock.advance(by: 1)
         },
         RenderCase(name: "3-hotkey", step: .hotkey) { _ in },
         RenderCase(name: "4-model", step: .model) { bundle in
             for _ in 0..<200 where bundle.vm.modelRow == nil { await Task.yield() }
         },
-        RenderCase(name: "5-tryit", step: .tryIt) { _ in },
+        RenderCase(name: "5-tryit", step: .tryIt) { bundle in
+            // `ImageRenderer` doesn't reliably run SwiftUI's `.onAppear`, so the view's own
+            // `beginTryIt()` call (`TryItStepView.onAppear`) can't be relied on here — call it
+            // directly, the same action the view would trigger.
+            bundle.vm.beginTryIt()
+        },
+        RenderCase(name: "5b-tryit-inserted", step: .tryIt) { bundle in
+            // M-7: exercises the result chip — the most distinctive element on ONB-05 — which no
+            // render case previously drove to `.inserted`.
+            bundle.vm.beginTryIt()
+            bundle.dictation.fn(.down)
+            for _ in 0..<1_000 where !isArmed(bundle.dictation.state) { await Task.yield() }
+            if !isArmed(bundle.dictation.state) { Issue.record("5b-tryit-inserted: never reached .armed (state: \(bundle.dictation.state))") }
+            await bundle.clock.waitForSleepers(1)
+            await bundle.clock.advance(by: 0.3)   // past the 0.25 s hold threshold: armed → listening
+            for _ in 0..<1_000 where !isListening(bundle.dictation.state) { await Task.yield() }
+            if !isListening(bundle.dictation.state) { Issue.record("5b-tryit-inserted: never reached .listening (state: \(bundle.dictation.state))") }
+            bundle.dictation.fn(.up)
+            for _ in 0..<2_000 where bundle.vm.tryItResult == nil { await Task.yield() }
+            if bundle.vm.tryItResult == nil { Issue.record("5b-tryit-inserted: tryItResult never set (state: \(bundle.dictation.state))") }
+        },
     ]
 
     @Test("renders every onboarding step for design-fidelity comparison")
@@ -101,8 +133,11 @@ struct OnboardingRenderTests {
         for testCase in Self.cases {
             let bundle = makeBundle(step: testCase.step, accessibility: testCase.accessibility)
             await testCase.configure(bundle)
-            let vm = bundle.vm
-            let renderer = ImageRenderer(content: OnboardingContentView(viewModel: vm).frame(width: 700, height: 520))
+            // D-1: the shipped window relies on the real titlebar's traffic lights
+            // (`.windowStyle(.hiddenTitleBar)`), which an `ImageRenderer` snapshot of bare content
+            // never shows — draw a stand-in set here only, so the PNG still has something to compare
+            // against the mock's top-left corner.
+            let renderer = ImageRenderer(content: RenderChrome(content: OnboardingContentView(viewModel: bundle.vm)))
             renderer.scale = 2
             guard let image = renderer.nsImage else {
                 Issue.record("Failed to render \(testCase.name)")
@@ -127,5 +162,25 @@ struct OnboardingRenderTests {
             return
         }
         try png.write(to: url)
+    }
+}
+
+/// Render-only stand-in for the real window's `.hiddenTitleBar` traffic lights (D-1) — the shipped
+/// `OnboardingContentView` no longer draws these itself.
+private struct RenderChrome: View {
+    let content: OnboardingContentView
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            content
+            HStack(spacing: 8) {
+                Circle().fill(Color(red: 1, green: 0.37, blue: 0.34)).frame(width: 12, height: 12)
+                Circle().fill(Color.black.opacity(0.12)).frame(width: 12, height: 12)
+                Circle().fill(Color.black.opacity(0.12)).frame(width: 12, height: 12)
+            }
+            .padding(.leading, 20)
+            .padding(.top, 20)
+        }
+        .frame(width: 700, height: 520)
     }
 }

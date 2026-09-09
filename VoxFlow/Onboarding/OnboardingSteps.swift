@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import VoxFlowDictation
 
@@ -112,9 +113,14 @@ struct PermissionsStepView: View {
                     Text("To type into whichever app you're using.")
                         .font(.system(size: 12)).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
-                    Text("System Settings → Privacy & Security → Accessibility → enable VoxFlow.")
-                        .font(.system(size: 11)).foregroundStyle(.secondary.opacity(0.85))
-                        .fixedSize(horizontal: false, vertical: true)
+                    // Only while still asking — once granted this is a how-to-grant instruction with
+                    // nothing left to instruct, so it drops out alongside the "Open System Settings…"
+                    // button (both replaced by the green "Granted" label).
+                    if !viewModel.accessibilityGranted {
+                        Text("System Settings → Privacy & Security → Accessibility → enable VoxFlow.")
+                            .font(.system(size: 11)).foregroundStyle(.secondary.opacity(0.85))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             }
             Spacer()
@@ -215,6 +221,10 @@ struct HotkeyStepView: View {
 struct TryItStepView: View {
     let viewModel: OnboardingViewModel
     @State private var scratchpad = ""
+    /// Accessibility insertion types into whatever's focused in the frontmost app — without this the
+    /// scratchpad is never first responder just by appearing, and the dictated text has nowhere to
+    /// land (B-3).
+    @FocusState private var scratchpadFocused: Bool
 
     var body: some View {
         VStack(spacing: 16) {
@@ -232,11 +242,12 @@ struct TryItStepView: View {
             TextEditor(text: $scratchpad)
                 .font(.system(size: 13))
                 .scrollContentBackground(.hidden)
+                .focused($scratchpadFocused)
                 .padding(10)
-                .frame(height: 64)
+                .frame(height: 96)
                 .background(Color.white, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Color.accentColor.opacity(0.55), lineWidth: 1.5))
-                .frame(maxWidth: 420)
+                .frame(maxWidth: 500)
 
             if let result = viewModel.tryItResult {
                 Text(result)
@@ -250,5 +261,15 @@ struct TryItStepView: View {
             Text("That never left this Mac. Neither will anything else.")
                 .font(.system(size: 11)).foregroundStyle(.secondary)
         }
+        .onAppear {
+            viewModel.beginTryIt()
+            // The AX insertion types into the frontmost app's focused element — re-assert both that
+            // this window is key/front *and* that the scratchpad holds first responder, since a prior
+            // step (System Settings, granting a permission) may have stolen focus (B-3).
+            NSApp.windows.first { $0.identifier?.rawValue == OnboardingWindowID.onboarding }?.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            scratchpadFocused = true
+        }
+        .onDisappear { viewModel.endTryIt() }
     }
 }

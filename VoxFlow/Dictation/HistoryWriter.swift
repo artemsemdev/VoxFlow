@@ -12,6 +12,10 @@ final class HistorySuppressBox: Sendable {
     func set() { flag.withLock { $0 = true } }
     /// Reads and clears in one step so exactly one `save` is skipped per `set()`.
     func consume() -> Bool { flag.withLock { let was = $0; $0 = false; return was } }
+    /// Clears an armed-but-never-consumed flag (e.g. a try-it capture that's discarded or the user
+    /// leaves ONB-05 before reaching `.inserted`) so it doesn't leak into the *next* real dictation's
+    /// save — see `HistoryWriter.clearSuppression()`.
+    func clear() { flag.withLock { $0 = false } }
 }
 
 /// Persists a finished dictation to history, respecting the "Keep history" toggle (design ST-05).
@@ -41,6 +45,11 @@ struct HistoryWriter: Sendable {
     /// Skips exactly the next `save` call (e.g. onboarding's Try It dictation, which shouldn't leave
     /// a real history entry) without disabling history for any dictation after that one.
     func suppressNext() { suppress.set() }
+
+    /// Clears a pending `suppressNext()` that was never consumed by a `save` (e.g. onboarding's
+    /// Try It armed a capture the user then discarded, or left the step before it finished) — without
+    /// this, that armed-but-unconsumed flag would silently skip the *next real* dictation's save.
+    func clearSuppression() { suppress.clear() }
 
     /// No-op when history is off, there's no store (Privacy toggle / storage unavailable), or this
     /// save was just suppressed via `suppressNext()`. The insert itself is blocking SQLite I/O, so it

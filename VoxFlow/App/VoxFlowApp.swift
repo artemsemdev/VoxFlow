@@ -54,5 +54,9 @@ struct VoxFlowApp: App {
                 .environment(AppServices.shared)
         }
         .windowResizability(.contentSize)
+        // D-1: one set of chrome — real traffic lights, no titlebar strip/title text above the
+        // content, matching the mock (`OnboardingContentView` reserves clearance for them but no
+        // longer hand-draws its own).
+        .windowStyle(.hiddenTitleBar)
     }
 }

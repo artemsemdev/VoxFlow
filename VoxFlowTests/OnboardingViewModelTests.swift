@@ -26,6 +26,9 @@ struct OnboardingViewModelTests {
     static let small = descriptor(id: "small", payload: smallPayload, isDefault: false)
     static let catalog = [big, small]
 
+    static let sampleResult = DictationResult(text: "hello there", rawText: "hello there", segments: [],
+                                              language: nil, duration: 0.5, lowConfidence: false)
+
     /// One store backs everything (onboarding step/completed, dictation settings, model store
     /// bookkeeping) — the same shape `AppServices.live()` uses in production.
     @MainActor
@@ -33,7 +36,7 @@ struct OnboardingViewModelTests {
         let store = InMemoryKeyValueStore()
         let dir = TemporaryDirectory()
         let downloader = FakeModelDownloader()
-        let freeSpace = FakeFreeSpace(available: 10_000_000_000)
+        var freeSpace = FakeFreeSpace(available: 10_000_000_000)
         let clock = FakeClock()
         let permissions: FakePermissions
         let historyStore: DictationStore
@@ -82,17 +85,19 @@ struct OnboardingViewModelTests {
 
         /// Builds a fresh `OnboardingViewModel` resuming at `step` (persisted into `store` first, the
         /// same way a relaunch would resume it) plus every collaborator it was built from.
-        func viewModel(step: OnboardingStep = .welcome) -> (vm: OnboardingViewModel, state: OnboardingState,
-                                                             models: ModelsViewModel, dictation: DictationCoordinator) {
+        func viewModel(step: OnboardingStep = .welcome, completed: Bool = false)
+            -> (vm: OnboardingViewModel, state: OnboardingState, models: ModelsViewModel,
+                dictation: DictationCoordinator, historyWriter: HistoryWriter) {
             let bootstrap = OnboardingState(store: store)
             bootstrap.step = step
+            bootstrap.completed = completed
             let state = OnboardingState(store: store)
             let models = modelsViewModel()
             let historyWriter = HistoryWriter(storeBox: historyStoreBox, settings: dictationSettings.box, now: { Date() })
             let dc = dictation(historyWriter: historyWriter)
             let vm = OnboardingViewModel(state: state, permissions: permissions, settings: dictationSettings, models: models,
                                          dictation: dc, historyWriter: historyWriter, navigation: navigation, clock: clock)
-            return (vm, state, models, dc)
+            return (vm, state, models, dc, historyWriter)
         }
     }
 
@@ -117,7 +122,7 @@ struct OnboardingViewModelTests {
     @Test("permissions: canContinue requires mic granted and (accessibility granted or skipped)")
     func permissionsCanContinue() async throws {
         let h = try Harness(microphone: .denied, accessibility: false)
-        let (vm, state, _, _) = h.viewModel(step: .permissions)
+        let (vm, state, _, _, _) = h.viewModel(step: .permissions)
         #expect(!vm.canContinue)
 
         await vm.requestMicrophone()
@@ -136,17 +141,24 @@ struct OnboardingViewModelTests {
         #expect(vm.canContinue)
     }
 
-    @Test("openAccessibilitySettings polls the clock until Accessibility is trusted")
+    @Test("openAccessibilitySettings polls the clock; the denied variant appears only after a failed poll, not immediately (M-4)")
     func accessibilityPolling() async throws {
         let h = try Harness(microphone: .granted, accessibility: false)
         let vm = h.viewModel(step: .permissions).vm
 
         vm.openAccessibilitySettings()
-        #expect(vm.showsAccessibilityDenied)
-        #expect(!vm.accessibilityGranted)
+        #expect(!vm.showsAccessibilityDenied)   // neutral row while the first poll is still in flight
         #expect(h.permissions.openedAccessibilitySettings == 1)
 
+        // `waitForSleepers` (not a fixed yield count) makes this deterministic: the poll task must
+        // actually have registered its `clock.sleep(for: 1)` before `advance` fires it.
+        await h.clock.waitForSleepers(1)
+        await h.clock.advance(by: 1)
+        #expect(vm.showsAccessibilityDenied)    // still not trusted after the first poll
+        #expect(!vm.accessibilityGranted)
+
         h.permissions.accessibility = true
+        await h.clock.waitForSleepers(1)
         await h.clock.advance(by: 1)
         #expect(vm.accessibilityGranted)
         #expect(!vm.showsAccessibilityDenied)
@@ -166,7 +178,7 @@ struct OnboardingViewModelTests {
     @Test("continueWithClipboard advances to .hotkey and persists accessibilitySkipped")
     func continueWithClipboardAdvances() throws {
         let h = try Harness(microphone: .granted, accessibility: false)
-        let (vm, state, _, _) = h.viewModel(step: .permissions)
+        let (vm, state, _, _, _) = h.viewModel(step: .permissions)
 
         vm.continueWithClipboard()
 
@@ -189,7 +201,7 @@ struct OnboardingViewModelTests {
     func modelDownloadAdvances() async throws {
         let h = try Harness()
         await h.serveAll()
-        let (vm, _, models, _) = h.viewModel(step: .model)
+        let (vm, _, models, _, _) = h.viewModel(step: .model)
         await models.refresh()
         await waitFor { vm.modelRow != nil }
 
@@ -207,13 +219,38 @@ struct OnboardingViewModelTests {
     func useSmallerModel() async throws {
         let h = try Harness()
         await h.serveAll()
-        let (vm, _, models, _) = h.viewModel(step: .model)
+        let (vm, _, models, _, _) = h.viewModel(step: .model)
         await models.refresh()
         await waitFor { vm.modelRow != nil }
 
         vm.useSmallerModel()
 
         #expect(vm.modelRow?.model.id == "small")
+    }
+
+    @Test("model step (B-2): insufficient space surfaces the alert and stays on .model; useSmallerModelInsufficientSpace switches the row to the installed smaller model")
+    func modelInsufficientSpaceAlert() async throws {
+        var h = try Harness()
+        await h.serveAll()
+        h.freeSpace = FakeFreeSpace(available: 300_000 + ModelStore.reserveBytes - 1)   // not enough for "big"
+        let (vm, _, models, _, _) = h.viewModel(step: .model)
+        await models.refresh()
+        await waitFor { vm.modelRow != nil }
+
+        await vm.download()
+
+        #expect(models.alert == .insufficientSpace(OnboardingViewModelTests.big,
+                                                    required: 300_000 + ModelStore.reserveBytes,
+                                                    available: 300_000 + ModelStore.reserveBytes - 1))
+        #expect(vm.step == .model)   // never auto-advanced — the row never reached .installed
+        #expect(!vm.canContinue)
+
+        await vm.useSmallerModelInsufficientSpace()
+
+        #expect(models.alert == nil)
+        #expect(vm.modelRow?.model.id == "small")
+        #expect(vm.modelRow?.state == .installed)
+        #expect(vm.canContinue)
     }
 
     @Test("resume at persisted step on init")
@@ -229,24 +266,26 @@ struct OnboardingViewModelTests {
         #expect(vm.step == .hotkey)
     }
 
-    @Test("finish() marks completed, requests the main window, and dismisses the onboarding window")
+    @Test("finish() marks completed, resets step, requests the main window, and dismisses the onboarding window")
     func finishCompletes() throws {
         let h = try Harness()
-        let (vm, state, _, _) = h.viewModel(step: .tryIt)
+        let (vm, state, _, _, _) = h.viewModel(step: .tryIt)
         var dismissed = false
         vm.dismiss = { dismissed = true }
 
         vm.finish()
 
         #expect(state.completed)
+        #expect(state.step == .welcome)
         #expect(h.navigation.requestMainWindow)
         #expect(dismissed)
     }
 
-    @Test("tryIt: .armed suppresses the next history save; .inserted sets tryItResult without saving")
+    @Test("tryIt: beginTryIt() arms the observation — .armed suppresses the next save; .inserted sets tryItResult without saving")
     func tryItSuppressesHistory() async throws {
         let h = try Harness()
-        let (vm, _, _, dc) = h.viewModel(step: .tryIt)
+        let (vm, _, _, dc, _) = h.viewModel(step: .tryIt)
+        vm.beginTryIt()
 
         dc.fn(.down)
         // `.armed(_)`/`.listening(_)` (explicit wildcard payload), not `if case .armed = $0` — same
@@ -259,6 +298,59 @@ struct OnboardingViewModelTests {
 
         #expect(vm.tryItResult?.hasPrefix("✓ Inserted · 11 words") == true)
         #expect(try h.historyStore.count() == 0)
+    }
+
+    // MARK: B-1 — the try-it observation lifecycle must not leak past onboarding
+
+    @Test("B-1: a fresh view model resuming with completed == true never arms try-it suppression, even on .tryIt")
+    func completedNeverSuppresses() async throws {
+        let h = try Harness()
+        let (vm, _, _, dc, _) = h.viewModel(step: .tryIt, completed: true)
+
+        vm.beginTryIt()   // must no-op: onboarding is already completed
+
+        dc.fn(.down)
+        await waitFor { if case .armed(_) = dc.state { true } else { false } }
+        await h.clock.advance(by: 0.3)
+        await waitFor { if case .listening(_) = dc.state { true } else { false } }
+        dc.fn(.up)
+        await waitFor { if case .inserted = dc.state { true } else { false } }
+        await waitFor { (try? h.historyStore.count()) == 1 }
+
+        #expect(try h.historyStore.count() == 1)   // never suppressed
+    }
+
+    @Test("B-1: finish() stops the observation — a dictation started after finish() is saved normally")
+    func finishStopsObservation() async throws {
+        let h = try Harness()
+        let (vm, state, _, dc, _) = h.viewModel(step: .tryIt)
+        vm.beginTryIt()
+
+        vm.finish()
+        #expect(state.completed)
+
+        dc.fn(.down)
+        await waitFor { if case .armed(_) = dc.state { true } else { false } }
+        await h.clock.advance(by: 0.3)
+        await waitFor { if case .listening(_) = dc.state { true } else { false } }
+        dc.fn(.up)
+        await waitFor { if case .inserted = dc.state { true } else { false } }
+        await waitFor { (try? h.historyStore.count()) == 1 }
+
+        #expect(try h.historyStore.count() == 1)
+    }
+
+    @Test("B-1/M-2: leaving .tryIt (e.g. Back) after only arming clears a pending suppression instead of leaking into the next save")
+    func leavingTryItClearsSuppression() async throws {
+        let h = try Harness()
+        let (vm, _, _, _, historyWriter) = h.viewModel(step: .tryIt)
+        vm.beginTryIt()
+        historyWriter.suppressNext()   // simulates the .armed transition having suppressed the capture
+
+        vm.back()   // leaves .tryIt without ever reaching .inserted
+
+        await historyWriter.save(OnboardingViewModelTests.sampleResult, appName: "Test")
+        #expect(try h.historyStore.count() == 1)   // the stale suppression didn't eat this save
     }
 
     /// No-sleep poll, same technique as `ModelsViewModelTests`/`DictationCoordinatorTests`.

@@ -18,15 +18,17 @@ struct OnboardingWindow: View {
     }
 }
 
-/// The window chrome shared by every step (design ONB-01…05, 2g): traffic lights top-left, step
-/// content centred, page dots bottom-centre (4 dots — `.model` and `.tryIt` share the 4th), "Back"
-/// bottom-left from the permissions step on, and the primary action bottom-right.
+/// The window chrome shared by every step (design ONB-01…05, 2g): step content centred, page dots
+/// bottom-centre (4 dots — `.model` and `.tryIt` share the 4th), "Back" bottom-left from the
+/// permissions step on, and the primary action bottom-right. The real traffic lights come from the
+/// scene's own `.windowStyle(.hiddenTitleBar)` (`VoxFlowApp.swift`) — this view only reserves the
+/// clearance for them (D-1: one set of chrome, not a hand-drawn pair layered under the real ones).
 struct OnboardingContentView: View {
     let viewModel: OnboardingViewModel
 
     var body: some View {
         VStack(spacing: 0) {
-            trafficLights
+            Spacer().frame(height: 28)
             Spacer(minLength: 0)
             stepContent
                 .padding(.horizontal, 40)
@@ -35,17 +37,6 @@ struct OnboardingContentView: View {
         }
         .frame(width: 700, height: 520)
         .background(Color(red: 0.965, green: 0.965, blue: 0.972))
-    }
-
-    private var trafficLights: some View {
-        HStack(spacing: 8) {
-            Circle().fill(Color(red: 1, green: 0.37, blue: 0.34)).frame(width: 12, height: 12)
-            Circle().fill(Color.black.opacity(0.12)).frame(width: 12, height: 12)
-            Circle().fill(Color.black.opacity(0.12)).frame(width: 12, height: 12)
-            Spacer()
-        }
-        .padding(.leading, 20)
-        .padding(.top, 20)
     }
 
     @ViewBuilder
@@ -94,8 +85,10 @@ struct OnboardingContentView: View {
                 .buttonStyle(.borderedProminent)
         case .permissions:
             if viewModel.showsAccessibilityDenied {
+                // D-2: "Try again" (in the card above) stays the only blue control on ONB-02a — the
+                // clipboard fallback is a secondary, not the loud action.
                 Button("Continue with clipboard") { viewModel.continueWithClipboard() }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.bordered)
             } else {
                 Button("Continue") { viewModel.next() }
                     .buttonStyle(.borderedProminent)
