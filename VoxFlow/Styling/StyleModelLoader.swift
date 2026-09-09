@@ -68,7 +68,7 @@ actor StyleModelLoader: LLMBackend {
         await loadTask?.value
         loadTask = nil
         guard loadedModelID != nil else { return }
+        loadedModelID = nil   // clear *before* the suspension: a second caller resuming here sees nothing left to unload
         await engine.unload()
-        loadedModelID = nil
     }
 }
