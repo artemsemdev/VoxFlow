@@ -73,3 +73,6 @@ artifacts/
 *.swo
 *~
 .swiftlint-cache/
+
+# Per-developer code-signing override (see SETUP.md, #143)
+Local.xcconfig

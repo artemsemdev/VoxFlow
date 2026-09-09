@@ -10,12 +10,8 @@ settings:
     SWIFT_VERSION: "6.0"
     SWIFT_STRICT_CONCURRENCY: complete
     MACOSX_DEPLOYMENT_TARGET: "15.0"
-    # Ad-hoc signing so local builds and CI need no team or certificate.
-    # Developer ID signing is configured in phase 7 (release pipeline).
-    CODE_SIGN_IDENTITY: "-"
-    CODE_SIGN_STYLE: Manual
-    DEVELOPMENT_TEAM: ""
-    ENABLE_HARDENED_RUNTIME: NO
+    # Signing lives in Signing.xcconfig (ad-hoc by default; Local.xcconfig overrides it on a
+    # developer's Mac — see SETUP.md). Developer ID signing is configured in phase 7.
     SWIFT_TREAT_WARNINGS_AS_ERRORS: YES
     MARKETING_VERSION: "2.0.0"
     CURRENT_PROJECT_VERSION: "1"
@@ -26,6 +22,9 @@ targets:
   VoxFlow:
     type: application
     platform: macOS
+    configFiles:
+      Debug: Signing.xcconfig
+      Release: Signing.xcconfig
     sources:
       - path: VoxFlow
     dependencies:
@@ -66,6 +65,9 @@ targets:
   VoxFlowTests:
     type: bundle.unit-test
     platform: macOS
+    configFiles:
+      Debug: Signing.xcconfig
+      Release: Signing.xcconfig
     sources:
       - path: VoxFlowTests
     dependencies:

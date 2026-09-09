@@ -67,6 +67,31 @@ Settings → Privacy) independently of onboarding. `HistoryService` also
 opens the store lazily, on first use rather than at construction, specifically so that launching
 the app as the XCTest host never prompts for Keychain access — see #143.
 
+## Local code signing (once per Mac)
+
+macOS ties Microphone/Accessibility grants and Keychain access to the app's code signature. An
+ad-hoc signature changes on every build, so every rebuild would ask again. Use a self-signed
+certificate instead (#143):
+
+1. Keychain Access › menu Keychain Access › Certificate Assistant › Create a Certificate… —
+   Name `VoxFlow Dev`, Identity Type *Self Signed Root*, Certificate Type *Code Signing*.
+2. Trust it for code signing (no admin password needed for the login keychain):
+
+   ```sh
+   security find-certificate -c "VoxFlow Dev" -p > /tmp/voxflow-dev.pem
+   security add-trusted-cert -r trustRoot -p codeSign -k ~/Library/Keychains/login.keychain-db /tmp/voxflow-dev.pem
+   security find-identity -v -p codesigning   # must list "VoxFlow Dev"
+   ```
+3. Create the git-ignored override next to `project.yml`:
+
+   ```sh
+   echo 'CODE_SIGN_IDENTITY = VoxFlow Dev' > Local.xcconfig
+   xcodegen generate
+   ```
+4. Build once; macOS may ask to let `codesign` use the key — choose *Always Allow*. Then grant
+   Microphone and Accessibility to `VoxFlow.app` one more time; from now on they survive rebuilds.
+   `codesign -dvv <path to VoxFlow.app>` should print `Authority=VoxFlow Dev`.
+
 ## Tests
 
 - Package logic, fast: `cd VoxFlowKit && swift test`
@@ -77,5 +102,4 @@ the app as the XCTest host never prompts for Keychain access — see #143.
 
 - `VoxFlow.xcodeproj` and `VoxFlow/Info.plist` are generated; edit `project.yml` instead.
 - Warnings are errors (`SWIFT_TREAT_WARNINGS_AS_ERRORS`), strict concurrency is complete.
-- Local builds are ad-hoc signed. macOS ties Accessibility and Microphone permissions to the signing
-  identity, so dictation development (2.1) will need a stable local certificate; see ADR-001.
+- Signing lives in `Signing.xcconfig` (ad-hoc by default, used by CI). See "Local code signing".
