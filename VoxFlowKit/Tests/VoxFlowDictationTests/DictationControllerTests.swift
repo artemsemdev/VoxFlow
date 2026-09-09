@@ -202,6 +202,29 @@ struct DictationControllerTests {
         #expect(await h.controller.elapsed == 0)
     }
 
+    @Test("updateConfig applies once idle: listening keeps the old silenceStop, the next run uses the new one")
+    func updateConfigAppliesWhenIdle() async throws {
+        let h = await Harness()
+        #expect(await h.controller.config.silenceStop == 3)
+        await h.controller.fnDown(); _ = await h.next()
+        await h.controller.fnUp(); _ = await h.next()
+        await h.controller.fnDown()
+        #expect(await h.next() == .listening(Listening(mode: .handsFree, startedAt: 0, language: nil)))
+
+        await h.controller.updateConfig(FlowBarConfig(silenceStop: 5))
+        #expect(await h.controller.config.silenceStop == 3)      // still listening: the running timer keeps the old value
+
+        await h.controller.fnDown()                              // second fn-down in hands-free stops the dictation
+        guard case .processing = await h.next() else { Issue.record("expected processing"); return }
+        await h.mic.waitUntilStopped()
+        #expect(await h.next() == .inserted(appName: "Mail", words: 3, limitReached: false))
+        await h.saved.waitUntilCount(1)
+        await h.clock.waitForSleepers(1)                         // dismiss
+        await h.clock.advance(by: 1.5)
+        #expect(await h.next() == .idle)
+        #expect(await h.controller.config.silenceStop == 5)
+    }
+
     @Test("currentAndChanges yields the current state before any subsequent change (M3)")
     func currentAndChangesYieldsCurrentFirst() async throws {
         let h = await Harness()

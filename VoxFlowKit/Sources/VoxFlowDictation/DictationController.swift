@@ -31,6 +31,11 @@ public actor DictationController {
     private var subscribers: [UUID: AsyncStream<FlowBarState>.Continuation] = [:]
     public private(set) var lastResult: DictationResult?
     private var lastAppName: String?
+    /// A config set mid-dictation (`updateConfig` while not `.idle`) waits here rather than
+    /// mutating the running machine's timers out from under it — applied the moment the machine
+    /// next transitions to `.idle`, so a change to e.g. `silenceStop` never affects the timer
+    /// already ticking for the dictation in progress.
+    private var pendingConfig: FlowBarConfig?
 
     public init(config: FlowBarConfig, microphone: any MicrophoneCapturing, transcriber: any DictationTranscribing,
                 inserter: any TextInserting, clock: any MonotonicClock,
@@ -52,6 +57,19 @@ public actor DictationController {
     }
 
     public var state: FlowBarState { machine.state }
+    /// Exposed for tests and live-settings callers (`updateConfig` below is the only writer).
+    public var config: FlowBarConfig { machine.config }
+
+    /// Live-applies a settings change (e.g. silence-stop). Applied immediately when idle; while a
+    /// dictation is in progress it's held and applied the moment the machine returns to `.idle`, so
+    /// the change never perturbs a timer already running for that dictation.
+    public func updateConfig(_ config: FlowBarConfig) {
+        if machine.state == .idle {
+            machine.config = config
+        } else {
+            pendingConfig = config
+        }
+    }
 
     /// Seconds since the current dictation started, from this controller's (monotonic) clock — nil
     /// outside `.listening`/`.processing`. History timestamps use `Date`; this is the HUD's own
@@ -94,7 +112,13 @@ public actor DictationController {
     private func handle(_ event: FlowBarEvent) {
         let before = machine.state
         let effects = machine.handle(event, now: clock.now())
-        if machine.state != before { for c in subscribers.values { c.yield(machine.state) } }
+        if machine.state != before {
+            if machine.state == .idle, let pendingConfig {
+                machine.config = pendingConfig
+                self.pendingConfig = nil
+            }
+            for c in subscribers.values { c.yield(machine.state) }
+        }
         for effect in effects { run(effect) }
     }
 

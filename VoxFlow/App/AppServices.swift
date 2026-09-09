@@ -1,5 +1,4 @@
 import Foundation
-import os
 import Synchronization
 import VoxFlowAudio
 import VoxFlowCore
@@ -53,21 +52,19 @@ final class AppServices {
     let dictationSettings: DictationSettings
     /// Shared with the Files `LazyModelFileTranscriber` (ruling 9: one place knows which model is loaded).
     let modelLoader: ModelLoader
-    /// `nil` when history storage is unavailable this launch (see `StorageError.keyLost` in `live()`).
-    let dictationStore: DictationStore?
-    let retention: RetentionRunner?
+    /// Owns the `DictationStore`/`RetentionRunner`; `historyService.status` is `.disabled(reason:)`
+    /// when history storage is unavailable this launch (see `StorageError.keyLost`) or reopening failed.
+    let historyService: HistoryService
     let inserter: AccessibilityTextInserter
     let dictationController: DictationController
     let dictation: DictationCoordinator
     let flowBar: FlowBarPresenter
     let fnMonitor: FnKeyMonitor
 
-    private static let log = Logger(subsystem: "dev.artemsem.voxflow", category: "app-services")
-
     private init(modelStore: ModelStore, engine: WhisperCppEngine, queue: FileQueue, filesSettings: FilesSettings,
                  durations: AudioDurationReader, exports: ExportCoordinator, navigation: Navigation,
                  filesViewModel: FilesViewModel, modelsViewModel: ModelsViewModel, dictationSettings: DictationSettings,
-                 modelLoader: ModelLoader, dictationStore: DictationStore?, retention: RetentionRunner?,
+                 modelLoader: ModelLoader, historyService: HistoryService,
                  inserter: AccessibilityTextInserter, dictationController: DictationController,
                  dictation: DictationCoordinator, flowBar: FlowBarPresenter, fnMonitor: FnKeyMonitor) {
         self.modelStore = modelStore
@@ -81,8 +78,7 @@ final class AppServices {
         self.modelsViewModel = modelsViewModel
         self.dictationSettings = dictationSettings
         self.modelLoader = modelLoader
-        self.dictationStore = dictationStore
-        self.retention = retention
+        self.historyService = historyService
         self.inserter = inserter
         self.dictationController = dictationController
         self.dictation = dictation
@@ -115,31 +111,13 @@ final class AppServices {
         let frontmost = WorkspaceFrontmostApp()
         let inserter = AccessibilityTextInserter(permissions: permissions, pasteboard: SystemPasteboard())
 
-        // `try?` would discard which failure happened; `.keyLost` (the original key material is gone,
-        // e.g. a Keychain reset) is worth a log line, since it silently turns history off this launch.
-        var dictationStore: DictationStore?
-        do {
-            dictationStore = try DictationStore(databaseURL: DictationStore.defaultURL,
-                                                keyProvider: dictationSettings.encryptHistory ? HistoryKeyProviders.default() : nil)
-        } catch StorageError.keyLost {
-            log.error("history key lost — history disabled for this launch")
-        } catch {
-            log.error("history store unavailable, history disabled for this launch: \(String(describing: error))")
-        }
+        // `HistoryService` owns opening/reopening the store (and its `RetentionRunner`) off the main
+        // actor; `.keyLost` (the original key material is gone, e.g. a Keychain reset) and other open
+        // failures land in `historyService.status` and are logged inside the service.
+        let historyService = HistoryService(url: DictationStore.defaultURL, settings: dictationSettings,
+                                            keyProvider: { HistoryKeyProviders.default() }, clock: SystemMonotonicClock())
 
-        // Reads the persisted value straight from `settingsStore` (Sendable) rather than
-        // `dictationSettings.retentionDays` (a main-actor-isolated `var`), which a `@Sendable`
-        // closure called from the actor's own executor cannot touch directly. `DictationSettings.Keys`
-        // is the single source of truth for the key name, so this can't silently drift from what
-        // `DictationSettings` itself persists to.
-        let retention: RetentionRunner? = dictationStore.map { store in
-            RetentionRunner(store: store,
-                            policy: { RetentionPolicy(days: settingsStore.string(forKey: DictationSettings.Keys.retentionDays).flatMap(Int.init) ?? 30) },
-                            now: Date.init, clock: SystemMonotonicClock())
-        }
-        if let retention { Task { await retention.start() } }
-
-        let historyWriter = HistoryWriter(store: dictationStore, settings: dictationSettings.box, now: Date.init)
+        let historyWriter = HistoryWriter(storeBox: historyService.storeBox, settings: dictationSettings.box, now: Date.init)
 
         // Built fresh on every fn-down (not once, up front) so a Settings edit to the excluded-apps
         // list or hotkey mode applies to the very next capture rather than only after a relaunch.
@@ -172,6 +150,11 @@ final class AppServices {
                                              permissions: permissions, navigation: navigation)
         levelSink.attach(dictation)
 
+        // Live settings: a silence-stop change reaches the running controller without waiting for
+        // the next dictation to start it fresh; an encryption/retention change reopens the store.
+        dictationSettings.onConfigChange = { config in Task { await dictationController.updateConfig(config) } }
+        dictationSettings.onHistorySettingsChange = { historyService.reopen() }
+
         let flowBarPanel = FlowBarPanel(rootView: FlowBarView(coordinator: dictation))
         let flowBar = FlowBarPresenter(panel: flowBarPanel, scheduler: TaskHideScheduler())
 
@@ -185,7 +168,7 @@ final class AppServices {
         return AppServices(modelStore: modelStore, engine: engine, queue: queue, filesSettings: filesSettings,
                            durations: durations, exports: exports, navigation: navigation, filesViewModel: filesViewModel,
                            modelsViewModel: modelsViewModel, dictationSettings: dictationSettings, modelLoader: modelLoader,
-                           dictationStore: dictationStore, retention: retention, inserter: inserter,
+                           historyService: historyService, inserter: inserter,
                            dictationController: dictationController, dictation: dictation, flowBar: flowBar, fnMonitor: fnMonitor)
     }
 

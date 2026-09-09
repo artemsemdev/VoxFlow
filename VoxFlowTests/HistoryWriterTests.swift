@@ -20,11 +20,20 @@ struct HistoryWriterTests {
     @Test("saves when keepHistory is on; skips when off")
     func save() async throws {
         let store = try DictationStore(inMemoryWith: nil)
+        let storeBox = HistoryStoreBox(store)
         let on = DictationSettingsBox(DictationSettingsSnapshot(excludedBundleIDs: [], keepHistory: true, options: TranscriptionOptions()))
-        await HistoryWriter(store: store, settings: on, now: { Date() }).save(result, appName: "Mail")
+        await HistoryWriter(storeBox: storeBox, settings: on, now: { Date() }).save(result, appName: "Mail")
         #expect(try store.count() == 1)
         let off = DictationSettingsBox(DictationSettingsSnapshot(excludedBundleIDs: [], keepHistory: false, options: TranscriptionOptions()))
-        await HistoryWriter(store: store, settings: off, now: { Date() }).save(result, appName: "Mail")
+        await HistoryWriter(storeBox: storeBox, settings: off, now: { Date() }).save(result, appName: "Mail")
         #expect(try store.count() == 1)
+    }
+
+    @Test("skips when the store box has no store (history unavailable)")
+    func skipsWithoutStore() async throws {
+        let storeBox = HistoryStoreBox(nil)
+        let on = DictationSettingsBox(DictationSettingsSnapshot(excludedBundleIDs: [], keepHistory: true, options: TranscriptionOptions()))
+        await HistoryWriter(storeBox: storeBox, settings: on, now: { Date() }).save(result, appName: "Mail")
+        // Nothing to assert on directly (no store to query) — this just must not crash or hang.
     }
 }
