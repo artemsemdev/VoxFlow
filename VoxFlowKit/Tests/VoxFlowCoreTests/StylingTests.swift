@@ -4,7 +4,7 @@ import Testing
 @Suite("Styling core types")
 struct StylingTests {
     private struct EchoStyler: TextStyler {
-        func style(_ raw: String, options: StylingOptions) -> StyledText {
+        func style(_ raw: String, options: StylingOptions) async throws -> StyledText {
             StyledText(text: raw, fillersRemoved: 0, cursorOffset: nil)
         }
     }
@@ -32,9 +32,9 @@ struct StylingTests {
     }
 
     @Test("a TextStyler implementation can be driven through the protocol")
-    func protocolConformance() {
+    func protocolConformance() async throws {
         let styler: TextStyler = EchoStyler()
-        let result = styler.style("hello", options: StylingOptions(style: .casual, removeFillers: false, autoPunctuate: false))
+        let result = try await styler.style("hello", options: StylingOptions(style: .casual, removeFillers: false, autoPunctuate: false))
         #expect(result.text == "hello")
         #expect(result.fillersRemoved == 0)
     }

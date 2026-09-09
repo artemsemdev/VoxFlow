@@ -31,7 +31,9 @@ public struct StyledText: Sendable, Equatable {
 }
 
 /// Rewrites raw dictation text according to `StylingOptions`. Implemented by `RuleStyler`
-/// (phase 4a, deterministic) and later an LLM-backed styler (phase 5) — same call shape.
+/// (phase 4a, deterministic) and an LLM-backed `LlamaStyler` (phase 5, VoxFlowStyling) — same
+/// call shape, now `async throws` so the LLM path can await generation; implementations must
+/// still never lose a dictation, falling back to the rule-based result on any failure.
 public protocol TextStyler: Sendable {
-    func style(_ raw: String, options: StylingOptions) -> StyledText
+    func style(_ raw: String, options: StylingOptions) async throws -> StyledText
 }
