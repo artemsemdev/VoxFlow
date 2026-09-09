@@ -228,7 +228,7 @@ struct OnboardingViewModelTests {
         #expect(vm.modelRow?.model.id == "small")
     }
 
-    @Test("model step (B-2): insufficient space surfaces the alert and stays on .model; useSmallerModelInsufficientSpace switches the row to the installed smaller model")
+    @Test("model step (B-2/N-4): insufficient space surfaces the alert and stays on .model; useSmallerModelInsufficientSpace switches the row to the installed smaller model and auto-advances")
     func modelInsufficientSpaceAlert() async throws {
         var h = try Harness()
         await h.serveAll()
@@ -251,6 +251,9 @@ struct OnboardingViewModelTests {
         #expect(vm.modelRow?.model.id == "small")
         #expect(vm.modelRow?.state == .installed)
         #expect(vm.canContinue)
+        // N-4: the alert-driven recovery must auto-advance too, not just the happy-path download() —
+        // otherwise a successful SYS-DISK recovery leaves the user parked on ONB-04.
+        #expect(vm.step == .tryIt)
     }
 
     @Test("resume at persisted step on init")
@@ -351,6 +354,48 @@ struct OnboardingViewModelTests {
 
         await historyWriter.save(OnboardingViewModelTests.sampleResult, appName: "Test")
         #expect(try h.historyStore.count() == 1)   // the stale suppression didn't eat this save
+    }
+
+    @Test("N-2: a try-it capture discarded (Esc) while still on .tryIt clears the suppression instead of leaking into the next save")
+    func discardedTryItClearsSuppression() async throws {
+        let h = try Harness()
+        let (vm, _, _, dc, historyWriter) = h.viewModel(step: .tryIt)
+        vm.beginTryIt()
+
+        dc.fn(.down)
+        await waitFor { if case .armed(_) = dc.state { true } else { false } }
+        dc.escape()
+        await waitFor { dc.state == .discarded }
+        // Let the VM's `withObservationTracking` hop actually process `.discarded` before checking —
+        // no observable side effect of "the flag was cleared" exists to poll directly, so this gives
+        // the (non-blocking, actor-hop-only) handler ample chances to run.
+        for _ in 0..<200 { await Task.yield() }
+
+        await historyWriter.save(OnboardingViewModelTests.sampleResult, appName: "Test")
+        #expect(try h.historyStore.count() == 1)   // the discarded try-it didn't eat this save
+    }
+
+    @Test("N-2: endTryIt() (e.g. the onboarding window closing mid-try-it) clears a pending suppression")
+    func endTryItClearsSuppression() async throws {
+        let h = try Harness()
+        let (vm, _, _, _, historyWriter) = h.viewModel(step: .tryIt)
+        vm.beginTryIt()
+        historyWriter.suppressNext()   // simulates the .armed transition having suppressed the capture
+
+        vm.endTryIt()   // e.g. the window is closed instead of "Back"/"Start using VoxFlow"
+
+        await historyWriter.save(OnboardingViewModelTests.sampleResult, appName: "Test")
+        #expect(try h.historyStore.count() == 1)   // the stale suppression didn't eat this save
+    }
+
+    @Test("N-3: finish() resets the in-memory step to .welcome, not just the persisted one")
+    func finishResetsInMemoryStep() throws {
+        let h = try Harness()
+        let vm = h.viewModel(step: .tryIt).vm
+
+        vm.finish()
+
+        #expect(vm.step == .welcome)
     }
 
     /// No-sleep poll, same technique as `ModelsViewModelTests`/`DictationCoordinatorTests`.

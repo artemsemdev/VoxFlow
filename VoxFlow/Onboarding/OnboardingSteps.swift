@@ -267,7 +267,9 @@ struct TryItStepView: View {
             // this window is key/front *and* that the scratchpad holds first responder, since a prior
             // step (System Settings, granting a permission) may have stolen focus (B-3).
             NSApp.windows.first { $0.identifier?.rawValue == OnboardingWindowID.onboarding }?.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
+            // N-5: `activate(ignoringOtherApps:)` is deprecated since macOS 14 — `makeKeyAndOrderFront`
+            // above already covers the ordering intent; `activate()` covers bringing the app forward.
+            NSApp.activate()
             scratchpadFocused = true
         }
         .onDisappear { viewModel.endTryIt() }

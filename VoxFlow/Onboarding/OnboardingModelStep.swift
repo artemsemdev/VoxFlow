@@ -3,7 +3,9 @@ import VoxFlowModels
 
 /// ONB-04 "Download your speech model" — one row (`ModelsViewModel`'s default speech row) with the
 /// same states `ModelsSettingsView` shows in Settings › Models, plus the smaller-model hint and the
-/// no-sign-in footer. Completion (row `.installed`) auto-advances via `OnboardingViewModel.download()`.
+/// no-sign-in footer. Completion (row `.installed`) auto-advances — via `OnboardingViewModel.download()`,
+/// and via `retryDownload(_:)`/`useSmallerModelInsufficientSpace()` for the ONB-04a alert-driven paths
+/// (N-4: none of the three routes bypass the shared `advanceIfInstalled()` check).
 struct ModelStepView: View {
     let viewModel: OnboardingViewModel
 
@@ -90,7 +92,7 @@ struct ModelStepView: View {
         case .cannotRemoveOnlyModel:
             Button("OK", role: .cancel) { viewModel.models.dismissAlert() }
         case .downloadFailed(let failed, _):
-            Button("Retry download") { Task { await viewModel.models.download(failed) } }
+            Button("Retry download") { Task { await viewModel.retryDownload(failed) } }
             Button("Cancel", role: .cancel) { viewModel.models.dismissAlert() }
         case .offline(let paused, _, _, _):
             Button("OK", role: .cancel) { viewModel.models.dismissAlert() }

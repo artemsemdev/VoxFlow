@@ -94,24 +94,28 @@ struct OnboardingRenderTests {
         RenderCase(name: "2a-accessibility-denied", step: .permissions, accessibility: false) { bundle in
             await bundle.vm.requestMicrophone()
             bundle.vm.openAccessibilitySettings()
-            // M-4: the denied variant only appears after a poll comes back still untrusted, not on
-            // the click itself — advance one poll interval so the render shows ONB-02a, not ONB-02.
+            // N-1: `advance` snapshots sleepers synchronously — without waiting for the poll task to
+            // actually reach its `clock.sleep(for: 1)` first, `advance(by: 1)` resumes nothing (the
+            // sleeper registers *after*, with `now` already moved on, so it parks at deadline 2 and
+            // never fires). `waitForSleepers(1)` makes this deterministic, same fix as the unit test.
+            await bundle.clock.waitForSleepers(1)
             await bundle.clock.advance(by: 1)
+            for _ in 0..<1_000 where !bundle.vm.showsAccessibilityDenied { await Task.yield() }
+            if !bundle.vm.showsAccessibilityDenied { Issue.record("2a-accessibility-denied: never reached the denied variant") }
         },
         RenderCase(name: "3-hotkey", step: .hotkey) { _ in },
         RenderCase(name: "4-model", step: .model) { bundle in
             for _ in 0..<200 where bundle.vm.modelRow == nil { await Task.yield() }
         },
-        RenderCase(name: "5-tryit", step: .tryIt) { bundle in
-            // `ImageRenderer` doesn't reliably run SwiftUI's `.onAppear`, so the view's own
-            // `beginTryIt()` call (`TryItStepView.onAppear`) can't be relied on here — call it
-            // directly, the same action the view would trigger.
-            bundle.vm.beginTryIt()
-        },
+        // N-6: `beginTryIt()` is no longer called directly here — `render()` primes the view (one
+        // discarded `.nsImage` pass) before running `configure`, which does trigger `TryItStepView`'s
+        // own `.onAppear` (confirmed: it also emits SwiftUI's "Accessing FocusState's value outside of
+        // the body of a View" warning), so both try-it cases now exercise the real production wiring
+        // instead of calling the view model's method as a stand-in for it.
+        RenderCase(name: "5-tryit", step: .tryIt) { _ in },
         RenderCase(name: "5b-tryit-inserted", step: .tryIt) { bundle in
             // M-7: exercises the result chip — the most distinctive element on ONB-05 — which no
             // render case previously drove to `.inserted`.
-            bundle.vm.beginTryIt()
             bundle.dictation.fn(.down)
             for _ in 0..<1_000 where !isArmed(bundle.dictation.state) { await Task.yield() }
             if !isArmed(bundle.dictation.state) { Issue.record("5b-tryit-inserted: never reached .armed (state: \(bundle.dictation.state))") }
@@ -132,13 +136,26 @@ struct OnboardingRenderTests {
 
         for testCase in Self.cases {
             let bundle = makeBundle(step: testCase.step, accessibility: testCase.accessibility)
-            await testCase.configure(bundle)
             // D-1: the shipped window relies on the real titlebar's traffic lights
             // (`.windowStyle(.hiddenTitleBar)`), which an `ImageRenderer` snapshot of bare content
             // never shows — draw a stand-in set here only, so the PNG still has something to compare
             // against the mock's top-left corner.
             let renderer = ImageRenderer(content: RenderChrome(content: OnboardingContentView(viewModel: bundle.vm)))
             renderer.scale = 2
+            // Prime the view once, discarding the image, so each step view's own `.onAppear` wiring
+            // (in particular `TryItStepView`'s `beginTryIt()` + focus) has actually run before
+            // `configure` drives further state — see N-6. `beginTryIt()` is idempotent while already
+            // armed, so this is harmless for cases that don't care about it.
+            _ = renderer.nsImage
+            await testCase.configure(bundle)
+            // `ImageRenderer.nsImage` can return a backing render that hasn't yet picked up an
+            // `@Observable` mutation from moments ago if nothing has pumped the run loop since —
+            // `5b-tryit-inserted`'s long yield chain (waiting through `.armed`/`.listening`/`.inserted`)
+            // happens to give it plenty of chances, but a case like `2a` that exits its wait loop on
+            // the very first successful check does not. Discard one extra pass, yielding first, so
+            // every case's *final* capture reliably reflects the state `configure` just set up.
+            await Task.yield()
+            _ = renderer.nsImage
             guard let image = renderer.nsImage else {
                 Issue.record("Failed to render \(testCase.name)")
                 continue

@@ -95,11 +95,9 @@ final class OnboardingViewModel {
     private func transition(to newStep: OnboardingStep) {
         accessibilityPollTask.withLock { $0?.cancel() }
         // Leaving `.tryIt` without ever reaching `.inserted` (e.g. "Back" after only arming) must not
-        // leave a stale suppression armed for the next real dictation (M-2).
-        if step == .tryIt {
-            endTryIt()
-            historyWriter.clearSuppression()
-        }
+        // leave a stale suppression armed for the next real dictation (M-2) — `endTryIt()` itself
+        // clears it now, so no separate call is needed here.
+        if step == .tryIt { endTryIt() }
         step = newStep
         state.step = newStep
         enter(newStep)
@@ -121,9 +119,12 @@ final class OnboardingViewModel {
 
     func finish() {
         endTryIt()
-        historyWriter.clearSuppression()
         state.completed = true
+        // Both the persisted step (N-3: relaunch resumes at `.welcome`, not a completed flow's last
+        // step) and the in-memory one — the VM is process-lifetime in `AppServices`, so a stale
+        // in-memory `.tryIt` would otherwise disagree with `state.step` for the rest of the session.
         state.step = .welcome
+        step = .welcome
         navigation.requestMainWindow = true
         dismiss()
     }
@@ -222,17 +223,32 @@ final class OnboardingViewModel {
         let smaller = models.smallerSpeechModel(than: failed)
         await models.useSmallerModelInstead()
         if let smaller { selectedModelID = smaller.id }
+        advanceIfInstalled()
     }
 
     func download() async {
         guard let model = modelRow?.model else { return }
         await models.download(model)
-        if modelRow?.state == .installed { next() }
+        advanceIfInstalled()
     }
 
     func pause() async {
         guard let model = modelRow?.model else { return }
         await models.pause(model)
+    }
+
+    /// ONB-04a's "Retry download" alert button (`downloadFailed`) — routed through here (not a bare
+    /// `models.download(failed)` call from the view) so the retry also auto-advances on success (N-4).
+    func retryDownload(_ model: ModelDescriptor) async {
+        await models.download(model)
+        advanceIfInstalled()
+    }
+
+    /// N-4: any path that can land the current row on `.installed` — a plain `download()`, or ONB-04a's
+    /// alert-driven recovery (retry / "Use the N model") — auto-advances to ONB-05, not just the
+    /// happy-path `download()` call.
+    private func advanceIfInstalled() {
+        if modelRow?.state == .installed { next() }
     }
 
     // MARK: Try it (ONB-05)
@@ -251,10 +267,15 @@ final class OnboardingViewModel {
         trackDictation()
     }
 
-    /// Disarms the try-it observation — called from `TryItStepView.onDisappear`, `transition(to:)`
-    /// (leaving `.tryIt`), and `finish()`.
+    /// Disarms the try-it observation — called from `TryItStepView.onDisappear` (including the
+    /// onboarding window being closed mid-try-it), `transition(to:)` (leaving `.tryIt`), and
+    /// `finish()`. Also clears any pending suppression (N-2): a capture that armed
+    /// (`.armed`/`.tapped`/`.listening`/`.processing`) but never reached `.inserted`/`.copied` before
+    /// the step was left would otherwise leave `HistoryWriter`'s flag set, silently dropping the
+    /// *next real* dictation's save.
     func endTryIt() {
         tryItTrackingEnabled = false
+        historyWriter.clearSuppression()
     }
 
     /// Mirrors `FlowBarPresenter.trackState(of:)`'s `withObservationTracking` pattern, gated by
@@ -284,6 +305,14 @@ final class OnboardingViewModel {
             let elapsed = processingStartedAt.map { clock.now() - $0 } ?? dictation.elapsed
             tryItResult = "✓ Inserted · \(words) words · \(String(format: "%.1f", elapsed)) s"
             processingStartedAt = nil
+        // N-2: the capture ended without a save — `FlowBarMachine` only emits `saveHistory` from
+        // `.inserted`/`.copied` (`.copied` is deliberately left out here: it's still a *saving* path,
+        // so the flag must survive to be consumed by that save). Clearing here (still on `.tryIt`,
+        // still tracking) covers a cancelled-but-not-step-exited capture; `endTryIt()` covers leaving
+        // the step or closing the window. Never on `.idle` — that would race the still-pending
+        // `Task { await onSave(…) }` `DictationController` kicks off right after `.inserted`/`.copied`.
+        case .discarded, .didntCatch, .error, .micUnavailable, .modelNotInstalled, .excluded:
+            historyWriter.clearSuppression()
         default:
             break
         }
