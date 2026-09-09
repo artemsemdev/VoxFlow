@@ -42,6 +42,8 @@ targets:
         product: VoxFlowDictation
       - package: VoxFlowKit
         product: VoxFlowStorage
+      - package: VoxFlowKit
+        product: VoxFlowStyling
     info:
       path: VoxFlow/Info.plist
       properties:
@@ -86,6 +88,8 @@ targets:
         product: VoxFlowDictation
       - package: VoxFlowKit
         product: VoxFlowStorage
+      - package: VoxFlowKit
+        product: VoxFlowStyling
       - package: VoxFlowKit
         product: VoxFlowTestSupport
     settings:

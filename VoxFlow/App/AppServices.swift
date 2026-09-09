@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Synchronization
 import VoxFlowAudio
@@ -7,6 +8,7 @@ import VoxFlowFiles
 import VoxFlowModels
 import VoxFlowSpeech
 import VoxFlowStorage
+import VoxFlowStyling
 
 /// Sendable pipe from `MeteredMicrophone`'s `@Sendable` level callback (called off the main actor)
 /// into the main-actor `DictationCoordinator` — same `Mutex`-boxed pattern as `DictationSettingsBox`,
@@ -62,6 +64,13 @@ final class AppServices {
     /// Drives the History page (design MW-02) — built once here so navigating away and back keeps
     /// its search/expanded/undo state, same reasoning as `filesViewModel`.
     let historyViewModel: HistoryViewModel
+    /// The default style plus fillers/auto-punctuate/snippet-prefix/learn-from-contacts toggles
+    /// (design MW-05 Styles page) — read by `StyledTranscriber` via `stylingSettings.box`.
+    let stylingSettings: StylingSettings
+    /// Dictionary/Snippets/Styles page content (design MW-03/04/05), built on `historyService`'s
+    /// shared database — `StyledTranscriber` reads its snapshot boxes to expand snippets and feed
+    /// the dictionary into `TranscriptionOptions.vocabulary`.
+    let contentService: ContentService
     let inserter: AccessibilityTextInserter
     /// Entered/left by onboarding's Try It step and History's scratchpad sheet — read once at the
     /// start of every capture (`dictationController`'s `ephemeral:` closure) to decide whether that
@@ -81,6 +90,7 @@ final class AppServices {
                  filesViewModel: FilesViewModel, modelsViewModel: ModelsViewModel, audioViewModel: AudioViewModel,
                  privacyViewModel: PrivacyViewModel, dictationSettings: DictationSettings,
                  modelLoader: ModelLoader, historyService: HistoryService, historyViewModel: HistoryViewModel,
+                 stylingSettings: StylingSettings, contentService: ContentService,
                  inserter: AccessibilityTextInserter, ephemeralScope: EphemeralScope, dictationController: DictationController,
                  dictation: DictationCoordinator, flowBar: FlowBarPresenter, fnMonitor: FnKeyMonitor,
                  onboardingState: OnboardingState, onboardingViewModel: OnboardingViewModel) {
@@ -99,6 +109,8 @@ final class AppServices {
         self.modelLoader = modelLoader
         self.historyService = historyService
         self.historyViewModel = historyViewModel
+        self.stylingSettings = stylingSettings
+        self.contentService = contentService
         self.inserter = inserter
         self.ephemeralScope = ephemeralScope
         self.dictationController = dictationController
@@ -143,13 +155,32 @@ final class AppServices {
         let historyWriter = HistoryWriter(storeBox: historyService.storeBox, settings: dictationSettings.box, now: Date.init,
                                           ready: { await historyService.ready() })
 
+        // Styles/Dictionary/Snippets content (design MW-03/04/05) — `ContentService` builds its three
+        // stores from `historyService`'s shared database once that opens; `StyledTranscriber` reads
+        // its snapshot boxes below.
+        let stylingSettings = StylingSettings(store: settingsStore)
+        let contentService = ContentService(history: historyService)
+        // `PreflightBuilder` fills this on the clean path (fn-down) below; `StyledTranscriber` reads
+        // it once the window loop returns, instead of re-querying `NSWorkspace` itself.
+        let frontmostBox = FrontmostBox()
+        // Weak-attach pipe (same pattern as `levelSink` below) from `StyledTranscriber`, running off
+        // the main actor, into `ContentService.noteUses`.
+        let usesSink = contentService.makeUsesSink()
+        let contentSnapshots = ContentSnapshots(vocabularyBox: contentService.vocabularyBox, snippetsBox: contentService.snippetsBox,
+                                                overridesBox: contentService.overridesBox,
+                                                noteUses: { words, snippets in usesSink.note(words: words, snippets: snippets) })
+        let styledTranscriber = StyledTranscriber(base: WindowedTranscriber(engine: engine), styler: RuleStyler(),
+                                                  settings: stylingSettings.box, content: contentSnapshots, frontmost: frontmostBox,
+                                                  clipboard: { NSPasteboard.general.string(forType: .string) }, now: Date.init)
+
         // Built fresh on every fn-down (not once, up front) so a Settings edit to the excluded-apps
         // list or hotkey mode applies to the very next capture rather than only after a relaunch.
         let preflight: @Sendable () async -> Preflight = {
             let builder = PreflightBuilder(frontmost: frontmost, permissions: permissions,
                                            readiness: { await modelLoader.readiness() },
                                            settings: dictationSettings.box.current,
-                                           captureFocus: { app in await inserter.captureFocus(app: app) })
+                                           captureFocus: { app in await inserter.captureFocus(app: app) },
+                                           onFrontmostCaptured: { app in frontmostBox.set(app) })
             return await builder.preflight()
         }
 
@@ -165,12 +196,16 @@ final class AppServices {
         let dictationController = DictationController(
             config: dictationSettings.flowBarConfig,
             microphone: MeteredMicrophone(base: MicrophoneSource()) { rms in levelSink.report(rms) },
-            transcriber: WindowedTranscriber(engine: engine),
+            transcriber: styledTranscriber,
             inserter: inserter,
             clock: SystemMonotonicClock(),
             preflight: preflight,
             loadModel: { _ = try await modelLoader.ensureLoaded() },
-            options: { dictationSettings.box.current.options },
+            options: {
+                var options = dictationSettings.box.current.options
+                options.vocabulary = contentService.vocabularyBox.current
+                return options
+            },
             onSave: { result, appName in await historyWriter.save(result, appName: appName) },
             copyToClipboard: { SystemPasteboard().setString($0) },
             ephemeral: { ephemeralScope.isActive }
@@ -211,7 +246,8 @@ final class AppServices {
                            durations: durations, exports: exports, navigation: navigation, filesViewModel: filesViewModel,
                            modelsViewModel: modelsViewModel, audioViewModel: audioViewModel, privacyViewModel: privacyViewModel,
                            dictationSettings: dictationSettings, modelLoader: modelLoader,
-                           historyService: historyService, historyViewModel: historyViewModel, inserter: inserter,
+                           historyService: historyService, historyViewModel: historyViewModel,
+                           stylingSettings: stylingSettings, contentService: contentService, inserter: inserter,
                            ephemeralScope: ephemeralScope, dictationController: dictationController, dictation: dictation,
                            flowBar: flowBar, fnMonitor: fnMonitor,
                            onboardingState: onboardingState, onboardingViewModel: onboardingViewModel)

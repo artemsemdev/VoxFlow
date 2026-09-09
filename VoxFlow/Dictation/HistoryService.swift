@@ -30,6 +30,11 @@ final class HistoryService {
     static let notOpenedYetReason = "not opened yet"
 
     private(set) var store: DictationStore?
+    /// The shared `VoxFlowDatabase` behind `store` — `nil` until the first open resolves, and again
+    /// whenever an open/reopen fails (mirrors `store`'s nil-ness: dictionary/snippets/style-override
+    /// content lives on the same connection, so there is nothing for `ContentService` to use either).
+    /// `ContentService` builds its three stores from this rather than opening a second connection.
+    private(set) var database: VoxFlowDatabase?
     private(set) var status: Status = .disabled(reason: HistoryService.notOpenedYetReason)
     let storeBox = HistoryStoreBox()
 
@@ -161,10 +166,14 @@ final class HistoryService {
         let useKey = settings.encryptHistory
         let makeKeyProvider = keyProvider
         do {
-            let newStore = try await Task.detached(priority: .userInitiated) {
-                try DictationStore(databaseURL: url, keyProvider: useKey ? makeKeyProvider() : nil)
+            let opened = try await Task.detached(priority: .userInitiated) { () throws -> (VoxFlowDatabase, DictationStore) in
+                let database = try VoxFlowDatabase(url: url)
+                let store = try DictationStore(database: database, keyProvider: useKey ? makeKeyProvider() : nil)
+                return (database, store)
             }.value
+            let (newDatabase, newStore) = opened
             store = newStore
+            database = newDatabase
             storeBox.set(newStore)
             status = .ready
             // Captured once per open, not re-read per purge pass: a later `retentionDays` change
@@ -176,11 +185,13 @@ final class HistoryService {
             Task { await runner.start() }
         } catch StorageError.keyLost {
             store = nil
+            database = nil
             storeBox.set(nil)
             status = .disabled(reason: "history key lost")
             Self.log.error("history key lost — history disabled")
         } catch {
             store = nil
+            database = nil
             storeBox.set(nil)
             status = .disabled(reason: String(describing: error))
             Self.log.error("history store unavailable, history disabled: \(String(describing: error))")

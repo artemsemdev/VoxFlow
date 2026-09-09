@@ -22,7 +22,7 @@ struct HistoryWriter: Sendable {
     private static let log = Logger(subsystem: "dev.artemsem.voxflow", category: "history")
 
     static func draft(from result: DictationResult, appName: String?, now: Date) -> DictationDraft {
-        DictationDraft(text: result.text, rawText: result.rawText, appName: appName, style: nil,
+        DictationDraft(text: result.text, rawText: result.rawText, appName: appName, style: result.style,
                        language: result.language?.code, duration: result.duration, createdAt: now)
     }
 

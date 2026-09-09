@@ -44,6 +44,33 @@ struct HistoryServiceTests {
         #expect(service.status == .ready)
     }
 
+    @Test("database is nil until the first open resolves, then set alongside store")
+    func databaseExposedAfterOpen() async throws {
+        let dir = TemporaryDirectory()
+        let settings = DictationSettings(store: InMemoryKeyValueStore())
+        let service = makeService(dir: dir, settings: settings)
+        #expect(service.database == nil)
+        _ = await service.count()                                     // force the open to finish
+        #expect(service.database != nil)
+        #expect(service.status == .ready)
+    }
+
+    @Test("a key-lost open failure leaves database nil alongside store")
+    func databaseNilWhenKeyLost() async throws {
+        let dir = TemporaryDirectory()
+        let url = dir.file("voxflow.sqlite")
+        let sharedKey = SymmetricKey(size: .bits256)
+        _ = try DictationStore(databaseURL: url, keyProvider: FakeHistoryKeyProvider(key: sharedKey)).insert(draft("secret", at: Date()))
+
+        let settings = DictationSettings(store: InMemoryKeyValueStore())
+        let service = HistoryService(url: url, settings: settings,
+                                     keyProvider: { FakeHistoryKeyProvider(key: SymmetricKey(size: .bits256), isNew: true) }, clock: FakeClock())
+        _ = await service.count()
+
+        #expect(service.status == .disabled(reason: "history key lost"))
+        #expect(service.database == nil)
+    }
+
     @Test("reopening with encryption off flags previously-encrypted rows as unreadable")
     func reopenWithoutEncryption() async throws {
         let dir = TemporaryDirectory()

@@ -18,6 +18,15 @@ struct HistoryWriterTests {
                                     createdAt: Date(timeIntervalSince1970: 42)))
     }
 
+    @Test("draft mapping carries the resolved style through")
+    func draftCarriesStyle() {
+        let styled = DictationResult(text: "hello there", rawText: "hello there", segments: [],
+                                     language: LanguageDetection(code: "en", confidence: 0.9), duration: 2.5, lowConfidence: false,
+                                     style: "formal")
+        let d = HistoryWriter.draft(from: styled, appName: "Mail", now: Date(timeIntervalSince1970: 42))
+        #expect(d.style == "formal")
+    }
+
     @Test("saves when keepHistory is on; skips when off")
     func save() async throws {
         let store = try DictationStore(inMemoryWith: nil)
