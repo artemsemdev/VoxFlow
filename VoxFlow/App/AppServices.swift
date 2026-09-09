@@ -74,6 +74,11 @@ final class AppServices {
     /// Drives the Dictionary page (design MW-03) — built once here so navigating away and back
     /// keeps its sheet/contacts state, same reasoning as `historyViewModel`.
     let dictionaryViewModel: DictionaryViewModel
+    /// Drives the Snippets page (design MW-04) — built once here so navigating away and back keeps
+    /// its sheet state, same reasoning as `dictionaryViewModel`.
+    let snippetsViewModel: SnippetsViewModel
+    /// Drives the Styles page (design MW-05) — same reasoning as `snippetsViewModel`.
+    let stylesViewModel: StylesViewModel
     let inserter: AccessibilityTextInserter
     /// Entered/left by onboarding's Try It step and History's scratchpad sheet — read once at the
     /// start of every capture (`dictationController`'s `ephemeral:` closure) to decide whether that
@@ -94,6 +99,7 @@ final class AppServices {
                  privacyViewModel: PrivacyViewModel, dictationSettings: DictationSettings,
                  modelLoader: ModelLoader, historyService: HistoryService, historyViewModel: HistoryViewModel,
                  stylingSettings: StylingSettings, contentService: ContentService, dictionaryViewModel: DictionaryViewModel,
+                 snippetsViewModel: SnippetsViewModel, stylesViewModel: StylesViewModel,
                  inserter: AccessibilityTextInserter, ephemeralScope: EphemeralScope, dictationController: DictationController,
                  dictation: DictationCoordinator, flowBar: FlowBarPresenter, fnMonitor: FnKeyMonitor,
                  onboardingState: OnboardingState, onboardingViewModel: OnboardingViewModel) {
@@ -115,6 +121,8 @@ final class AppServices {
         self.stylingSettings = stylingSettings
         self.contentService = contentService
         self.dictionaryViewModel = dictionaryViewModel
+        self.snippetsViewModel = snippetsViewModel
+        self.stylesViewModel = stylesViewModel
         self.inserter = inserter
         self.ephemeralScope = ephemeralScope
         self.dictationController = dictationController
@@ -244,11 +252,17 @@ final class AppServices {
                                                        navigation: navigation, clock: SystemMonotonicClock())
 
         let audioViewModel = AudioViewModel(devices: AVCaptureInputDeviceProvider(), settings: dictationSettings, dictation: dictation)
-        let privacyViewModel = PrivacyViewModel(settings: dictationSettings, history: historyService, apps: WorkspaceInstalledApps())
+        // Shared across Privacy/Snippets/Styles — one `/Applications` scan behind the three app
+        // pickers ("Never record in", "Only in {app}", "Add app override").
+        let installedApps = WorkspaceInstalledApps()
+        let privacyViewModel = PrivacyViewModel(settings: dictationSettings, history: historyService, apps: installedApps)
 
-        // Dictionary page (design MW-03) — built on the same `contentService`/`stylingSettings`
-        // `StyledTranscriber` reads above; `SystemContacts` is the real `CNContactStore` seam.
+        // Dictionary/Snippets/Styles pages (design MW-03/04/05) — built on the same
+        // `contentService`/`stylingSettings` `StyledTranscriber` reads above; `SystemContacts` is the
+        // real `CNContactStore` seam.
         let dictionaryViewModel = DictionaryViewModel(content: contentService, contactsImporter: SystemContacts(), stylingSettings: stylingSettings)
+        let snippetsViewModel = SnippetsViewModel(content: contentService, stylingSettings: stylingSettings, installedApps: installedApps)
+        let stylesViewModel = StylesViewModel(content: contentService, stylingSettings: stylingSettings, installedApps: installedApps)
 
         return AppServices(modelStore: modelStore, engine: engine, queue: queue, filesSettings: filesSettings,
                            durations: durations, exports: exports, navigation: navigation, filesViewModel: filesViewModel,
@@ -256,6 +270,7 @@ final class AppServices {
                            dictationSettings: dictationSettings, modelLoader: modelLoader,
                            historyService: historyService, historyViewModel: historyViewModel,
                            stylingSettings: stylingSettings, contentService: contentService, dictionaryViewModel: dictionaryViewModel,
+                           snippetsViewModel: snippetsViewModel, stylesViewModel: stylesViewModel,
                            inserter: inserter,
                            ephemeralScope: ephemeralScope, dictationController: dictationController, dictation: dictation,
                            flowBar: flowBar, fnMonitor: fnMonitor,

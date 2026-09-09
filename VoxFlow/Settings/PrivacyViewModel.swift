@@ -13,9 +13,19 @@ protocol InstalledAppsProviding: Sendable {
     /// id, or nil if cancelled. `@MainActor`: `NSOpenPanel.runModal()` must run on the main thread,
     /// and this is an unisolated `async` protocol requirement otherwise.
     @MainActor func pickApplication() async -> String?
+    /// Every installed application, for a searchable list (design MW-04a "New snippet"'s "Only in"
+    /// picker, MW-05a "Add app override"'s app list) — bundle id + display name, alphabetical.
+    /// Defaulted to `[]` below so existing conformers (test fakes that only need `name`/
+    /// `pickApplication`) don't have to implement it.
+    func installedApps() -> [(bundleID: String, name: String)]
 }
 
-/// Production `InstalledAppsProviding`: `NSWorkspace` for the lookup, `NSOpenPanel` for picking.
+extension InstalledAppsProviding {
+    func installedApps() -> [(bundleID: String, name: String)] { [] }
+}
+
+/// Production `InstalledAppsProviding`: `NSWorkspace` for the lookup, `NSOpenPanel` for picking, a
+/// scan of the well-known application directories for the searchable list.
 struct WorkspaceInstalledApps: InstalledAppsProviding {
     func name(forBundleID bundleID: String) -> String? {
         guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else { return nil }
@@ -30,6 +40,25 @@ struct WorkspaceInstalledApps: InstalledAppsProviding {
         panel.canChooseDirectories = false
         guard panel.runModal() == .OK, let url = panel.url else { return nil }
         return Bundle(url: url)?.bundleIdentifier
+    }
+
+    /// Scans `/Applications`, `/System/Applications` and `~/Applications` (top level only — no
+    /// recursive descent into nested bundles) for `.app` bundles with a readable bundle id,
+    /// deduplicated by id, sorted by display name.
+    func installedApps() -> [(bundleID: String, name: String)] {
+        let directories = ["/Applications", "/System/Applications", NSHomeDirectory() + "/Applications"]
+        var seen = Set<String>()
+        var result: [(bundleID: String, name: String)] = []
+        for directory in directories {
+            guard let items = try? FileManager.default.contentsOfDirectory(atPath: directory) else { continue }
+            for item in items where item.hasSuffix(".app") {
+                let url = URL(fileURLWithPath: directory).appendingPathComponent(item)
+                guard let bundle = Bundle(url: url), let bundleID = bundle.bundleIdentifier, !seen.contains(bundleID) else { continue }
+                seen.insert(bundleID)
+                result.append((bundleID, bundle.displayName ?? item))
+            }
+        }
+        return result.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 }
 
