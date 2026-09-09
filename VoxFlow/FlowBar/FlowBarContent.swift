@@ -8,7 +8,7 @@ import VoxFlowDictation
 struct FlowBarContent: Hashable {
     enum DotColor: Hashable { case idle, recording, warning, error }
     enum Leading: Hashable { case dot(DotColor), spinner, check, cross, excluded }
-    enum Button: Hashable { case openSettings, download(sizeText: String), tryAgain, copyRaw }
+    enum Button: Hashable { case openSettings, download(sizeText: String), tryAgain, copyRaw, resume }
     enum Trailing: Hashable { case keycap(String), languageChip(String), button(Button) }
 
     var leading: Leading
@@ -41,7 +41,7 @@ struct FlowBarContent: Hashable {
     }
 
     static func make(state: FlowBarState, elapsed: TimeInterval, mode: HotkeyMode,
-                      config: FlowBarConfig = FlowBarConfig()) -> FlowBarContent {
+                      config: FlowBarConfig = FlowBarConfig(), now: TimeInterval = 0) -> FlowBarContent {
         switch state {
         case .idle:
             return FlowBarContent(leading: .dot(.idle), title: state.hint(mode: mode) ?? "", subtitle: nil,
@@ -107,6 +107,14 @@ struct FlowBarContent: Hashable {
         case .error(let message):
             return FlowBarContent(leading: .dot(.error), title: message, subtitle: nil, showsWaveform: false,
                                    timer: nil, timerIsAmber: false, trailing: .button(.openSettings))
+
+        case .paused(let until):
+            // FB-09 "Paused · 58 min left · Resume". `until` and `now` share the controller's monotonic
+            // clock (`DictationCoordinator.now()` in production) — deliberately *not* `elapsed`, which
+            // this state doesn't populate (it isn't `.listening`/`.processing`) and would read as 0.
+            let minutesLeft = max(0, Int(((until - now) / 60).rounded(.up)))
+            return FlowBarContent(leading: .dot(.warning), title: "Paused", subtitle: "\(minutesLeft) min left",
+                                   showsWaveform: false, timer: nil, timerIsAmber: false, trailing: .button(.resume))
         }
     }
 

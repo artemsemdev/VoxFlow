@@ -121,6 +121,13 @@ public actor DictationController {
     public func escape() { handle(.escape) }
     public func anyKey() { handle(.anyKey) }
     public func copyRaw() { handle(.copyRawRequested) }
+    /// FB-09: pause dictation from the menu bar or the Flow Bar pill.
+    public func pause(for seconds: TimeInterval) { handle(.pause(seconds: seconds)) }
+    public func resume() { handle(.resume) }
+    /// This controller's (monotonic) clock's "until" — `nil` outside `.paused`.
+    public var pausedUntil: TimeInterval? {
+        if case .paused(let until) = machine.state { until } else { nil }
+    }
 
     private func handle(_ event: FlowBarEvent) {
         let before = machine.state

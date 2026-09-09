@@ -17,12 +17,17 @@ final class OnboardingState {
         static let step = "onboarding.step"
         static let completed = "onboarding.completed"
         static let clipboardFallback = "onboarding.clipboardFallback"
+        static let hintShown = "onboarding.hintShown"
     }
 
     private let store: any KeyValueStore
 
     var step: OnboardingStep { didSet { store.set(String(step.rawValue), forKey: Keys.step) } }
     var completed: Bool { didSet { store.set(completed ? "1" : "0", forKey: Keys.completed) } }
+    /// MB-00: whether the "VoxFlow lives here" menu bar hint (design page 4) has already been shown
+    /// once — `MenuBarServices.showHintIfNeeded()` reads this; `OnboardingViewModel.finish()`'s
+    /// `onFinished` hook is what actually triggers a *first* show.
+    var hintShown: Bool { didSet { store.set(hintShown ? "1" : "0", forKey: Keys.hintShown) } }
     /// M-8: read only by `OnboardingViewModel.canContinue` — it gates leaving ONB-02a with
     /// Accessibility ungranted, nothing more. `AccessibilityTextInserter` decides for itself, at
     /// insertion time, whether to fall back to the clipboard (by actually checking Accessibility
@@ -35,5 +40,6 @@ final class OnboardingState {
         step = store.string(forKey: Keys.step).flatMap { Int($0) }.flatMap(OnboardingStep.init(rawValue:)) ?? .welcome
         completed = store.string(forKey: Keys.completed) == "1"
         accessibilitySkipped = store.string(forKey: Keys.clipboardFallback) == "1"
+        hintShown = store.string(forKey: Keys.hintShown) == "1"
     }
 }

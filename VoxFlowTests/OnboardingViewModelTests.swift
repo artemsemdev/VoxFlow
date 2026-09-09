@@ -153,12 +153,16 @@ struct OnboardingViewModelTests {
         // actually have registered its `clock.sleep(for: 1)` before `advance` fires it.
         await h.clock.waitForSleepers(1)
         await h.clock.advance(by: 1)
+        // `advance` only resumes the sleeper; the poll body still hops to the main actor before it
+        // publishes — wait for that publication instead of asserting on scheduling luck (#151).
+        await waitFor { vm.showsAccessibilityDenied }
         #expect(vm.showsAccessibilityDenied)    // still not trusted after the first poll
         #expect(!vm.accessibilityGranted)
 
         h.permissions.accessibility = true
         await h.clock.waitForSleepers(1)
         await h.clock.advance(by: 1)
+        await waitFor { vm.accessibilityGranted }
         #expect(vm.accessibilityGranted)
         #expect(!vm.showsAccessibilityDenied)
     }

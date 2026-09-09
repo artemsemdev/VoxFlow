@@ -40,7 +40,19 @@ any app, style cleanup with a local LLM and an MCP server follow in 2.x (see the
 - History page: search past dictations, expand a row for the full transcript, Copy, Delete with
   Undo; the expanded row shows the resolved style. Settings › Hotkeys (mode + shortcuts), Audio
   (input device, silence-stop, hands-free) and Privacy (encrypt-at-rest toggle, retention) are
-  built; General and MCP tabs follow later in 2.2.
+  built.
+- Home page: today's words/dictations/speaking pace/time saved, a 7-day word chart with a streak,
+  your last 4 dictations, and (before your first dictation) a Setup card that tracks permissions,
+  the speech model and your hotkey live. Settings › General: launch at login, show in menu bar,
+  start/end sounds, appearance (Light/Dark/System), Flow Bar position, dictation language. Settings
+  › MCP Server: endpoint and access token (with Copy/Regenerate), which tools are exposed — UI only
+  this phase, the server itself ships in 2.4.
+- Menu bar: click the status item for today's stats, a hands-free toggle, quick actions (History,
+  Settings, the language picker) and "Pause dictation for 1 hour" — fn does nothing while paused,
+  and the menu bar header reads "Paused until 10:41" until you resume. A model finishing a download
+  or a file finishing transcription while the window is in the background sends a notification
+  (never for an error) that takes you straight to Models or the result when you click it. See
+  [ADR-006](docs/adr/006-menu-bar-and-notifications.md).
 - Dictionary page: add names, terms, products and places with an optional phonetic hint; recognised
   words feed the speech engine directly, and "Learn names from Contacts" imports names locally.
 - Snippets page: define a trigger (e.g. `/sig`) and a body with `cursor`/`date`/`clipboard`/`app`

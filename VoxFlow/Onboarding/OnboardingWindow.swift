@@ -14,6 +14,10 @@ struct OnboardingWindow: View {
         OnboardingContentView(viewModel: services.onboardingViewModel)
             .onAppear {
                 services.onboardingViewModel.dismiss = { dismissWindow(id: OnboardingWindowID.onboarding) }
+                // MB-00: shows the menu bar hint once onboarding finishes (`OnboardingViewModel`'s
+                // default `onFinished` is a no-op, so every existing direct `finish()` call in tests
+                // keeps running exactly as before).
+                services.onboardingViewModel.onFinished = { MenuBarServices.shared.showHintIfNeeded() }
             }
     }
 }

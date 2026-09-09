@@ -47,16 +47,44 @@ final class FlowBarPresenter {
     private let panel: any FlowBarPanelling
     private let scheduler: any HideScheduling
     private let idleHideDelay: TimeInterval
+    /// FB-09: unlike every other non-idle state, `.paused` sticks around for up to an hour — the
+    /// pill itself must not, so it auto-hides `pausedHideDelay` seconds after entering `.paused`
+    /// instead of waiting for a return to `.idle` (which may not happen for a long time).
+    private let pausedHideDelay: TimeInterval
     private var hasPendingHide = false
     private var isBound = false
+    /// The previous call's state — lets `.paused → .idle` (a resume) be told apart from any other
+    /// arrival at `.idle`, so resuming briefly re-shows the pill as a confirmation even if it had
+    /// already auto-hidden while paused.
+    private var previousState: FlowBarState = .idle
 
-    init(panel: any FlowBarPanelling, scheduler: any HideScheduling, idleHideDelay: TimeInterval = 6) {
+    init(panel: any FlowBarPanelling, scheduler: any HideScheduling, idleHideDelay: TimeInterval = 6, pausedHideDelay: TimeInterval = 3) {
         self.panel = panel
         self.scheduler = scheduler
         self.idleHideDelay = idleHideDelay
+        self.pausedHideDelay = pausedHideDelay
     }
 
     func stateChanged(to state: FlowBarState) {
+        defer { previousState = state }
+
+        if case .paused = state {
+            // Shows immediately (same as any non-idle state) then hides itself again shortly after —
+            // re-entering `.paused` (a fresh `pause(for:)` after a resume) goes through this same
+            // branch and shows it again.
+            if hasPendingHide { scheduler.cancel() }
+            panel.show()
+            hasPendingHide = true
+            scheduler.schedule(after: pausedHideDelay) { [weak self] in
+                guard let self else { return }
+                self.hasPendingHide = false
+                self.panel.hide()
+            }
+            return
+        }
+
+        let resumedFromPause: Bool = if case .paused = previousState { true } else { false }
+
         guard state == .idle else {
             if hasPendingHide {
                 scheduler.cancel()
@@ -64,6 +92,12 @@ final class FlowBarPresenter {
             }
             if !panel.isVisible { panel.show() }
             return
+        }
+        // Resuming (`.paused → .idle`) re-shows the pill as a brief confirmation if `pausedHideDelay`
+        // already hid it — same as any other "something just happened" transition, just arriving at
+        // `.idle` instead of a busy state.
+        if resumedFromPause, !panel.isVisible {
+            panel.show()
         }
         // M-10: says what is meant — a never-shown panel (e.g. the `.idle` state at launch) has
         // nothing to hide, so don't schedule a hide for it.
@@ -102,5 +136,15 @@ final class FlowBarPresenter {
                 self.trackState(of: coordinator)
             }
         }
+    }
+}
+
+/// Forwards Settings › General's "Flow Bar position" straight to `panel` when it's a real
+/// `FlowBarPanel` (always true in production; test fakes conforming only to `FlowBarPanelling`
+/// simply ignore it) — lets `SettingsServices` hand `GeneralViewModel` the one `FlowBarPresenter`
+/// `AppServices` already exposes instead of needing the panel itself exposed too.
+extension FlowBarPresenter: FlowBarPositioning {
+    func apply(_ position: FlowBarPosition) {
+        (panel as? FlowBarPositioning)?.apply(position)
     }
 }

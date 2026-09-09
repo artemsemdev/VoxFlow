@@ -47,6 +47,13 @@ final class OnboardingViewModel {
     /// it to close the onboarding window. A plain closure (not the environment action itself) keeps
     /// this view model SwiftUI-independent, same reasoning as `DictationCoordinator`'s callbacks.
     var dismiss: () -> Void = {}
+    /// MB-00: notifies the menu bar to show its first-run hint once onboarding finishes — set to
+    /// `MenuBarServices.shared.showHintIfNeeded` wherever this plan's composition-root task wires
+    /// `MenuBarServices` in (this task's file scope doesn't include `AppServices.swift`/
+    /// `OnboardingWindow.swift`, where that assignment would live). Defaults to a no-op so every
+    /// existing call site — including every test that calls `finish()` directly — keeps compiling
+    /// and running exactly as before, the same reasoning as `dismiss`.
+    var onFinished: () -> Void = {}
 
     /// Cancelled on every step change and on deinit — boxed outside main-actor isolation the same
     /// way `DictationCoordinator.mirror` is, so `deinit` (nonisolated) can cancel it safely.
@@ -131,6 +138,7 @@ final class OnboardingViewModel {
         step = .welcome
         navigation.requestMainWindow = true
         dismiss()
+        onFinished()
     }
 
     // MARK: Permissions (ONB-02 / ONB-02a)

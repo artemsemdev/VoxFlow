@@ -250,6 +250,39 @@ struct DictationControllerTests {
         #expect(await h.controller.config.silenceStop == 8)
     }
 
+    @Test("FB-09: pause reports paused, pausedUntil follows the controller's clock; the pauseEnd timer returns it to idle")
+    func pauseThenTimerExpires() async throws {
+        let h = await Harness()
+        #expect(await h.controller.pausedUntil == nil)
+        await h.controller.pause(for: 3600)
+        #expect(await h.next() == .paused(until: 3600))
+        #expect(await h.controller.pausedUntil == 3600)
+        await h.clock.waitForSleepers(1)
+        await h.clock.advance(by: 3600)
+        #expect(await h.next() == .idle)
+        #expect(await h.controller.pausedUntil == nil)
+    }
+
+    @Test("FB-09: resume ends a pause early")
+    func resumeEndsPauseEarly() async throws {
+        let h = await Harness()
+        await h.controller.pause(for: 3600)
+        #expect(await h.next() == .paused(until: 3600))
+        await h.controller.resume()
+        #expect(await h.next() == .idle)
+        #expect(await h.controller.pausedUntil == nil)
+    }
+
+    @Test("FB-09: fn-down while paused is ignored — the microphone never opens")
+    func fnDownIgnoredWhilePaused() async throws {
+        let h = await Harness()
+        await h.controller.pause(for: 3600)
+        #expect(await h.next() == .paused(until: 3600))
+        await h.controller.fnDown()
+        #expect(h.mic.startCount == 0)
+        #expect(await h.controller.state == .paused(until: 3600))
+    }
+
     @Test("currentAndChanges yields the current state before any subsequent change (M3)")
     func currentAndChangesYieldsCurrentFirst() async throws {
         let h = await Harness()

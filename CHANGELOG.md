@@ -42,6 +42,29 @@ versioning.
   capped at 64) so recognised names/terms get spelled right without a manual correction pass.
 - `dictionary`, `snippets` and `app_style_overrides` tables added to the shared VoxFlow SQLite
   database (unencrypted — only dictation text is sensitive, per ADR-004).
+- Home page: today's words/dictations/speaking pace/time saved, a 7-day word chart with a streak,
+  the last 4 dictations, and a first-run Setup card (permissions, speech model, hotkey) that
+  reappears whenever a permission is later revoked.
+- Settings › General: launch at login (`SMAppService`), show in menu bar, play sounds on
+  dictation start/end, appearance (Light/Dark/System), Flow Bar position, dictation language.
+- Settings › MCP Server (UI only this phase — the server itself ships in 2.4): endpoint and access
+  token with Copy/Regenerate (a confirmation alert first), which tools are exposed.
+- Menu bar: a window-style dropdown (status, hands-free toggle, today's stats, quick actions, a
+  language picker, a footer) replaces the plain menu; a first-run hint introduces it once, after
+  onboarding finishes.
+- Pause: "Pause dictation for 1 hour" from the menu bar or the Flow Bar pill — fn does nothing
+  while paused; the pill shows "Paused · N min left" and hides itself after 3 s; the menu bar
+  header reads "Paused until 10:41" until Resume.
+- Completion notifications: a model finishing its download, or a file finishing transcription,
+  posts a system notification while VoxFlow's window isn't the frontmost one — never for an
+  error — and clicking it opens Settings › Models or the Files result. See
+  [ADR-006](docs/adr/006-menu-bar-and-notifications.md).
+
+### Fixed
+- Settings › General's appearance and Flow Bar position now apply at launch, not only once
+  Settings has been opened at least once.
+- The Flow Bar HUD and the menu bar's "Paused until 10:41" now read the same clock instead of two
+  independently-started ones that could disagree by however long apart they were created.
 
 ## 2.0.0 — 2026-09-08
 
