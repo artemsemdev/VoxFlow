@@ -53,6 +53,7 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSMicrophoneUsageDescription: "VoxFlow listens only while you hold fn. Audio never leaves this Mac."
+        NSContactsUsageDescription: "VoxFlow reads first and last names from Contacts so it spells them right. Nothing is uploaded."
         CFBundleDocumentTypes:
           - CFBundleTypeName: Audio or video
             LSItemContentTypes:

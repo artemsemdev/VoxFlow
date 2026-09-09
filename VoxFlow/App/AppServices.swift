@@ -71,6 +71,9 @@ final class AppServices {
     /// shared database — `StyledTranscriber` reads its snapshot boxes to expand snippets and feed
     /// the dictionary into `TranscriptionOptions.vocabulary`.
     let contentService: ContentService
+    /// Drives the Dictionary page (design MW-03) — built once here so navigating away and back
+    /// keeps its sheet/contacts state, same reasoning as `historyViewModel`.
+    let dictionaryViewModel: DictionaryViewModel
     let inserter: AccessibilityTextInserter
     /// Entered/left by onboarding's Try It step and History's scratchpad sheet — read once at the
     /// start of every capture (`dictationController`'s `ephemeral:` closure) to decide whether that
@@ -90,7 +93,7 @@ final class AppServices {
                  filesViewModel: FilesViewModel, modelsViewModel: ModelsViewModel, audioViewModel: AudioViewModel,
                  privacyViewModel: PrivacyViewModel, dictationSettings: DictationSettings,
                  modelLoader: ModelLoader, historyService: HistoryService, historyViewModel: HistoryViewModel,
-                 stylingSettings: StylingSettings, contentService: ContentService,
+                 stylingSettings: StylingSettings, contentService: ContentService, dictionaryViewModel: DictionaryViewModel,
                  inserter: AccessibilityTextInserter, ephemeralScope: EphemeralScope, dictationController: DictationController,
                  dictation: DictationCoordinator, flowBar: FlowBarPresenter, fnMonitor: FnKeyMonitor,
                  onboardingState: OnboardingState, onboardingViewModel: OnboardingViewModel) {
@@ -111,6 +114,7 @@ final class AppServices {
         self.historyViewModel = historyViewModel
         self.stylingSettings = stylingSettings
         self.contentService = contentService
+        self.dictionaryViewModel = dictionaryViewModel
         self.inserter = inserter
         self.ephemeralScope = ephemeralScope
         self.dictationController = dictationController
@@ -242,12 +246,17 @@ final class AppServices {
         let audioViewModel = AudioViewModel(devices: AVCaptureInputDeviceProvider(), settings: dictationSettings, dictation: dictation)
         let privacyViewModel = PrivacyViewModel(settings: dictationSettings, history: historyService, apps: WorkspaceInstalledApps())
 
+        // Dictionary page (design MW-03) — built on the same `contentService`/`stylingSettings`
+        // `StyledTranscriber` reads above; `SystemContacts` is the real `CNContactStore` seam.
+        let dictionaryViewModel = DictionaryViewModel(content: contentService, contactsImporter: SystemContacts(), stylingSettings: stylingSettings)
+
         return AppServices(modelStore: modelStore, engine: engine, queue: queue, filesSettings: filesSettings,
                            durations: durations, exports: exports, navigation: navigation, filesViewModel: filesViewModel,
                            modelsViewModel: modelsViewModel, audioViewModel: audioViewModel, privacyViewModel: privacyViewModel,
                            dictationSettings: dictationSettings, modelLoader: modelLoader,
                            historyService: historyService, historyViewModel: historyViewModel,
-                           stylingSettings: stylingSettings, contentService: contentService, inserter: inserter,
+                           stylingSettings: stylingSettings, contentService: contentService, dictionaryViewModel: dictionaryViewModel,
+                           inserter: inserter,
                            ephemeralScope: ephemeralScope, dictationController: dictationController, dictation: dictation,
                            flowBar: flowBar, fnMonitor: fnMonitor,
                            onboardingState: onboardingState, onboardingViewModel: onboardingViewModel)
