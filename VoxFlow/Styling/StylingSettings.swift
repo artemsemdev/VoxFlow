@@ -43,13 +43,23 @@ final class StylingSettings {
     var learnFromContacts: Bool { didSet { store.set(learnFromContacts ? "1" : "0", forKey: "styling.learnFromContacts"); sync() } }
 
     init(store: any KeyValueStore) {
+        // M7: read into locals first, then assign both the stored properties and the box from the
+        // same values — `self.defaultStyle` etc. can't be read back yet (`box` isn't initialized
+        // until the two-phase init finishes), and seeding the box from separate literal defaults
+        // instead (the old code) meant those literals could silently drift from these.
+        let loadedDefaultStyle = store.string(forKey: Keys.defaultStyle).flatMap(TextStyle.init(rawValue:)) ?? .casual
+        let loadedRemoveFillers = store.string(forKey: "styling.removeFillers") != "0"
+        let loadedAutoPunctuate = store.string(forKey: "styling.autoPunctuate") != "0"
+        let loadedSnippetSayPrefix = store.string(forKey: "styling.snippetSayPrefix") == "1"
+
         self.store = store
-        defaultStyle = store.string(forKey: Keys.defaultStyle).flatMap(TextStyle.init(rawValue:)) ?? .casual
-        removeFillers = store.string(forKey: "styling.removeFillers") != "0"
-        autoPunctuate = store.string(forKey: "styling.autoPunctuate") != "0"
-        snippetSayPrefix = store.string(forKey: "styling.snippetSayPrefix") == "1"
+        defaultStyle = loadedDefaultStyle
+        removeFillers = loadedRemoveFillers
+        autoPunctuate = loadedAutoPunctuate
+        snippetSayPrefix = loadedSnippetSayPrefix
         learnFromContacts = store.string(forKey: "styling.learnFromContacts") == "1"
-        box = StylingSettingsBox(StylingSettingsSnapshot(defaultStyle: .casual, removeFillers: true, autoPunctuate: true, snippetSayPrefix: false))
+        box = StylingSettingsBox(StylingSettingsSnapshot(defaultStyle: loadedDefaultStyle, removeFillers: loadedRemoveFillers,
+                                                          autoPunctuate: loadedAutoPunctuate, snippetSayPrefix: loadedSnippetSayPrefix))
         sync()
     }
 

@@ -21,8 +21,13 @@ public enum FillerWords: Sendable {
 
         // "like" set off by commas: ", like," -> ",".
         removed += replace(&result, pattern: ",\\s*like\\s*,", with: ",")
-        // "like" opening a clause at the start of the text: "like, " -> "".
-        removed += replace(&result, pattern: "^\\s*like\\s*,\\s*", with: "")
+        // M3: "like" opening a clause followed by a comma — either the very start of the text, or
+        // right after a sentence-ending `.`/`?`/`!` and its following space (a new clause, not just
+        // the string's start): "like, " -> "". Was anchored to `^`, so "It's late. Like, we should
+        // go" never matched. The mid-text branch's lookbehind stops at the space rather than
+        // consuming it, so the sentence boundary keeps its single space instead of colliding the
+        // previous sentence into the next word.
+        removed += replace(&result, pattern: "(?:^\\s*|(?<=[.?!]\\s))like\\s*,\\s*", with: "")
 
         result = collapseCleanup(result)
         return (result, removed)

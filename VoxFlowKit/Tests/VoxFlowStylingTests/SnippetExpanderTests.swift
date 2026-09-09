@@ -122,6 +122,16 @@ struct SnippetExpanderTests {
         #expect(result.text == "Notes told Notes")
     }
 
+    @Test("M1: a pre-existing double space before the cursor placeholder does not shift the reported offset off the end of the final text")
+    func cursorOffsetSurvivesDoubleSpaceCollapse() {
+        // Two spaces before "cursor": collapsing them after the old code measured the offset used
+        // to leave `cursorOffset` one character past the end of the actual final string.
+        let rule = SnippetRule(trigger: "/greet", body: "Best,  cursor")
+        let result = expander(snippets: [rule]).expand("/greet")
+        #expect(result.text == "Best, ")
+        #expect(result.cursorOffset == result.text.count)
+    }
+
     @Test("a second cursor occurrence is removed from the output; the first sets the offset")
     func secondCursorOccurrenceIsRemoved() {
         let rule = SnippetRule(trigger: "/greet", body: "Hi cursor, thanks cursor!")

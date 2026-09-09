@@ -99,6 +99,12 @@ public struct SnippetExpander: Sendable {
 
     // MARK: - Body placeholders
 
+    /// M1: the offset used to be measured *before* the trailing `"  " -> " "` collapse ran, so a
+    /// double space anywhere earlier in the body (pre-existing, or left behind by removing the
+    /// `cursor` word itself) silently shifted the reported position by one per collapse. A sentinel
+    /// (`\u{FFFC}`, the Unicode "object replacement character" — never typed by a user) stands in
+    /// for the first `cursor` occurrence through the collapse, so the offset is read back from the
+    /// *final* string instead of a pre-collapse one.
     private func expandBody(_ body: String) -> (text: String, cursorOffset: Int?) {
         var result = replaceAllOccurrences(of: "date", with: formattedDate(), in: body)
         result = replaceAllOccurrences(of: "clipboard", with: context.clipboard ?? "", in: result)
@@ -106,14 +112,27 @@ public struct SnippetExpander: Sendable {
 
         let cursorRanges = wordRanges(result, "cursor")
         guard let first = cursorRanges.first else {
+            return (collapseSpaces(result), nil)
+        }
+        let sentinel = "\u{FFFC}"
+        for range in cursorRanges.reversed() {
+            result.replaceSubrange(range, with: range == first ? sentinel : "")
+        }
+        result = collapseSpaces(result)
+        guard let sentinelRange = result.range(of: sentinel) else {
             return (result, nil)
         }
-        let cursorOffset = result.distance(from: result.startIndex, to: first.lowerBound)
-        for range in cursorRanges.reversed() {
-            result.removeSubrange(range)
-        }
-        result = result.replacingOccurrences(of: "  ", with: " ")
+        let cursorOffset = result.distance(from: result.startIndex, to: sentinelRange.lowerBound)
+        result.removeSubrange(sentinelRange)
         return (result, cursorOffset)
+    }
+
+    private func collapseSpaces(_ text: String) -> String {
+        var result = text
+        while result.contains("  ") {
+            result = result.replacingOccurrences(of: "  ", with: " ")
+        }
+        return result
     }
 
     private func formattedDate() -> String {

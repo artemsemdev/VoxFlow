@@ -33,6 +33,13 @@ struct FillerWordsTests {
         #expect(removed == 1)
     }
 
+    @Test("M3: like opening a clause after a sentence end (not just the very start of the text) is removed")
+    func likeAtClauseStartMidText() {
+        let (text, removed) = FillerWords.strip("It's late. Like, we should go")
+        #expect(text == "It's late. we should go")
+        #expect(removed == 1)
+    }
+
     @Test("a plain verb 'like' is not removed")
     func likeAsVerbKept() {
         let (text, removed) = FillerWords.strip("I really like it")
