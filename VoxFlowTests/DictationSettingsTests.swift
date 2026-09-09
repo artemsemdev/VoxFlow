@@ -29,4 +29,28 @@ struct DictationSettingsTests {
         #expect(reloaded.transcriptionOptions.language == "de")
         #expect(reloaded.snapshot.excludedBundleIDs == ["com.example.a", "com.example.b"])
     }
+
+    @Test("onConfigChange fires with the clamped FlowBarConfig whenever silenceStop changes")
+    func onConfigChangeFiresWithClampedConfig() {
+        let s = DictationSettings(store: InMemoryKeyValueStore())
+        var received: [FlowBarConfig] = []
+        s.onConfigChange = { received.append($0) }
+        s.silenceStop = 7
+        #expect(received.map(\.silenceStop) == [7])
+        s.silenceStop = 42                                   // clamps to 10 before the hook fires
+        #expect(received.map(\.silenceStop) == [7, 10])
+    }
+
+    @Test("onHistorySettingsChange fires on encryptHistory and retentionDays changes, not on unrelated settings")
+    func onHistorySettingsChangeFiresOnHistorySettings() {
+        let s = DictationSettings(store: InMemoryKeyValueStore())
+        var count = 0
+        s.onHistorySettingsChange = { count += 1 }
+        s.encryptHistory = false
+        #expect(count == 1)
+        s.retentionDays = 7
+        #expect(count == 2)
+        s.hotkeyMode = .handsFree                            // unrelated setting: no history-settings hook
+        #expect(count == 2)
+    }
 }

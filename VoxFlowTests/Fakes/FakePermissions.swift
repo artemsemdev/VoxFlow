@@ -25,6 +25,14 @@ final class FakePermissions: PermissionChecking, Sendable {
     var openedAccessibilitySettings: Int { state.withLock { $0.openedAccessibilitySettings } }
     var prompted: Int { state.withLock { $0.prompted } }
 
+    /// Settable after construction — `OnboardingViewModelTests` flips this mid-test to simulate the
+    /// user granting Accessibility in System Settings while `openAccessibilitySettings()`'s poll is
+    /// still running.
+    var accessibility: Bool {
+        get { state.withLock { $0.accessibility } }
+        set { state.withLock { $0.accessibility = newValue } }
+    }
+
     func microphone() -> PermissionState { state.withLock { $0.microphone } }
 
     /// Mirrors `SystemPermissions.requestMicrophone()`'s real-world effect: the OS grant/denial the

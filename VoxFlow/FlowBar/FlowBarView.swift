@@ -246,18 +246,9 @@ struct FlowBarView: View {
         .buttonStyle(.plain)
     }
 
-    private func keycap(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 11, weight: .medium))
-            .foregroundStyle(Palette.hudText.opacity(0.85))
-            .fixedSize()
-            .padding(.horizontal, 7)
-            .padding(.vertical, 4)
-            .background(
-                RoundedRectangle(cornerRadius: 5).fill(Color.white.opacity(0.16))
-                    .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.white.opacity(0.2), lineWidth: 1))
-            )
-    }
+    // `KeycapView(style: .dark)` — extracted to `VoxFlow/Design/KeycapView.swift` so Settings ›
+    // Hotkeys (ST-02) can reuse the same shape.
+    private func keycap(_ text: String) -> some View { KeycapView(text: text, style: .dark) }
 }
 
 /// A near-full ring that spins forever (FB-03 "Cleaning up…", FB-12 "Loading model…"). Drawn rather

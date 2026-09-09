@@ -1,5 +1,4 @@
 import Foundation
-import os
 import Synchronization
 import VoxFlowAudio
 import VoxFlowCore
@@ -49,27 +48,42 @@ final class AppServices {
     /// Same reasoning as `filesViewModel`: `SettingsPage`/`ModelsSettingsView` read this instead of
     /// each owning their own, so a download started before leaving Settings keeps being tracked.
     let modelsViewModel: ModelsViewModel
+    /// Settings › Audio (ST-04) — built once here so `SettingsPage` keeps reading the same instance.
+    let audioViewModel: AudioViewModel
+    /// Settings › Privacy (ST-05) — same reasoning as `audioViewModel`.
+    let privacyViewModel: PrivacyViewModel
 
     let dictationSettings: DictationSettings
     /// Shared with the Files `LazyModelFileTranscriber` (ruling 9: one place knows which model is loaded).
     let modelLoader: ModelLoader
-    /// `nil` when history storage is unavailable this launch (see `StorageError.keyLost` in `live()`).
-    let dictationStore: DictationStore?
-    let retention: RetentionRunner?
+    /// Owns the `DictationStore`/`RetentionRunner`; `historyService.status` is `.disabled(reason:)`
+    /// when history storage is unavailable this launch (see `StorageError.keyLost`) or reopening failed.
+    let historyService: HistoryService
+    /// Drives the History page (design MW-02) — built once here so navigating away and back keeps
+    /// its search/expanded/undo state, same reasoning as `filesViewModel`.
+    let historyViewModel: HistoryViewModel
     let inserter: AccessibilityTextInserter
+    /// Entered/left by onboarding's Try It step and History's scratchpad sheet — read once at the
+    /// start of every capture (`dictationController`'s `ephemeral:` closure) to decide whether that
+    /// capture should be written to History (I-1/I-2/I-3). See `EphemeralScope`'s doc comment.
+    let ephemeralScope: EphemeralScope
     let dictationController: DictationController
     let dictation: DictationCoordinator
     let flowBar: FlowBarPresenter
     let fnMonitor: FnKeyMonitor
-
-    private static let log = Logger(subsystem: "dev.artemsem.voxflow", category: "app-services")
+    /// Persisted onboarding progress (design ONB-01…05) — `AppDelegate` checks `.completed` on first
+    /// launch to decide whether to show the onboarding window instead of the main one.
+    let onboardingState: OnboardingState
+    let onboardingViewModel: OnboardingViewModel
 
     private init(modelStore: ModelStore, engine: WhisperCppEngine, queue: FileQueue, filesSettings: FilesSettings,
                  durations: AudioDurationReader, exports: ExportCoordinator, navigation: Navigation,
-                 filesViewModel: FilesViewModel, modelsViewModel: ModelsViewModel, dictationSettings: DictationSettings,
-                 modelLoader: ModelLoader, dictationStore: DictationStore?, retention: RetentionRunner?,
-                 inserter: AccessibilityTextInserter, dictationController: DictationController,
-                 dictation: DictationCoordinator, flowBar: FlowBarPresenter, fnMonitor: FnKeyMonitor) {
+                 filesViewModel: FilesViewModel, modelsViewModel: ModelsViewModel, audioViewModel: AudioViewModel,
+                 privacyViewModel: PrivacyViewModel, dictationSettings: DictationSettings,
+                 modelLoader: ModelLoader, historyService: HistoryService, historyViewModel: HistoryViewModel,
+                 inserter: AccessibilityTextInserter, ephemeralScope: EphemeralScope, dictationController: DictationController,
+                 dictation: DictationCoordinator, flowBar: FlowBarPresenter, fnMonitor: FnKeyMonitor,
+                 onboardingState: OnboardingState, onboardingViewModel: OnboardingViewModel) {
         self.modelStore = modelStore
         self.engine = engine
         self.queue = queue
@@ -79,15 +93,20 @@ final class AppServices {
         self.navigation = navigation
         self.filesViewModel = filesViewModel
         self.modelsViewModel = modelsViewModel
+        self.audioViewModel = audioViewModel
+        self.privacyViewModel = privacyViewModel
         self.dictationSettings = dictationSettings
         self.modelLoader = modelLoader
-        self.dictationStore = dictationStore
-        self.retention = retention
+        self.historyService = historyService
+        self.historyViewModel = historyViewModel
         self.inserter = inserter
+        self.ephemeralScope = ephemeralScope
         self.dictationController = dictationController
         self.dictation = dictation
         self.flowBar = flowBar
         self.fnMonitor = fnMonitor
+        self.onboardingState = onboardingState
+        self.onboardingViewModel = onboardingViewModel
     }
 
     static func live() -> AppServices {
@@ -115,31 +134,14 @@ final class AppServices {
         let frontmost = WorkspaceFrontmostApp()
         let inserter = AccessibilityTextInserter(permissions: permissions, pasteboard: SystemPasteboard())
 
-        // `try?` would discard which failure happened; `.keyLost` (the original key material is gone,
-        // e.g. a Keychain reset) is worth a log line, since it silently turns history off this launch.
-        var dictationStore: DictationStore?
-        do {
-            dictationStore = try DictationStore(databaseURL: DictationStore.defaultURL,
-                                                keyProvider: dictationSettings.encryptHistory ? HistoryKeyProviders.default() : nil)
-        } catch StorageError.keyLost {
-            log.error("history key lost — history disabled for this launch")
-        } catch {
-            log.error("history store unavailable, history disabled for this launch: \(String(describing: error))")
-        }
+        // `HistoryService` owns opening/reopening the store (and its `RetentionRunner`) off the main
+        // actor; `.keyLost` (the original key material is gone, e.g. a Keychain reset) and other open
+        // failures land in `historyService.status` and are logged inside the service.
+        let historyService = HistoryService(url: DictationStore.defaultURL, settings: dictationSettings,
+                                            keyProvider: { HistoryKeyProviders.default() }, clock: SystemMonotonicClock())
 
-        // Reads the persisted value straight from `settingsStore` (Sendable) rather than
-        // `dictationSettings.retentionDays` (a main-actor-isolated `var`), which a `@Sendable`
-        // closure called from the actor's own executor cannot touch directly. `DictationSettings.Keys`
-        // is the single source of truth for the key name, so this can't silently drift from what
-        // `DictationSettings` itself persists to.
-        let retention: RetentionRunner? = dictationStore.map { store in
-            RetentionRunner(store: store,
-                            policy: { RetentionPolicy(days: settingsStore.string(forKey: DictationSettings.Keys.retentionDays).flatMap(Int.init) ?? 30) },
-                            now: Date.init, clock: SystemMonotonicClock())
-        }
-        if let retention { Task { await retention.start() } }
-
-        let historyWriter = HistoryWriter(store: dictationStore, settings: dictationSettings.box, now: Date.init)
+        let historyWriter = HistoryWriter(storeBox: historyService.storeBox, settings: dictationSettings.box, now: Date.init,
+                                          ready: { await historyService.ready() })
 
         // Built fresh on every fn-down (not once, up front) so a Settings edit to the excluded-apps
         // list or hotkey mode applies to the very next capture rather than only after a relaunch.
@@ -156,6 +158,10 @@ final class AppServices {
         // `levelSink` carries the level callback across that gap without capturing the (non-Sendable)
         // coordinator itself in the microphone's `@Sendable` closure.
         let levelSink = DictationLevelSink()
+        // Entered/left by onboarding's Try It step and History's scratchpad sheet — read once at the
+        // start of every capture below so an onboarding/scratchpad dictation is never written to
+        // History (I-1/I-2/I-3), replacing the old shared `HistoryWriter` suppression flag.
+        let ephemeralScope = EphemeralScope()
         let dictationController = DictationController(
             config: dictationSettings.flowBarConfig,
             microphone: MeteredMicrophone(base: MicrophoneSource()) { rms in levelSink.report(rms) },
@@ -166,11 +172,22 @@ final class AppServices {
             loadModel: { _ = try await modelLoader.ensureLoaded() },
             options: { dictationSettings.box.current.options },
             onSave: { result, appName in await historyWriter.save(result, appName: appName) },
-            copyToClipboard: { SystemPasteboard().setString($0) }
+            copyToClipboard: { SystemPasteboard().setString($0) },
+            ephemeral: { ephemeralScope.isActive }
         )
         let dictation = DictationCoordinator(controller: dictationController, settings: dictationSettings,
                                              permissions: permissions, navigation: navigation)
         levelSink.attach(dictation)
+
+        // History's "Try it in a scratchpad" (design 2d) enters/leaves `ephemeralScope` from its own
+        // sheet view (`HistoryPage.ScratchpadSheet`) — this view model doesn't need to know about it.
+        let historyViewModel = HistoryViewModel(service: historyService, settings: dictationSettings, navigation: navigation,
+                                                clock: SystemMonotonicClock(), pasteboard: SystemPasteboard())
+
+        // Live settings: a silence-stop change reaches the running controller without waiting for
+        // the next dictation to start it fresh; an encryption/retention change reopens the store.
+        dictationSettings.onConfigChange = { config in Task { await dictationController.updateConfig(config) } }
+        dictationSettings.onHistorySettingsChange = { historyService.reopen() }
 
         let flowBarPanel = FlowBarPanel(rootView: FlowBarView(coordinator: dictation))
         let flowBar = FlowBarPresenter(panel: flowBarPanel, scheduler: TaskHideScheduler())
@@ -182,11 +199,22 @@ final class AppServices {
             isHUDActive: { dictation.isHUDActive }
         )
 
+        let onboardingState = OnboardingState(store: settingsStore)
+        let onboardingViewModel = OnboardingViewModel(state: onboardingState, permissions: permissions, settings: dictationSettings,
+                                                       models: modelsViewModel, dictation: dictation, ephemeralScope: ephemeralScope,
+                                                       navigation: navigation, clock: SystemMonotonicClock())
+
+        let audioViewModel = AudioViewModel(devices: AVCaptureInputDeviceProvider(), settings: dictationSettings, dictation: dictation)
+        let privacyViewModel = PrivacyViewModel(settings: dictationSettings, history: historyService, apps: WorkspaceInstalledApps())
+
         return AppServices(modelStore: modelStore, engine: engine, queue: queue, filesSettings: filesSettings,
                            durations: durations, exports: exports, navigation: navigation, filesViewModel: filesViewModel,
-                           modelsViewModel: modelsViewModel, dictationSettings: dictationSettings, modelLoader: modelLoader,
-                           dictationStore: dictationStore, retention: retention, inserter: inserter,
-                           dictationController: dictationController, dictation: dictation, flowBar: flowBar, fnMonitor: fnMonitor)
+                           modelsViewModel: modelsViewModel, audioViewModel: audioViewModel, privacyViewModel: privacyViewModel,
+                           dictationSettings: dictationSettings, modelLoader: modelLoader,
+                           historyService: historyService, historyViewModel: historyViewModel, inserter: inserter,
+                           ephemeralScope: ephemeralScope, dictationController: dictationController, dictation: dictation,
+                           flowBar: flowBar, fnMonitor: fnMonitor,
+                           onboardingState: onboardingState, onboardingViewModel: onboardingViewModel)
     }
 
     var exporter: TranscriptExporter { TranscriptExporter(directory: filesSettings.outputFolder) }

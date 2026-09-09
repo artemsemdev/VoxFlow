@@ -18,6 +18,11 @@ struct VoxFlowApp: App {
             navigation.requestMainWindow = false
             openWindow(id: MainWindowID.main)
         }
+        .onChange(of: navigation.requestOnboarding) { _, requested in
+            guard requested else { return }
+            navigation.requestOnboarding = false
+            openWindow(id: OnboardingWindowID.onboarding)
+        }
         .commands {
             SidebarCommands()
             CommandGroup(after: .sidebar) {
@@ -43,5 +48,15 @@ struct VoxFlowApp: App {
         MenuBarExtra("VoxFlow", systemImage: "waveform") {
             MenuBarContent()
         }
+
+        Window("Welcome to VoxFlow", id: OnboardingWindowID.onboarding) {
+            OnboardingWindow()
+                .environment(AppServices.shared)
+        }
+        .windowResizability(.contentSize)
+        // D-1: one set of chrome — real traffic lights, no titlebar strip/title text above the
+        // content, matching the mock (`OnboardingContentView` reserves clearance for them but no
+        // longer hand-draws its own).
+        .windowStyle(.hiddenTitleBar)
     }
 }

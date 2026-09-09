@@ -31,6 +31,13 @@ final class DictationSettings {
         static let retentionDays = "privacy.retentionDays"
     }
 
+    /// Fired from `silenceStop`'s `didSet` (after clamping) so a live dictation's controller can
+    /// pick up the new value — see `DictationController.updateConfig`.
+    var onConfigChange: ((FlowBarConfig) -> Void)?
+    /// Fired from `encryptHistory`/`retentionDays`'s `didSet`s so `HistoryService` can reopen the
+    /// store with the new key policy / restart retention with the new window.
+    var onHistorySettingsChange: (() -> Void)?
+
     var hotkeyMode: HotkeyMode { didSet { store.set(hotkeyMode.rawValue, forKey: "dictation.hotkeyMode") } }
     var silenceStop: TimeInterval {
         didSet {
@@ -43,12 +50,13 @@ final class DictationSettings {
                 return
             }
             store.set(String(silenceStop), forKey: "dictation.silenceStop")
+            onConfigChange?(flowBarConfig)
         }
     }
     var language: String? { didSet { store.set(language, forKey: "dictation.language"); sync() } }
     var keepHistory: Bool { didSet { store.set(keepHistory ? "1" : "0", forKey: "privacy.keepHistory"); sync() } }
-    var encryptHistory: Bool { didSet { store.set(encryptHistory ? "1" : "0", forKey: "privacy.encryptHistory") } }
-    var retentionDays: Int { didSet { store.set(String(retentionDays), forKey: Keys.retentionDays) } }
+    var encryptHistory: Bool { didSet { store.set(encryptHistory ? "1" : "0", forKey: "privacy.encryptHistory"); onHistorySettingsChange?() } }
+    var retentionDays: Int { didSet { store.set(String(retentionDays), forKey: Keys.retentionDays); onHistorySettingsChange?() } }
     var excludedBundleIDs: [String] { didSet { store.set(excludedBundleIDs.joined(separator: ","), forKey: "privacy.excludedApps"); sync() } }
 
     init(store: any KeyValueStore) {

@@ -1,13 +1,16 @@
 import SwiftUI
 
 /// Settings (design ST-01…06): segmented tabs across the top, `navigation.settingsTab` picks which
-/// one shows. Only Models (ST-03) is real in this phase — the other five read "Coming in a later
-/// phase", matching `PlaceholderPageView`'s treatment of the not-yet-built sidebar pages.
+/// one shows. Hotkeys/Models/Audio/Privacy (ST-02…05) are real; General and MCP (ST-01, ST-06) read
+/// "Coming in a later phase", matching `PlaceholderPageView`'s treatment of the not-yet-built
+/// sidebar pages.
 struct SettingsPage: View {
     @Environment(AppServices.self) private var services
     @Environment(Navigation.self) private var navigation
 
     private var model: ModelsViewModel { services.modelsViewModel }
+    private var audio: AudioViewModel { services.audioViewModel }
+    private var privacy: PrivacyViewModel { services.privacyViewModel }
 
     var body: some View {
         @Bindable var navigation = navigation
@@ -23,10 +26,12 @@ struct SettingsPage: View {
             .padding(.top, 16)
 
             Group {
-                if navigation.settingsTab == .models {
-                    ModelsSettingsView(model: model)
-                } else {
-                    SettingsPlaceholderTab(tab: navigation.settingsTab)
+                switch navigation.settingsTab {
+                case .hotkeys: HotkeysSettingsView(settings: services.dictationSettings)
+                case .models: ModelsSettingsView(model: model)
+                case .audio: AudioSettingsView(audio: audio)
+                case .privacy: PrivacySettingsView(privacy: privacy)
+                case .general, .mcp: SettingsPlaceholderTab(tab: navigation.settingsTab)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)

@@ -6,10 +6,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Starts the dictation loop exactly once: `dictation.start()` begins mirroring controller state,
     /// `flowBar.bind(to:)` shows/hides the HUD off that state, `fnMonitor.start()` arms the global
     /// fn/esc/any-key monitors (design 3e — needs Accessibility trust to see events at all).
+    ///
+    /// None of that (nor `historyService.ready()`) runs under the XCTest host: the test process must
+    /// never open the mic, install global fn/esc monitors or touch the Keychain (#143) just because
+    /// it launched the app to host its tests.
     func applicationDidFinishLaunching(_ notification: Notification) {
-        AppServices.shared.dictation.start()
-        AppServices.shared.flowBar.bind(to: AppServices.shared.dictation)
-        AppServices.shared.fnMonitor.start()
+        // M-2: gates the onboarding-routing block too, not just dictation/monitor/`ready()` above it
+        // — without this, an XCTest run on a machine where onboarding was never completed closes the
+        // test host's main window and opens the onboarding window (running `TryItStepView.onAppear`
+        // → `beginTryIt()`) under the test process. Harmless today (no mic/Keychain/dictation under
+        // tests either way), but it contradicted the stated "nothing onboarding-related runs under
+        // XCTest" rule.
+        if LaunchEnvironment.isRunningTests() == false {
+            AppServices.shared.dictation.start()
+            AppServices.shared.flowBar.bind(to: AppServices.shared.dictation)
+            AppServices.shared.fnMonitor.start()
+            // `HistoryService` opens lazily (Keychain access deferred to first use) — run that open
+            // once here at a real launch so retention (design §5) runs at launch as the spec says,
+            // rather than waiting for the first History read/write to trigger it implicitly.
+            Task { await AppServices.shared.historyService.ready() }
+
+            // First launch (or onboarding never finished): show it instead of the main window —
+            // closing whatever SwiftUI already opened for `MainWindowID.main` so the two don't both
+            // appear.
+            if !AppServices.shared.onboardingState.completed {
+                NSApp.windows.first { $0.identifier?.rawValue == MainWindowID.main }?.close()
+                // M-1: `requestOnboarding` is consumed by `.onChange` on the main `Window` scene, which
+                // SwiftUI attaches while building the scene graph — that may not have happened yet at
+                // `applicationDidFinishLaunching` (this runs from `NSApplicationDelegateAdaptor`, which
+                // itself fires from within that same launch sequence). Setting it a runloop turn later
+                // gives the scene graph a turn to finish installing its observers first, so the flag is
+                // never set before anything is watching it.
+                Task { @MainActor in
+                    AppServices.shared.navigation.requestOnboarding = true
+                }
+            }
+        }
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {

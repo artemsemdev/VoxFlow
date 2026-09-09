@@ -12,8 +12,18 @@ versioning.
   HUD shows listening/processing/result; recognized text is inserted into the focused field via
   Accessibility, or copied to the clipboard when there isn't one; finished dictations save to
   encrypted history (Privacy toggle permitting); the menu bar status line follows dictation state.
-  Requires Microphone and Accessibility permission, granted on first use. Onboarding and the
-  History page follow in phase 3c.
+  Requires Microphone and Accessibility permission, granted on first use.
+- First-launch onboarding: a five-step window (welcome, permissions, hotkey mode, model, try it)
+  with buttons to grant Microphone and open System Settings for Accessibility, a hands-free/push-
+  to-talk choice, model download (or "Installed" when one already is), and a scratchpad to try
+  dictation before the main window opens. Progress and completion persist across relaunches.
+- History page: search, expand a row for the full transcript, Copy, Delete with Undo; a "Try it"
+  entry point from onboarding inserts into a scratchpad without writing a History row.
+- Settings › Hotkeys (mode + shortcuts), Audio (input device, silence-stop duration, hands-free)
+  and Privacy (encrypt-history-at-rest toggle, retention) — live, editing them applies immediately.
+- Launch wiring: `HistoryService` opens (and starts retention) once at every real launch; the
+  XCTest host skips that open, dictation start, Flow Bar binding and the fn/esc monitor so running
+  tests never opens the microphone, installs global monitors or touches the Keychain.
 
 ## 2.0.0 — 2026-09-08
 

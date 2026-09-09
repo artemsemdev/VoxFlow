@@ -12,6 +12,7 @@ struct MainWindow: View {
         } detail: {
             switch navigation.page {
             case .files: FilesPage()
+            case .history: HistoryPage()
             case .settings: SettingsPage()
             default: PlaceholderPageView(page: navigation.page)
             }
