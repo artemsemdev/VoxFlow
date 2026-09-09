@@ -52,9 +52,11 @@ struct AddWordSheet: View {
                         RoundedRectangle(cornerRadius: 6, style: .continuous)
                             .strokeBorder(isDuplicate ? Color.red : Color.clear, lineWidth: 2)
                     )
-                if case .duplicate(let existing) = viewModel.validation {
+                if case .duplicate(let existing, let typed) = viewModel.validation {
                     HStack {
-                        Text("\u{201c}\(existing.word)\u{201d} is already in your dictionary.")
+                        // Straight quotes, and the *typed* word (not the stored entry's casing) —
+                        // design MW-03v / resolution 4: `"Kubernetes" is already in your dictionary.`
+                        Text("\"\(typed)\" is already in your dictionary.")
                             .foregroundStyle(.red)
                         Spacer()
                         Button("Edit existing") { viewModel.editExisting(existing) }

@@ -1,7 +1,6 @@
 import AppKit
 import CryptoKit
 import Foundation
-import Synchronization
 import SwiftUI
 import Testing
 import VoxFlowCore
@@ -11,22 +10,6 @@ import VoxFlowTestSupport
 
 private struct InsecureKeyProvider: HistoryKeyProviding {
     func historyKey() throws -> HistoryKey { HistoryKey(key: .init(size: .bits256), isNewlyCreated: true) }
-}
-
-/// A `ContactsImporting` whose `fetchNames()` never returns until `unblock()` is called — lets a
-/// render case snapshot `.importing` mid-flight instead of racing past it, the same way a real
-/// import stays in that state until the fetch completes.
-private final class BlockingContacts: ContactsImporting, Sendable {
-    private let continuation = Mutex<CheckedContinuation<[String], Error>?>(nil)
-    private let names: [String]
-    init(names: [String]) { self.names = names }
-    func authorization() -> PermissionState { .granted }
-    func request() async -> PermissionState { .granted }
-    func fetchNames() async throws -> [String] {
-        try await withCheckedThrowingContinuation { k in self.continuation.withLock { $0 = k } }
-    }
-    func unblock() { continuation.withLock { $0?.resume(returning: names); $0 = nil } }
-    func observeChanges(_ handler: @escaping @Sendable () -> Void) -> ContactsChangeToken { ContactsChangeToken {} }
 }
 
 /// Design-fidelity renders (Task 4 Step 3) — gated behind `VOXFLOW_RENDER`, same convention as
@@ -113,12 +96,13 @@ struct DictionaryRenderTests {
         validationBundle.vm.sheet?.word = "Kubernetes"
         try Self.render(AddWordSheetRenderPreview(viewModel: validationBundle.vm), name: "4-validation-duplicate", directory: directory)
 
-        // 5. MW-03c importing — a blocked fetch snapshotted mid-flight.
-        let blocking = BlockingContacts(names: ["Anh Nguyen"])
+        // 5. MW-03c importing — fetch still in flight, count unknown yet (F2: spinner, no number).
+        let doneNames312 = (1...312).map { "Contact \($0)" }
+        let blocking = BlockingFakeContacts(names: doneNames312)
         let importingBundle = makeBundle(contacts: blocking)
         await importingBundle.vm.load()
         let importTask = Task { await importingBundle.vm.setLearnFromContacts(true) }
-        await waitFor { importingBundle.vm.contacts == .importing }
+        await waitFor { importingBundle.vm.contacts == .importing(count: nil) }
         try Self.render(DictionaryContactsRow(viewModel: importingBundle.vm).frame(width: 860).padding(20).background(Color(nsColor: .windowBackgroundColor)),
                         name: "5-contacts-importing", directory: directory)
         blocking.unblock()
@@ -247,9 +231,9 @@ private struct AddWordSheetRenderPreview: View {
                     .padding(6)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(isDuplicate ? Color.red : Color.secondary.opacity(0.3), lineWidth: isDuplicate ? 2 : 1))
-                if case .duplicate(let existing) = viewModel.validation {
+                if case .duplicate(_, let typed) = viewModel.validation {
                     HStack {
-                        Text("\u{201c}\(existing.word)\u{201d} is already in your dictionary.").foregroundStyle(.red)
+                        Text("\"\(typed)\" is already in your dictionary.").foregroundStyle(.red)
                         Spacer()
                         Text("Edit existing").foregroundStyle(.tint)
                     }

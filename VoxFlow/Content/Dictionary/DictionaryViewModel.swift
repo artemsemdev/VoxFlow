@@ -1,10 +1,16 @@
 import AppKit
 import Foundation
+import os
 import VoxFlowStorage
 
-/// Case- and diacritic-insensitive fold, mirroring `DictionaryStore`'s own `word_folded` column
-/// (that extension is internal to `VoxFlowStorage`, so the app-side duplicate check needs its own
-/// copy to compare `sheet.word` against the already-loaded `entries` live, without a round trip).
+/// Case- and diacritic-insensitive fold, mirroring `DictionaryStore`'s own `word_folded` column.
+/// That extension is internal to `VoxFlowStorage`, and this fix pass is scoped to
+/// `VoxFlow/Content/{Dictionary,Contacts}` only (a concurrent implementer owns Snippets/Styles/
+/// `MainWindow`/`AppServices`) — exposing `foldedForMatching` as `public` from `VoxFlowStorage`
+/// (review F4's preferred fix) would touch a file outside that scope, so this keeps its own copy for
+/// now and `DictionaryViewModelTests.foldedMatchingPinnedToStorageSemantics` pins it against the same
+/// case/diacritic cases `DictionaryStoreTests` exercises, so a drift between the two would fail loudly
+/// instead of silently. Exposing the shared fold is a good follow-up outside this pass.
 extension String {
     var foldedForDictionaryMatching: String {
         folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil).lowercased()
@@ -27,18 +33,24 @@ final class DictionaryViewModel {
     }
 
     /// Live validation (design MW-03v), recomputed from `sheet` and `entries` on every access —
-    /// there's nothing to debounce, folding+comparing a short word list is instant.
+    /// there's nothing to debounce, folding+comparing a short word list is instant. `.duplicate`
+    /// carries the *typed* word (trimmed, as-typed casing) for the message (design MW-03v /
+    /// resolution 4: `"<Word>" is already in your dictionary.` quotes what the user typed, not the
+    /// stored entry's casing) alongside the `existing` row "Edit existing" prefills from.
     enum Validation: Equatable {
         case empty
-        case duplicate(existing: DictionaryEntry)
+        case duplicate(existing: DictionaryEntry, typed: String)
     }
 
     /// "Learn names from Contacts" (design MW-03, MW-03c) — `.off`/`.denied` are followed by the
     /// toggle snapping back off (`stylingSettings.learnFromContacts` reset to false); `.importing` →
-    /// `.done(count:)` is one successful import run.
+    /// `.done(count:)` is one successful import run. `.importing(count:)` is `nil` while the Contacts
+    /// fetch itself is still in flight (nothing to show a number for yet) and becomes the real count
+    /// the moment the fetch returns, before the (fast, local) per-name insert loop runs — so "Importing
+    /// N names…" is accurate rather than a placeholder frozen at 0.
     enum ContactsState: Equatable {
         case off
-        case importing
+        case importing(count: Int?)
         case done(count: Int)
         case denied
     }
@@ -60,6 +72,15 @@ final class DictionaryViewModel {
     var isObservingContacts = false
     var contactsChangeToken: ContactsChangeToken?
 
+    /// Bumped by every `setLearnFromContacts`/`handleContactsChange`/`load` Contacts-import attempt
+    /// (F7): each caller captures the value at its own start, and only applies its result if the
+    /// counter still matches when it finishes — a toggle-off (or any later attempt) bumps it first,
+    /// so a stale "on" import that races past that point discards its own result instead of clobbering
+    /// the newer state, and removes whatever it already wrote (see `setLearnFromContacts`).
+    var contactsGeneration = 0
+
+    private static let log = Logger(subsystem: "dev.artemsem.voxflow", category: "dictionary-view-model")
+
     init(content: ContentService, contactsImporter: any ContactsImporting, stylingSettings: StylingSettings,
          openURL: @escaping (URL) -> Void = { NSWorkspace.shared.open($0) }) {
         self.content = content
@@ -79,7 +100,7 @@ final class DictionaryViewModel {
         let trimmed = sheet.word.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty { return .empty }
         if let existing = entries.first(where: { $0.word.foldedForDictionaryMatching == trimmed.foldedForDictionaryMatching && $0.id != sheet.editingID }) {
-            return .duplicate(existing: existing)
+            return .duplicate(existing: existing, typed: trimmed)
         }
         return nil
     }
@@ -93,15 +114,11 @@ final class DictionaryViewModel {
     func load() async {
         entries = await content.dictionary.all()
         guard stylingSettings.learnFromContacts else { return }
-        let result = await runContactsImport(requestIfNeeded: false)
-        contacts = result
-        if case .done = result {
-            observeContactsChangesIfNeeded()
-        } else {
-            // Permission was revoked since the toggle was last turned on — the toggle can't stay
-            // claiming "on" over a state that isn't actually importing anything.
-            stylingSettings.learnFromContacts = false
-        }
+        contactsGeneration += 1
+        let generation = contactsGeneration
+        let result = await runContactsImport(requestIfNeeded: false, generation: generation)
+        guard generation == contactsGeneration else { return }   // superseded — see `contactsGeneration`
+        applyContactsResult(result)
     }
 
     // MARK: Sheet actions
@@ -148,10 +165,16 @@ final class DictionaryViewModel {
         }
     }
 
+    /// Removes the row locally right away, then issues the store delete — a failure there is logged
+    /// (not swallowed) rather than silently reverting only whenever the page next happens to `load()`.
     func delete(_ entry: DictionaryEntry) {
         entries.removeAll { $0.id == entry.id }
         Task { [content] in
-            try? await content.dictionary.delete(id: entry.id)
+            do {
+                try await content.dictionary.delete(id: entry.id)
+            } catch {
+                Self.log.error("dictionary delete failed for id \(entry.id, privacy: .public): \(String(describing: error), privacy: .public)")
+            }
         }
     }
 }

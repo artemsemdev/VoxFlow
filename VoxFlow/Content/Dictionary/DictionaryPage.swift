@@ -75,14 +75,25 @@ struct DictionaryList: View {
     }
 }
 
-/// "Word · Sounds like · Type · Uses" (design MW-03) — matches `DictionaryRowView`'s column widths.
+/// Column widths shared by `DictionaryColumnHeader` and `DictionaryRowView` (F1 fix) — the header
+/// previously reserved `Type 90 / Uses 50` while the row reserved `pill 90 / value 90`, so the "Type"
+/// and "Uses" labels drifted from the columns they were meant to sit above. One shared source of
+/// truth for the two fixed-width trailing columns; "Word"/"Sounds like" both stay `maxWidth: .infinity`
+/// in each view and so need no shared constant.
+private enum DictionaryColumn {
+    static let type: CGFloat = 90
+    static let trailing: CGFloat = 90
+}
+
+/// "Word · Sounds like · Type · Uses" (design MW-03) — matches `DictionaryRowView`'s column widths
+/// via `DictionaryColumn`.
 struct DictionaryColumnHeader: View {
     var body: some View {
         HStack(spacing: 12) {
             Text("Word").frame(maxWidth: .infinity, alignment: .leading)
             Text("Sounds like").frame(maxWidth: .infinity, alignment: .leading)
-            Text("Type").frame(width: 90, alignment: .leading)
-            Text("Uses").frame(width: 50, alignment: .trailing)
+            Text("Type").frame(width: DictionaryColumn.type, alignment: .leading)
+            Text("Uses").frame(width: DictionaryColumn.trailing, alignment: .trailing)
         }
         .font(.caption.weight(.semibold))
         .foregroundStyle(.secondary)
@@ -105,11 +116,11 @@ struct DictionaryRowView: View {
                 .italic()
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            typePill.frame(width: 90, alignment: .leading)
+            typePill.frame(width: DictionaryColumn.type, alignment: .leading)
             Group {
                 if isHovering { actions } else { Text("\(entry.uses)").foregroundStyle(.secondary) }
             }
-            .frame(width: 90, alignment: .trailing)
+            .frame(width: DictionaryColumn.trailing, alignment: .trailing)
         }
         .font(.callout)
         .padding(.horizontal, 16)
@@ -176,9 +187,7 @@ struct DictionaryContactsRow: View {
         HStack(alignment: .top, spacing: 16) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Learn names from Contacts").fontWeight(.medium)
-                Text(subtitle)
-                    .font(.caption)
-                    .foregroundStyle(isDenied ? Color.orange : .secondary)
+                subtitleView
             }
             Spacer(minLength: 12)
             if isDenied {
@@ -198,21 +207,34 @@ struct DictionaryContactsRow: View {
 
     private var isDenied: Bool { viewModel.contacts == .denied }
 
-    private var subtitle: String {
+    /// F2 fix: `.importing`'s count now comes straight from `ContactsState.importing(count:)` — set
+    /// by `runContactsImport` to the real fetched count before the insert loop runs, not derived from
+    /// `entries` (which stayed 0 until rows actually landed, showing "Importing 0 names…" the whole
+    /// time). `nil` (still fetching) shows the spinner with no number yet, matching the canvas's
+    /// loading glyph before the count is known.
+    @ViewBuilder
+    private var subtitleView: some View {
         switch viewModel.contacts {
-        case .off: "Reads first and last names locally. Nothing is uploaded."
-        case .importing: "Importing \(placeholderCount) names… nothing is uploaded"
-        case .done(let count): "\(count) names added · updates when Contacts change"
-        case .denied: "Contacts access was denied. Allow it in System Settings → Privacy & Security → Contacts."
+        case .off:
+            Text("Reads first and last names locally. Nothing is uploaded.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        case .importing(let count):
+            HStack(spacing: 4) {
+                ProgressView().controlSize(.small)
+                Text(count.map { "Importing \($0) names… nothing is uploaded" } ?? "Importing names… nothing is uploaded")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        case .done(let count):
+            Text("\(count) names added · updates when Contacts change")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        case .denied:
+            Text("Contacts access was denied. Allow it in System Settings → Privacy & Security → Contacts.")
+                .font(.caption)
+                .foregroundStyle(Color.orange)
         }
-    }
-
-    /// `.importing` doesn't know the final count yet — the design's sample copy ("Importing 312
-    /// names…") shows a concrete number, so this reuses the last known `.done` count, falling back to
-    /// the entry count already loaded (both are the best guess available mid-import; the count firms
-    /// up the moment `.done` replaces this state).
-    private var placeholderCount: Int {
-        viewModel.entries.filter { $0.source == "contacts" }.count
     }
 
     private var toggleBinding: Binding<Bool> {

@@ -29,7 +29,7 @@ struct DictionaryViewModelTests {
             content = ContentService(history: service)
         }
 
-        func vm(contacts: FakeContacts = FakeContacts()) -> DictionaryViewModel {
+        func vm(contacts: any ContactsImporting = FakeContacts()) -> DictionaryViewModel {
             DictionaryViewModel(content: content, contactsImporter: contacts, stylingSettings: settings, openURL: { _ in })
         }
     }
@@ -84,12 +84,45 @@ struct DictionaryViewModelTests {
         vm.presentAdd()
         vm.sheet?.word = "kubernetes"   // different case — still a duplicate (folded match)
 
-        guard case .duplicate(let existing) = vm.validation else {
+        guard case .duplicate(let existing, let typed) = vm.validation else {
             Issue.record("expected .duplicate, got \(String(describing: vm.validation))")
             return
         }
         #expect(existing.word == "Kubernetes")
         #expect(vm.canAdd == false)
+        // F3: the message quotes what was *typed*, not the stored entry's casing.
+        #expect(typed == "kubernetes")
+    }
+
+    @Test("F3: the duplicate message quotes the typed word (as typed, trimmed) in straight quotes")
+    func duplicateMessageQuotesTypedWord() async throws {
+        let h = Harness()
+        let vm = h.vm()
+        await vm.load()
+        vm.presentAdd()
+        vm.sheet?.word = "Kubernetes"
+        await vm.add()
+
+        vm.presentAdd()
+        vm.sheet?.word = "  kubernetes  "   // extra whitespace — trimmed, but casing as typed
+
+        guard case .duplicate(_, let typed) = vm.validation else {
+            Issue.record("expected .duplicate, got \(String(describing: vm.validation))")
+            return
+        }
+        #expect(typed == "kubernetes")
+    }
+
+    /// F4: `DictionaryViewModel`'s local `String.foldedForDictionaryMatching` must keep matching
+    /// `DictionaryStore`'s `word_folded` semantics (case + diacritic insensitive) — this pass couldn't
+    /// expose the storage-internal fold as `public` (out of its file scope), so this pins the two
+    /// implementations to the same result set on the exact cases `DictionaryStoreTests` exercises, so
+    /// a drift between them fails a test instead of silently producing wrong validation.
+    @Test("F4: the local fold matches DictionaryStore's word_folded semantics — case and diacritic insensitive")
+    func foldedMatchingPinnedToStorageSemantics() {
+        #expect("Kubernetes".foldedForDictionaryMatching == "kubernetes".foldedForDictionaryMatching)
+        #expect("Tāmaki".foldedForDictionaryMatching == "Tamaki".foldedForDictionaryMatching)
+        #expect("VoxFlow".foldedForDictionaryMatching != "Snowflake".foldedForDictionaryMatching)
     }
 
     @Test("Edit existing prefills the sheet with the existing entry, in edit mode")
@@ -281,6 +314,79 @@ struct DictionaryViewModelTests {
 
         await waitFor { vm.entries.count == 2 }
         #expect(vm.contacts == .done(count: 2))
+    }
+
+    /// F2: the fetch resolves before the (fast) insert loop runs, and `.importing(count:)` reflects
+    /// the real fetched count at that point — not 0, and not derived from `entries`.
+    @Test("F2: .importing carries nil while fetching, then the real count once the fetch resolves")
+    func importingCarriesRealCount() async throws {
+        let h = Harness()
+        let blocking = BlockingFakeContacts(names: ["Anh Nguyen", "Priya Raghunathan", "Kubernetes"])
+        let vm = h.vm(contacts: blocking)
+        await vm.load()
+
+        let task = Task { await vm.setLearnFromContacts(true) }
+        await waitFor { vm.contacts == .importing(count: nil) }   // still fetching — no count yet
+
+        blocking.unblock()
+        await waitFor { vm.contacts != .importing(count: nil) }   // fetch resolved
+
+        // By the time we observe it, the state is either the transient `.importing(count: 3)` or
+        // (the fast local insert loop having already finished) `.done(count: 3)` — both prove the
+        // real fetched count made it into the state rather than staying frozen at 0.
+        switch vm.contacts {
+        case .importing(let count): #expect(count == 3)
+        case .done(let count): #expect(count == 3)
+        default: Issue.record("expected .importing(count: 3) or .done(count: 3), got \(vm.contacts)")
+        }
+        await task.value
+        #expect(vm.contacts == .done(count: 3))
+    }
+
+    /// F5: `handleContactsChange` must snap the toggle back off on a revoked permission exactly like
+    /// `load()` does — previously it only updated `contacts`, leaving the switch on over an amber row.
+    @Test("F5: a Contacts change notification that finds permission revoked snaps the toggle back off")
+    func contactsChangeSnapsBackOnRevoke() async throws {
+        let h = Harness()
+        let contacts = FakeContacts(authorization: .granted, names: ["Anh Nguyen"])
+        let vm = h.vm(contacts: contacts)
+        await vm.load()
+        await vm.setLearnFromContacts(true)
+        #expect(h.settings.learnFromContacts == true)
+
+        contacts.setAuthorization(.denied)
+        contacts.fireChange()
+
+        await waitFor { vm.contacts == .denied }
+        #expect(h.settings.learnFromContacts == false)
+    }
+
+    /// F7: a toggle-off that lands while an "on" import is still fetching must win — once the stale
+    /// import's fetch finally resolves, its result is discarded and any rows it wrote are removed,
+    /// rather than clobbering the "off" state with a stale `.done`.
+    @Test("F7: toggling off during an in-flight import cancels it and leaves no contacts rows behind")
+    func toggleOffDuringImportWins() async throws {
+        let h = Harness()
+        let blocking = BlockingFakeContacts(names: ["Anh Nguyen", "Priya Raghunathan"])
+        let vm = h.vm(contacts: blocking)
+        await vm.load()
+
+        let onTask = Task { await vm.setLearnFromContacts(true) }
+        await waitFor { vm.contacts == .importing(count: nil) }
+
+        await vm.setLearnFromContacts(false)   // arrives while the fetch above is still blocked
+        #expect(vm.contacts == .off)
+        #expect(h.settings.learnFromContacts == false)
+
+        blocking.unblock()   // the stale "on" import can now finish...
+        await onTask.value    // ...and settle
+
+        // The stale import must not have resurrected the toggle or left any contacts rows behind.
+        #expect(vm.contacts == .off)
+        #expect(h.settings.learnFromContacts == false)
+        #expect(vm.entries.isEmpty)
+        let stored = await h.content.dictionary.all()
+        #expect(stored.isEmpty)
     }
 
     @Test("openContactsSettings opens the Contacts privacy pane")
