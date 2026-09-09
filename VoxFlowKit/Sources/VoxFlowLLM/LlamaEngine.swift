@@ -35,6 +35,8 @@ public actor LlamaEngine: StyleEngine {
         deinit { llama_free(pointer) }
     }
 
+    /// Set from `withTaskCancellationHandler`'s onCancel (any thread) and read on `queue` between
+    /// decode steps — the lock is the whole synchronisation, same as `WhisperCppEngine.CancelFlag`.
     final class CancelFlag: @unchecked Sendable {
         private let lock = NSLock()
         private var flag = false
@@ -96,7 +98,7 @@ public actor LlamaEngine: StyleEngine {
             try await onQueue {
                 let vocab = llama_model_get_vocab(model.pointer)
                 let text = try Self.applyTemplate(model: model.pointer, prompt: prompt)
-                var tokens = try Self.tokenize(vocab: vocab, text: text)
+                let tokens = try Self.tokenize(vocab: vocab, text: text)
                 guard tokens.count + maxNewTokens <= limit else { throw LLMError.promptTooLong(tokens: tokens.count, limit: limit) }
 
                 llama_memory_clear(llama_get_memory(context.pointer), true)
@@ -148,7 +150,6 @@ public actor LlamaEngine: StyleEngine {
                     batch.seq_id[0]![0] = 0
                     batch.logits[0] = 1
                     position += 1
-                    tokens.append(token)
                     let code = llama_decode(context.pointer, batch)
                     guard code == 0 else { throw LLMError.decodeFailed(code: code) }
                     if cancel.isSet { throw LLMError.cancelled }
