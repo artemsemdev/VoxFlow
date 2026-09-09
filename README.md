@@ -31,11 +31,14 @@ any app, style cleanup with a local LLM and an MCP server follow in 2.x (see the
   processing and the result. Recognized text is inserted into the focused field via Accessibility,
   or copied to the clipboard when there isn't a text field; finished dictations save to encrypted
   history unless the Privacy toggle turns that off.
-- Needs Microphone and Accessibility permission — macOS prompts for each on first use.
+- Needs Microphone and Accessibility permission. First launch walks a five-step onboarding window
+  (welcome, permissions, hotkey mode, model, try it) with buttons to grant each permission and a
+  scratchpad to try dictation before the main window opens; SETUP.md explains how to reset it.
 - VoxFlow's own window is frontmost at launch, so click into the text field you want to dictate
   into (e.g. TextEdit) before the first fn press, or the dictation lands on the clipboard instead.
-- Onboarding and the History page are not built yet (phase 3c); Settings tabs beyond the defaults
-  follow in 2.2.
+- History page: search past dictations, expand a row for the full transcript, Copy, Delete with
+  Undo. Settings › Hotkeys (mode + shortcuts), Audio (input device, silence-stop, hands-free) and
+  Privacy (encrypt-at-rest toggle, retention) are built; General and MCP tabs follow in 2.2.
 
 ## Roadmap
 
@@ -48,8 +51,8 @@ any app, style cleanup with a local LLM and an MCP server follow in 2.x (see the
 | — | Signed and notarized releases | [#115](https://github.com/artemsemdev/VoxFlow/issues/115) |
 
 Dictation (capture, Flow Bar state machine and HUD, the fn hotkey, windowed transcription,
-Accessibility insertion, encrypted history) is wired end-to-end on `develop` (unreleased);
-onboarding and the History page follow in phase 3c.
+Accessibility insertion, encrypted history), onboarding, the History page and Settings ›
+Hotkeys/Audio/Privacy are wired end-to-end on `develop` (unreleased, phase 3c).
 
 Tracking issue: [#105](https://github.com/artemsemdev/VoxFlow/issues/105). The product design is the
 Claude Design canvas checked in at [design/](design/).

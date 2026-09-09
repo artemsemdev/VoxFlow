@@ -132,6 +132,40 @@
 - Manual checklist (owner): reset onboarding keys → launch → walk ONB-01…05 (grant Microphone via the button, Accessibility via System Settings, choose a mode, download or skip if installed, try-it inserts into the scratchpad) → main window opens on Home → History shows the try-it? No: suppressed — dictate once in TextEdit → History row appears → expand → Copy → Delete → Undo → Settings › Privacy toggle encryption off → rows show "Encrypted — …" → toggle on → readable again; Audio: change silence stop to 5 s, hands-free dictation stops after 5 s of silence.
 - Verification: full `xcodebuild … build test`, `swift test`, scripts; PR into `develop` with the template; on #110 tick the criteria the manual run confirmed; comment.
 
+#### Manual checklist (owner runs this on a real Mac)
+
+1. Quit VoxFlow. Reset onboarding: `defaults delete dev.artemsem.voxflow voxflow.onboarding.completed`,
+   `voxflow.onboarding.step`, `voxflow.onboarding.clipboardFallback` (see SETUP.md).
+2. Launch VoxFlow. The onboarding window opens, not the main window.
+3. ONB-01: welcome screen shows.
+4. ONB-02: permissions screen — click the Microphone button, grant it in the macOS prompt; click
+   the Accessibility button, grant it in System Settings and return to VoxFlow.
+   - ONB-02a: if Accessibility is denied instead, confirm the clipboard-fallback branch renders and
+     can be chosen to proceed.
+5. ONB-03: hotkey screen — choose a mode (push-to-talk or hands-free).
+6. ONB-04: model screen — if no model is installed, start a download and watch it complete; if one
+   is already installed, confirm the screen shows "Installed" instead of a download control.
+   - ONB-04a/SYS-DISK: if disk space is low, confirm the low-space alert appears instead of a stuck
+     download.
+7. ONB-05: try-it screen — dictate once; confirm the recognized text is inserted into the
+   onboarding scratchpad (not into any other app, and not saved to History).
+8. Finish onboarding. The main window opens on Home.
+9. Click into a TextEdit document, dictate once for real (fn press/hold or hands-free per the mode
+   chosen in step 5). Confirm the text is inserted into TextEdit.
+10. Open History. Confirm a new row appears for the TextEdit dictation (and only one — the
+    onboarding try-it in step 7 must not have created a row).
+11. Expand the row: confirm the full transcript renders.
+12. Click Copy: confirm the transcript is on the clipboard.
+13. Click Delete: confirm the row disappears and an Undo affordance appears; click Undo: confirm
+    the row comes back.
+14. Open Settings › Privacy. Turn "Encrypt history at rest" off. Confirm History rows now render as
+    "Encrypted — …" (unreadable without the toggle on).
+15. Turn encryption back on. Confirm History rows render as readable transcripts again.
+16. Open Settings › Audio. Change "Stop after silence" to 5 s. Start a hands-free dictation, go
+    silent, and confirm it stops automatically after about 5 seconds.
+17. Open Settings › Hotkeys. Switch the default mode (push-to-talk ↔ hands-free). Trigger dictation
+    and confirm the Flow Bar HUD's idle hint text follows the newly selected mode.
+
 ---
 
 ## Self-review
