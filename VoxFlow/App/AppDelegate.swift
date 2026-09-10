@@ -44,6 +44,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // are already populated (or racing to be) before fn is ever pressed.
             Task { await AppServices.shared.contentService.ready() }
 
+            // Phase 6 (ST-06): starts the real MCP server at launch when the user already had it
+            // enabled last session. A failure here (ports 7331–7340 all busy) is silently logged,
+            // not surfaced — there's no window guaranteed to be on screen at this point to show it
+            // in; `mcpViewModel.refresh()` (Settings › MCP Server's `.task`) re-syncs the toggle
+            // with reality the next time that page opens, same as `GeneralViewModel`'s own I3.
+            if AppServices.shared.mcpSettings.enabled {
+                Task { try? await AppServices.shared.mcpServerService.start() }
+            }
+
             // First launch (or onboarding never finished): show it instead of the main window —
             // closing whatever SwiftUI already opened for `MainWindowID.main` so the two don't both
             // appear.

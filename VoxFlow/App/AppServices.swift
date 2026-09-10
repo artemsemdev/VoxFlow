@@ -6,6 +6,7 @@ import VoxFlowCore
 import VoxFlowDictation
 import VoxFlowFiles
 import VoxFlowLLM
+import VoxFlowMCP
 import VoxFlowModels
 import VoxFlowSpeech
 import VoxFlowStorage
@@ -147,6 +148,9 @@ final class AppServices {
     let mcpSettings: MCPSettings
     let generalViewModel: GeneralViewModel
     let mcpViewModel: MCPViewModel
+    /// Phase 6: the real loopback MCP server — `AppDelegate` starts it at launch when
+    /// `mcpSettings.enabled`; `mcpViewModel` drives it thereafter (Settings › MCP Server toggle).
+    let mcpServerService: MCPServerService
     /// ST-01 "Play sounds…" — bound to `dictation` below (`live()`), same as `flowBar`.
     let soundCoordinator: SoundCoordinator
 
@@ -171,8 +175,8 @@ final class AppServices {
                  dictation: DictationCoordinator, flowBar: FlowBarPresenter, fnMonitor: FnKeyMonitor,
                  onboardingState: OnboardingState, onboardingViewModel: OnboardingViewModel,
                  generalSettings: GeneralSettings, mcpSettings: MCPSettings, generalViewModel: GeneralViewModel,
-                 mcpViewModel: MCPViewModel, soundCoordinator: SoundCoordinator, menuBarViewModel: MenuBarViewModel,
-                 notifications: NotificationCoordinator) {
+                 mcpViewModel: MCPViewModel, mcpServerService: MCPServerService, soundCoordinator: SoundCoordinator,
+                 menuBarViewModel: MenuBarViewModel, notifications: NotificationCoordinator) {
         self.modelStore = modelStore
         self.engine = engine
         self.queue = queue
@@ -209,6 +213,7 @@ final class AppServices {
         self.mcpSettings = mcpSettings
         self.generalViewModel = generalViewModel
         self.mcpViewModel = mcpViewModel
+        self.mcpServerService = mcpServerService
         self.soundCoordinator = soundCoordinator
         self.menuBarViewModel = menuBarViewModel
         self.notifications = notifications
@@ -389,7 +394,19 @@ final class AppServices {
         let generalViewModel = GeneralViewModel(settings: generalSettings, dictationSettings: dictationSettings,
                                                 loginItem: SMLoginItem(), appearanceApplier: NSAppearanceApplier(),
                                                 flowBarPositioning: flowBar)
-        let mcpViewModel = MCPViewModel(settings: mcpSettings, pasteboard: SystemPasteboard())
+        // Phase 6: the real loopback MCP server — built here (composition root), started by
+        // `AppDelegate` at launch when `mcpSettings.enabled`. `pathPolicy`'s scope matches
+        // `transcribe_file`'s own file picker: anywhere under the user's home directory, any audio
+        // extension `FileQueue`/Files already accepts. `approvalPresenter` is the real ST-06a panel
+        // bridge; `serverVersion` mirrors the app's own marketing version so `tools/list`'s
+        // `serverInfo.version` (MCPRouter) is never a hardcoded string that can drift from the app.
+        let mcpPathPolicy = PathPolicy(homeDirectory: FileManager.default.homeDirectoryForCurrentUser, allowedExtensions: SupportedAudio.extensions)
+        let mcpApprovalPresenter = MCPApprovalViewModel(clock: clock)
+        let mcpServerService = MCPServerService(settings: mcpSettings, coordinator: dictation, controller: dictationController,
+                                                historyService: historyService, fileTranscribing: transcriber, pathPolicy: mcpPathPolicy,
+                                                clock: clock, approvalPresenter: mcpApprovalPresenter, serverVersion: Self.appVersion)
+        let mcpViewModel = MCPViewModel(settings: mcpSettings, pasteboard: SystemPasteboard(), server: mcpServerService,
+                                        clientStoreProvider: mcpServerService)
         // ST-01 "Play sounds…" — bound here (Task 3's `SettingsServices` built this but never bound
         // it to a live coordinator; wiring `bind(to:)` into the real launch sequence was left to
         // this task, see its file-scope note).
@@ -434,8 +451,8 @@ final class AppServices {
                            flowBar: flowBar, fnMonitor: fnMonitor,
                            onboardingState: onboardingState, onboardingViewModel: onboardingViewModel,
                            generalSettings: generalSettings, mcpSettings: mcpSettings, generalViewModel: generalViewModel,
-                           mcpViewModel: mcpViewModel, soundCoordinator: soundCoordinator, menuBarViewModel: menuBarViewModel,
-                           notifications: notifications)
+                           mcpViewModel: mcpViewModel, mcpServerService: mcpServerService, soundCoordinator: soundCoordinator,
+                           menuBarViewModel: menuBarViewModel, notifications: notifications)
     }
 
     /// `modelsOnDisk` for `menuBarViewModel` above — a standalone, explicitly-typed `@Sendable`
@@ -450,4 +467,11 @@ final class AppServices {
     }
 
     var exporter: TranscriptExporter { TranscriptExporter(directory: filesSettings.outputFolder) }
+
+    /// `MCPServerService`'s `serverVersion` (`tools/list`'s `serverInfo.version`, `MCPRouter`) —
+    /// the same `CFBundleShortVersionString` `project.yml` sets from `MARKETING_VERSION`, so it
+    /// never drifts from the app's own version as a separate hardcoded string would.
+    private static var appVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "2.0.0"
+    }
 }
