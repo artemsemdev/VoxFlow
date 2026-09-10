@@ -53,6 +53,26 @@ struct HTTPMessageTests {
         #expect(HTTPMessage.parse(Data(partial.utf8)) == nil)
     }
 
+    /// Review M4: the old "three chunks" test above never actually reaches this branch — all three
+    /// chunks are shorter than the header block, so every assertion exercises the
+    /// headers-incomplete path. This is the branch that matters for a real chunked POST: headers
+    /// complete, `Content-Length` bytes still arriving.
+    @Test("a request whose headers are already complete parses as nil until the declared body length has fully arrived")
+    func bodyIncompleteAcrossChunks() {
+        let head = "POST /mcp HTTP/1.1\r\nContent-Length: 10\r\n\r\n"
+        let full = head + "0123456789"
+        let bytes = Array(full.utf8)
+        let headersOnlyNoBody = Data(bytes[0..<head.utf8.count])
+        let headersPlusPartialBody = Data(bytes[0..<(head.utf8.count + 4)])
+        let complete = Data(bytes)
+
+        #expect(HTTPMessage.parse(headersOnlyNoBody) == nil)
+        #expect(HTTPMessage.parse(headersPlusPartialBody) == nil)
+
+        let request = HTTPMessage.parse(complete)
+        #expect(request?.body == Data("0123456789".utf8))
+    }
+
     @Test("a response renders the exact status line, Content-Type, Content-Length and Connection: close")
     func responseRendersExactly() {
         let body = Data(#"{"ok":true}"#.utf8)
@@ -73,5 +93,27 @@ struct HTTPMessageTests {
         let rendered = HTTPMessage.write(status: 404, body: nil)
         let text = String(data: rendered, encoding: .utf8)
         #expect(text == "HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n")
+    }
+
+    @Test("a 413 response renders the correct status text (review C1: oversize requests)")
+    func payloadTooLargeStatusText() {
+        let rendered = HTTPMessage.write(status: 413, body: nil)
+        let text = String(data: rendered, encoding: .utf8)
+        #expect(text == "HTTP/1.1 413 Payload Too Large\r\nConnection: close\r\n\r\n")
+    }
+
+    @Test("headerTerminatorEnd finds the terminator only from the given offset onward")
+    func headerTerminatorEndRespectsSearchOffset() {
+        let data = Data("AAAA\r\n\r\nBBBB".utf8)
+        #expect(HTTPMessage.headerTerminatorEnd(in: data, searchingFrom: 0) == 8)
+        // Searching from an offset that skips past where the terminator starts finds nothing —
+        // callers are responsible for resuming just before the tail, not mid-terminator.
+        #expect(HTTPMessage.headerTerminatorEnd(in: data, searchingFrom: 8) == nil)
+    }
+
+    @Test("headerTerminatorEnd finds a terminator that starts exactly at the search offset")
+    func headerTerminatorEndAtOffset() {
+        let data = Data("AAAA\r\n\r\nBBBB".utf8)
+        #expect(HTTPMessage.headerTerminatorEnd(in: data, searchingFrom: 4) == 8)
     }
 }

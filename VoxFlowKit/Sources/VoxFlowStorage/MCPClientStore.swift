@@ -11,22 +11,50 @@ public final class MCPClientStore: Sendable {
     public init(database: VoxFlowDatabase) { queue = database.queue }
 
     /// Upsert keyed on `(name, path)` (never pid — ruling 5): a first sighting inserts a new row
-    /// with `firstSeen == lastSeen == now`; a repeat sighting updates `approved` and `lastSeen`
-    /// in place, leaving `firstSeen` untouched, rather than creating a duplicate row.
+    /// with `approved = false`, `firstSeen == lastSeen == now`; a repeat sighting updates only
+    /// `lastSeen`, in place, rather than creating a duplicate row.
+    ///
+    /// Task 2 review ruling (I6): this used to be `insertOrTouch(name:path:approved:now:)`, an
+    /// upsert that always overwrote `approved` with whatever the caller passed. The realistic
+    /// "record every connection" caller has no correct value to pass: `approved: false` would
+    /// silently de-approve every previously-approved client on its next connection, and
+    /// `approved: true` would silently re-approve a client someone had just revoked. A
+    /// security-relevant flag must not be a mandatory parameter of "I saw this client" — so
+    /// recording a sighting and approving are now two separate calls, and only `approve` ever sets
+    /// the flag.
     @discardableResult
-    public func insertOrTouch(name: String, path: String, approved: Bool, now: Date) throws -> MCPClientRecord {
+    public func recordSighting(name: String, path: String, now: Date) throws -> MCPClientRecord {
         try queue.write { db in
             try db.execute(
                 sql: """
-                    INSERT INTO mcp_clients (name, path, approved, first_seen, last_seen) VALUES (?,?,?,?,?)
-                    ON CONFLICT(name, path) DO UPDATE SET approved = excluded.approved, last_seen = excluded.last_seen
+                    INSERT INTO mcp_clients (name, path, approved, first_seen, last_seen) VALUES (?,?,0,?,?)
+                    ON CONFLICT(name, path) DO UPDATE SET last_seen = excluded.last_seen
                     """,
-                arguments: [name, path, approved, now.timeIntervalSince1970, now.timeIntervalSince1970])
-            guard let row = try Row.fetchOne(db, sql: "SELECT * FROM mcp_clients WHERE name = ? AND path = ?", arguments: [name, path]) else {
-                throw StorageError.corruptRow
-            }
-            return Self.record(from: row)
+                arguments: [name, path, now.timeIntervalSince1970, now.timeIntervalSince1970])
+            return try Self.fetch(db, name: name, path: path)
         }
+    }
+
+    /// Marks `(name, path)` approved (ST-06a "Always allow"), inserting the row first if this is
+    /// the client's first sighting. Also touches `lastSeen`, so an approval doubles as a sighting.
+    @discardableResult
+    public func approve(name: String, path: String, now: Date) throws -> MCPClientRecord {
+        try queue.write { db in
+            try db.execute(
+                sql: """
+                    INSERT INTO mcp_clients (name, path, approved, first_seen, last_seen) VALUES (?,?,1,?,?)
+                    ON CONFLICT(name, path) DO UPDATE SET approved = 1, last_seen = excluded.last_seen
+                    """,
+                arguments: [name, path, now.timeIntervalSince1970, now.timeIntervalSince1970])
+            return try Self.fetch(db, name: name, path: path)
+        }
+    }
+
+    private static func fetch(_ db: Database, name: String, path: String) throws -> MCPClientRecord {
+        guard let row = try Row.fetchOne(db, sql: "SELECT * FROM mcp_clients WHERE name = ? AND path = ?", arguments: [name, path]) else {
+            throw StorageError.corruptRow
+        }
+        return record(from: row)
     }
 
     /// Most recently seen first.

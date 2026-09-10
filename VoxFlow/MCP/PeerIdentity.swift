@@ -4,34 +4,57 @@ import Foundation
 /// Resolves the OS process on the other end of a loopback connection, behind a protocol so tests
 /// (and `LoopbackListener`) can inject a fake instead of touching real system process tables.
 protocol PeerResolving: Sendable {
-    /// `localPort` is the *client's own* local port — which is what `LoopbackListener` sees as the
-    /// accepted connection's peer port, since from the server's side "their local port" and "the
-    /// port they connected from" are the same number.
-    func resolveProcess(localPort: UInt16) -> (pid: Int32, name: String, path: String)?
+    /// `peerPort` is the *client's own* local port — what `LoopbackListener` sees as the accepted
+    /// connection's peer port, since from the server's side "their local port" and "the port they
+    /// connected from" are the same number. `serverPort` is VoxFlow's own bound port.
+    ///
+    /// Task 2 review ruling (I4): matching `peerPort` alone let a socket that merely *happens* to
+    /// share that local port number — a listener, or a connection to somewhere else entirely — be
+    /// mistaken for the real caller, and a `proc_listallpids` race (the real client exits and the
+    /// kernel recycles its ephemeral port before this resolves) could durably mis-attribute an
+    /// "Always allow" to an innocent app. The socket must now match **both** ends and be
+    /// established.
+    func resolveProcess(peerPort: UInt16, serverPort: UInt16) -> (pid: Int32, name: String, path: String)?
 }
 
 /// `libproc` resolution (spike notes §4), verified against a real loopback socket: no privileges,
 /// no entitlement, works only because VoxFlow is unsandboxed (no `.entitlements` file). Walks every
-/// process's open file descriptors looking for a TCP socket whose local port matches, then reads
-/// that process's name and executable path.
+/// process's open file descriptors looking for an *established* TCP socket whose local port matches
+/// `peerPort` **and** whose foreign (remote) port matches `serverPort`, then reads that process's
+/// name and executable path.
 ///
 /// `proc_name`/`proc_pidpath` failing is expected and not exceptional (a process can vanish between
-/// the port match and the name lookup, or refuse); `resolveProcess` returns `nil` only when the name
-/// itself can't be read — a missing `proc_pidpath` alone still yields an identity with `path == ""`
-/// (the caller falls back to the name; see resolutions).
+/// the port match and the name lookup, or refuse); `resolveProcess` returns `nil` when the name
+/// can't be read for the one match found, or when a **second** socket also matches both ports (an
+/// ambiguous result — an unidentified client is safer than a confidently wrong one; the approval
+/// dialog handles `nil` as "Unknown app"). A missing `proc_pidpath` alone still yields an identity
+/// with `path == ""` (the caller falls back to the name; see resolutions).
 struct LibprocPeerResolver: PeerResolving {
-    func resolveProcess(localPort: UInt16) -> (pid: Int32, name: String, path: String)? {
+    func resolveProcess(peerPort: UInt16, serverPort: UInt16) -> (pid: Int32, name: String, path: String)? {
+        var match: (pid: Int32, name: String, path: String)?
         for pid in Self.allPIDs() {
             for descriptor in Self.fileDescriptors(for: pid) where descriptor.proc_fdtype == UInt32(PROX_FDTYPE_SOCKET) {
                 guard let info = Self.socketInfo(pid: pid, fd: descriptor.proc_fd) else { continue }
-                guard Int(info.psi.soi_kind) == SOCKINFO_TCP else { continue }
-                let rawPort = UInt16(truncatingIfNeeded: info.psi.soi_proto.pri_tcp.tcpsi_ini.insi_lport)
-                guard UInt16(bigEndian: rawPort) == localPort else { continue }
+                guard Self.isEstablishedTCP(info) else { continue }
+                guard Self.localPort(of: info) == peerPort, Self.foreignPort(of: info) == serverPort else { continue }
+                guard match == nil else { return nil } // a second match: don't guess which one is real.
                 guard let name = Self.name(for: pid) else { return nil }
-                return (pid: pid, name: name, path: Self.path(for: pid) ?? "")
+                match = (pid: pid, name: name, path: Self.path(for: pid) ?? "")
             }
         }
-        return nil
+        return match
+    }
+
+    private static func isEstablishedTCP(_ info: socket_fdinfo) -> Bool {
+        Int(info.psi.soi_kind) == SOCKINFO_TCP && info.psi.soi_proto.pri_tcp.tcpsi_state == TSI_S_ESTABLISHED
+    }
+
+    private static func localPort(of info: socket_fdinfo) -> UInt16 {
+        UInt16(bigEndian: UInt16(truncatingIfNeeded: info.psi.soi_proto.pri_tcp.tcpsi_ini.insi_lport))
+    }
+
+    private static func foreignPort(of info: socket_fdinfo) -> UInt16 {
+        UInt16(bigEndian: UInt16(truncatingIfNeeded: info.psi.soi_proto.pri_tcp.tcpsi_ini.insi_fport))
     }
 
     /// Headroom above the first count: processes can start between the sizing call and the fetch.

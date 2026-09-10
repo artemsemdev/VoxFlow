@@ -44,14 +44,34 @@ struct PathPolicyTests {
         }
     }
 
-    @Test("a symlink inside home pointing outside is judged by its resolved target, not its own location")
-    func symlinkResolvedBeforeJudging() {
-        // Simulate resolution by having fileExists/isRegularFile see the *symlink* path, but the
-        // policy must still resolve to /etc/passwd via URL resolution before applying the home check.
-        // We can't create a real symlink portably in a pure unit test without touching disk, so this
-        // exercises the resolution path directly via a path containing ".." that resolves outside home.
+    @Test("a '..' traversal inside home that resolves outside it is rejected")
+    func dotDotTraversalRejected() {
+        // `.standardizedFileURL` alone collapses "..", so this exercises path *normalization*,
+        // not symlink resolution — see `symlinkResolvedBeforeJudging` below for the real thing.
         #expect(throws: PathPolicy.Rejection.outsideHome) {
             try policy.check("/Users/tester/Desktop/../../etc/passwd", fileExists: allExists, isRegularFile: isFile)
+        }
+    }
+
+    /// Task 2 review, I5: the brief's actual test case — "a symlink in the home pointing at
+    /// `/etc/passwd` → `.outsideHome` (proves resolution happens first)" — was never implemented;
+    /// the `..`-traversal test above proves only that `.standardizedFileURL` normalizes, which
+    /// `PathPolicy.check` would still pass even with `.resolvingSymlinksInPath()` deleted. This one
+    /// creates a real symlink (same temp-directory precedent as `MCPClientStoreTests`'s on-disk
+    /// migration test) whose *own* path is safely inside home but whose *target* is not, so it can
+    /// only pass if the policy resolves symlinks before judging scope.
+    @Test("a symlink inside home pointing at /etc/passwd is judged by its resolved target, not its own location")
+    func symlinkResolvedBeforeJudging() throws {
+        let tempHome = FileManager.default.temporaryDirectory.appendingPathComponent("PathPolicyTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempHome, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempHome) }
+
+        let linkURL = tempHome.appendingPathComponent("escape.wav")
+        try FileManager.default.createSymbolicLink(atPath: linkURL.path, withDestinationPath: "/etc/passwd")
+
+        let policyOverTempHome = PathPolicy(homeDirectory: tempHome, allowedExtensions: ["wav"])
+        #expect(throws: PathPolicy.Rejection.outsideHome) {
+            try policyOverTempHome.check(linkURL.path, fileExists: allExists, isRegularFile: isFile)
         }
     }
 

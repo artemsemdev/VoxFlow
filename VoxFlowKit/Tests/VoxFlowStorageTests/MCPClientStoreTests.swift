@@ -7,11 +7,11 @@ import Testing
 struct MCPClientStoreTests {
     func store() throws -> MCPClientStore { MCPClientStore(database: try VoxFlowDatabase.inMemory()) }
 
-    @Test("insertOrTouch then all() returns it")
-    func insertThenAll() throws {
+    @Test("recordSighting then all() returns it, unapproved")
+    func recordSightingThenAll() throws {
         let store = try store()
         let now = Date(timeIntervalSince1970: 1_000)
-        try store.insertOrTouch(name: "Cursor", path: "/Applications/Cursor.app/Contents/MacOS/Cursor", approved: false, now: now)
+        try store.recordSighting(name: "Cursor", path: "/Applications/Cursor.app/Contents/MacOS/Cursor", now: now)
         let all = try store.all()
         #expect(all.count == 1)
         #expect(all.first?.name == "Cursor")
@@ -21,43 +21,79 @@ struct MCPClientStoreTests {
         #expect(all.first?.lastSeen == now)
     }
 
-    @Test("a second insertOrTouch for the same name+path updates last_seen and approved without a duplicate row")
-    func secondCallTouchesNotDuplicates() throws {
+    @Test("a second recordSighting for the same name+path updates last_seen without a duplicate row, and never touches approved")
+    func secondSightingTouchesNotDuplicatesAndPreservesApproval() throws {
         let store = try store()
         let first = Date(timeIntervalSince1970: 1_000)
+        let approvedAt = Date(timeIntervalSince1970: 1_500)
         let second = Date(timeIntervalSince1970: 2_000)
-        try store.insertOrTouch(name: "Cursor", path: "/Applications/Cursor.app/Contents/MacOS/Cursor", approved: false, now: first)
-        try store.insertOrTouch(name: "Cursor", path: "/Applications/Cursor.app/Contents/MacOS/Cursor", approved: true, now: second)
+        try store.recordSighting(name: "Cursor", path: "/Applications/Cursor.app/Contents/MacOS/Cursor", now: first)
+        try store.approve(name: "Cursor", path: "/Applications/Cursor.app/Contents/MacOS/Cursor", now: approvedAt)
+        try store.recordSighting(name: "Cursor", path: "/Applications/Cursor.app/Contents/MacOS/Cursor", now: second)
 
         let all = try store.all()
         #expect(all.count == 1)
-        #expect(all.first?.approved == true)
+        #expect(all.first?.approved == true) // a plain sighting never de-approves.
         #expect(all.first?.firstSeen == first) // first_seen doesn't move on touch
         #expect(all.first?.lastSeen == second)
     }
 
-    @Test("insertOrTouch returns the record")
-    func returnsRecord() throws {
+    @Test("recordSighting returns the record")
+    func recordSightingReturnsRecord() throws {
         let store = try store()
         let now = Date(timeIntervalSince1970: 1_000)
-        let record = try store.insertOrTouch(name: "Cursor", path: "/path/Cursor", approved: true, now: now)
+        let record = try store.recordSighting(name: "Cursor", path: "/path/Cursor", now: now)
         #expect(record.name == "Cursor")
+        #expect(record.approved == false)
+    }
+
+    @Test("approve sets approved and also touches last_seen")
+    func approveSetsApprovedAndTouches() throws {
+        let store = try store()
+        let seenAt = Date(timeIntervalSince1970: 1_000)
+        let approvedAt = Date(timeIntervalSince1970: 2_000)
+        try store.recordSighting(name: "Cursor", path: "/path/Cursor", now: seenAt)
+        let record = try store.approve(name: "Cursor", path: "/path/Cursor", now: approvedAt)
         #expect(record.approved == true)
+        #expect(record.lastSeen == approvedAt)
+        #expect(record.firstSeen == seenAt) // approve doesn't move first_seen either
+    }
+
+    @Test("approve on a client never seen before inserts it approved")
+    func approveWithoutPriorSighting() throws {
+        let store = try store()
+        let now = Date(timeIntervalSince1970: 1_000)
+        let record = try store.approve(name: "Cursor", path: "/path/Cursor", now: now)
+        #expect(record.approved == true)
+        #expect(record.firstSeen == now)
     }
 
     @Test("revoke removes the row")
     func revokeRemoves() throws {
         let store = try store()
-        let record = try store.insertOrTouch(name: "Cursor", path: "/path/Cursor", approved: true, now: Date())
+        let record = try store.approve(name: "Cursor", path: "/path/Cursor", now: Date())
         try store.revoke(id: record.id)
         #expect(try store.all().isEmpty)
+    }
+
+    @Test("a sighting after a revoke leaves the client revoked, not silently re-approved")
+    func sightingAfterRevokeStaysRevoked() throws {
+        let store = try store()
+        let record = try store.approve(name: "Cursor", path: "/path/Cursor", now: Date(timeIntervalSince1970: 1_000))
+        try store.revoke(id: record.id)
+
+        try store.recordSighting(name: "Cursor", path: "/path/Cursor", now: Date(timeIntervalSince1970: 2_000))
+
+        let all = try store.all()
+        #expect(all.count == 1)
+        #expect(all.first?.approved == false)
     }
 
     @Test("revokeAll removes every row")
     func revokeAllRemoves() throws {
         let store = try store()
-        try store.insertOrTouch(name: "Cursor", path: "/path/Cursor", approved: true, now: Date())
-        try store.insertOrTouch(name: "Claude Desktop", path: "/path/Claude", approved: true, now: Date())
+        try store.approve(name: "Cursor", path: "/path/Cursor", now: Date())
+        try store.approve(name: "Claude Desktop", path: "/path/Claude", now: Date())
         try store.revokeAll()
         #expect(try store.all().isEmpty)
     }
@@ -65,8 +101,8 @@ struct MCPClientStoreTests {
     @Test("distinct name+path pairs stay distinct rows")
     func distinctClientsStayDistinct() throws {
         let store = try store()
-        try store.insertOrTouch(name: "Cursor", path: "/path/Cursor", approved: false, now: Date())
-        try store.insertOrTouch(name: "Cursor", path: "/other/path/Cursor", approved: false, now: Date())
+        try store.recordSighting(name: "Cursor", path: "/path/Cursor", now: Date())
+        try store.recordSighting(name: "Cursor", path: "/other/path/Cursor", now: Date())
         #expect(try store.all().count == 2)
     }
 
@@ -117,7 +153,7 @@ struct MCPClientStoreTests {
 
         // And the store actually works against the migrated table.
         let store = MCPClientStore(database: database)
-        try store.insertOrTouch(name: "Cursor", path: "/path/Cursor", approved: true, now: Date())
+        try store.recordSighting(name: "Cursor", path: "/path/Cursor", now: Date())
         #expect(try store.all().count == 1)
     }
 }

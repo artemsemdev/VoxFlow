@@ -7,6 +7,13 @@ import VoxFlowMCP
 enum HTTPMessage {
     private static let headerTerminator = Array("\r\n\r\n".utf8)
 
+    /// Ruling (Task 2 review, C1): framing happens before any token/approval check, so every byte
+    /// is attacker-controlled by any unprivileged local process. These bound what `ConnectionHandler`
+    /// will buffer: the header block (everything up to `\r\n\r\n`) is capped at 16 KB, and the whole
+    /// request (headers + body) at 1 MB. Exceeding either answers `413` and closes.
+    static let maxHeaderBytes = 16 * 1024
+    static let maxRequestBytes = 1 * 1024 * 1024
+
     /// Attempts to parse one HTTP request from `data` accumulated so far from a connection.
     /// `nil` while the header block (`\r\n\r\n`) hasn't fully arrived, or while fewer than
     /// `Content-Length` body bytes have arrived; extra bytes beyond `Content-Length` are ignored
@@ -64,15 +71,29 @@ enum HTTPMessage {
         case 403: return "Forbidden"
         case 404: return "Not Found"
         case 405: return "Method Not Allowed"
+        case 413: return "Payload Too Large"
         default: return "Error"
         }
     }
 
-    /// The first occurrence of `pattern` in `data`, or `nil`. `Data.firstRange(of:)` isn't
-    /// available on every toolchain this targets, so this is spelled out directly.
-    private static func firstRange(of pattern: [UInt8], in data: Data) -> Range<Data.Index>? {
+    /// The index just past the first `\r\n\r\n` in `data`, searching only from `searchFrom`
+    /// onward — lets a caller accumulating bytes across many chunks (`ConnectionHandler`) remember
+    /// how far it has already scanned and resume there, rather than re-scanning the whole buffer
+    /// from the start on every chunk (Task 2 review, C1: that rescan is quadratic in the number of
+    /// chunks an unauthenticated peer can send before hitting `maxHeaderBytes`). A caller that
+    /// hasn't found the terminator yet should pass back `max(data.count - 3, 0)` as the next
+    /// `searchFrom`, so a terminator split across a chunk boundary is still found.
+    static func headerTerminatorEnd(in data: Data, searchingFrom searchFrom: Data.Index) -> Data.Index? {
+        firstRange(of: headerTerminator, in: data, from: searchFrom)?.upperBound
+    }
+
+    /// The first occurrence of `pattern` in `data` at or after `from` (defaulting to the start), or
+    /// `nil`. `Data.firstRange(of:)` isn't available on every toolchain this targets, so this is
+    /// spelled out directly.
+    private static func firstRange(of pattern: [UInt8], in data: Data, from: Data.Index? = nil) -> Range<Data.Index>? {
         guard !pattern.isEmpty, data.count >= pattern.count else { return nil }
-        var index = data.startIndex
+        var index = from ?? data.startIndex
+        if index < data.startIndex { index = data.startIndex }
         let searchEnd = data.index(data.endIndex, offsetBy: -(pattern.count - 1))
         while index < searchEnd {
             let candidateEnd = data.index(index, offsetBy: pattern.count)
