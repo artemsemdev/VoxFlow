@@ -151,7 +151,7 @@ public struct ClientRegistry: Sendable {
 ```
 
 - Create: `VoxFlowKit/Sources/VoxFlowStorage/MCPClientStore.swift` + migration `v3` (ruling 8) in `VoxFlowDatabase.swift`: `insertOrTouch(name:path:approved:now:)`, `all() -> [MCPClientRecord]`, `revoke(id:)`, `revokeAll()`. Follow `DictionaryStore` for shape and `StorageError.duplicate` handling.
-- Create: `VoxFlow/MCP/PeerIdentity.swift` (app) — `libproc` resolution exactly as the spike verified (`proc_listallpids` → `PROC_PIDLISTFDS` → `PROC_PIDFDSOCKETINFO`, match `insi_lport` big-endian to the peer port, `proc_name`). Signature `func resolveProcess(localPort: UInt16) -> (pid: Int32, name: String, path: String)?`, using `proc_pidpath` for the path. Behind a protocol `PeerResolving` so tests inject a fake.
+- Create: `VoxFlow/MCP/PeerIdentity.swift` (app) — `libproc` resolution exactly as the spike verified (`proc_listallpids` → `PROC_PIDLISTFDS` → `PROC_PIDFDSOCKETINFO`, match `insi_lport` big-endian to the peer port, `proc_name`). Signature `func resolveProcess(peerPort: UInt16, serverPort: UInt16) -> (pid: Int32, name: String, path: String)?` (amended in the Task 2 review: matching the client's local port alone can mis-attribute a connection to an innocent process, so the socket must match **both** ends and be established), using `proc_pidpath` for the path. Behind a protocol `PeerResolving` so tests inject a fake.
 - Create: `VoxFlow/MCP/LoopbackListener.swift` (app) — `NWListener` per ruling 3 and the recipe in the spike notes; `final class ConnectionHandler: Sendable` with a `Mutex<Data>` buffer (spike gotcha 3); HTTP framing (headers to `\r\n\r\n`, then `Content-Length` bytes); replies `Connection: close`. API:
 
 ```swift
