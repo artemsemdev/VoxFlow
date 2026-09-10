@@ -56,8 +56,14 @@ final class MCPViewModel {
     private(set) var startFailure: String?
     private(set) var clients: [MCPClientRow] = []
 
+    /// Review fix (Important #2): `approvalObserver.onApproved` is wired at the end of `init`
+    /// (after every stored property is set, so `self` is fully initialized) to refresh `clients` —
+    /// so a client approved via ST-06a while this page is already open shows up live, not only on
+    /// the next page-appear/revoke/regenerate. `[weak self]` — see the closure below — so this
+    /// view model is never kept alive by the observer it hands a callback to.
     init(settings: MCPSettings, pasteboard: any Pasteboard, server: any MCPServerControlling,
-         clientStoreProvider: any MCPClientStoreProviding, now: @escaping @Sendable () -> Date = Date.init) {
+         clientStoreProvider: any MCPClientStoreProviding, approvalObserver: any MCPApprovalObserving,
+         now: @escaping @Sendable () -> Date = Date.init) {
         self.settings = settings
         self.pasteboard = pasteboard
         self.server = server
@@ -66,6 +72,9 @@ final class MCPViewModel {
         enabled = settings.enabled
         boundEndpoint = Self.endpointText(for: server.boundPort)
         portNote = Self.portNoteText(for: server.boundPort)
+        approvalObserver.onApproved = { [weak self] in
+            Task { @MainActor in await self?.refreshClients() }
+        }
     }
 
     var maskedToken: String { settings.maskedToken }

@@ -28,6 +28,33 @@ struct MCPApprovalCopyTests {
     }
 }
 
+/// Review fix (Important #1): which buttons ST-06a offers — and their exact labels — is a rule, and
+/// rules live in a tested type, not `MCPApprovalContentView`. `MCPApprovalPanel` renders exactly
+/// this list; the view holds no `canPersist` conditional of its own any more.
+@Suite("MCPApprovalButtons")
+struct MCPApprovalButtonsTests {
+    @Test("canPersist: true offers the three canvas buttons, in canvas order, with verbatim labels")
+    func canPersistTrueOffersAllThree() {
+        let buttons = MCPApprovalButtons.offered(canPersist: true)
+        #expect(buttons.map(\.label) == ["Always allow", "Allow once", "Deny"])
+        #expect(buttons.map(\.decision) == [.allow, .allowOnce, .deny])
+        #expect(buttons.map(\.id) == [.alwaysAllow, .allowOnce, .deny])
+        // "Always allow" leads as the prominent (filled) action; "Allow once" and "Deny" don't.
+        #expect(buttons.map(\.isProminent) == [true, false, false])
+        #expect(buttons.map(\.isDestructive) == [false, false, true])
+    }
+
+    @Test("canPersist: false hides \"Always allow\" — only the session-scoped grant and Deny remain")
+    func canPersistFalseHidesAlwaysAllow() {
+        let buttons = MCPApprovalButtons.offered(canPersist: false)
+        #expect(buttons.map(\.label) == ["Allow once", "Deny"])
+        #expect(buttons.map(\.decision) == [.allowOnce, .deny])
+        #expect(!buttons.contains { $0.id == .alwaysAllow })
+        // With no "Always allow" to lead, "Allow once" becomes the prominent action instead.
+        #expect(buttons.map(\.isProminent) == [true, false])
+    }
+}
+
 @Suite("MCPApprovalViewModel", .timeLimit(.minutes(1)))
 @MainActor
 struct MCPApprovalViewModelTests {
@@ -41,24 +68,20 @@ struct MCPApprovalViewModelTests {
         func hide() { hidden = true }
     }
 
-    /// Captures the arguments/closures `MCPApprovalViewModel.present` hands to `makePanel` —
+    /// Captures the arguments/closure `MCPApprovalViewModel.present` hands to `makePanel` —
     /// synchronously set by the time `present`'s first suspension point is reached, since
     /// `withCheckedContinuation`'s body (which calls `makePanel`) runs before any `await`.
     final class Callbacks {
         var canPersist: Bool?
-        var onAlwaysAllow: (() -> Void)?
-        var onAllowOnce: (() -> Void)?
-        var onDeny: (() -> Void)?
+        var onDecision: ((MCPClientDecision) -> Void)?
     }
 
     func harness(clock: any MonotonicClock) -> (vm: MCPApprovalViewModel, panel: FakePanel, callbacks: Callbacks) {
         let panel = FakePanel()
         let callbacks = Callbacks()
-        let vm = MCPApprovalViewModel(clock: clock, makePanel: { _, _, _, canPersist, onAlwaysAllow, onAllowOnce, onDeny in
+        let vm = MCPApprovalViewModel(clock: clock, makePanel: { _, _, _, canPersist, onDecision in
             callbacks.canPersist = canPersist
-            callbacks.onAlwaysAllow = onAlwaysAllow
-            callbacks.onAllowOnce = onAllowOnce
-            callbacks.onDeny = onDeny
+            callbacks.onDecision = onDecision
             return panel
         })
         return (vm, panel, callbacks)
@@ -67,7 +90,7 @@ struct MCPApprovalViewModelTests {
     /// Waits (yielding, never sleeping) until `present`'s synchronous setup — including the
     /// `makePanel` call — has run inside the spawned `Task`.
     func waitForCallbacks(_ callbacks: Callbacks) async {
-        for _ in 0..<10_000 where callbacks.onAllowOnce == nil { await Task.yield() }
+        for _ in 0..<10_000 where callbacks.onDecision == nil { await Task.yield() }
     }
 
     @Test("present() shows the panel and forwards the caller's canPersist verbatim")
@@ -77,7 +100,7 @@ struct MCPApprovalViewModelTests {
         await waitForCallbacks(h.callbacks)
         #expect(h.panel.shown)
         #expect(h.callbacks.canPersist == true)
-        h.callbacks.onDeny?()
+        h.callbacks.onDecision?(.deny)
         _ = await task.value
     }
 
@@ -87,7 +110,7 @@ struct MCPApprovalViewModelTests {
         let task = Task { await h.vm.present(identity: identity, tools: ["dictate"], canPersist: false) }
         await waitForCallbacks(h.callbacks)
         #expect(h.callbacks.canPersist == false)
-        h.callbacks.onDeny?()
+        h.callbacks.onDecision?(.deny)
         _ = await task.value
     }
 
@@ -96,7 +119,7 @@ struct MCPApprovalViewModelTests {
         let h = harness(clock: FakeClock())
         let task = Task { await h.vm.present(identity: identity, tools: ["dictate"], canPersist: true) }
         await waitForCallbacks(h.callbacks)
-        h.callbacks.onAlwaysAllow?()
+        h.callbacks.onDecision?(.allow)
         #expect(await task.value == .allow)
         #expect(h.panel.hidden)
     }
@@ -106,7 +129,7 @@ struct MCPApprovalViewModelTests {
         let h = harness(clock: FakeClock())
         let task = Task { await h.vm.present(identity: identity, tools: ["dictate"], canPersist: true) }
         await waitForCallbacks(h.callbacks)
-        h.callbacks.onAllowOnce?()
+        h.callbacks.onDecision?(.allowOnce)
         #expect(await task.value == .allowOnce)
         #expect(h.panel.hidden)
     }
@@ -116,7 +139,7 @@ struct MCPApprovalViewModelTests {
         let h = harness(clock: FakeClock())
         let task = Task { await h.vm.present(identity: identity, tools: ["dictate"], canPersist: true) }
         await waitForCallbacks(h.callbacks)
-        h.callbacks.onDeny?()
+        h.callbacks.onDecision?(.deny)
         #expect(await task.value == .deny)
         #expect(h.panel.hidden)
     }
@@ -140,10 +163,62 @@ struct MCPApprovalViewModelTests {
         let task = Task { await h.vm.present(identity: identity, tools: ["dictate"], canPersist: true) }
         await waitForCallbacks(h.callbacks)
         await clock.waitForSleepers(1)
-        h.callbacks.onAlwaysAllow?()
+        h.callbacks.onDecision?(.allow)
         #expect(await task.value == .allow)
         // Advancing well past the timeout afterwards must not change anything — the continuation
         // already resumed once; a second resume would be a runtime crash if `finish` didn't guard it.
         await clock.advance(by: MCPApprovalViewModel.timeout * 2)
+    }
+
+    // MARK: onApproved (review fix, Important #2)
+
+    @Test("Always allow (the only decision that can persist) fires onApproved exactly once")
+    func alwaysAllowFiresOnApproved() async throws {
+        let h = harness(clock: FakeClock())
+        var approvedCount = 0
+        h.vm.onApproved = { approvedCount += 1 }
+        let task = Task { await h.vm.present(identity: identity, tools: ["dictate"], canPersist: true) }
+        await waitForCallbacks(h.callbacks)
+        h.callbacks.onDecision?(.allow)
+        _ = await task.value
+        #expect(approvedCount == 1)
+    }
+
+    @Test("Allow once never fires onApproved — it's session-only, never persisted")
+    func allowOnceNeverFiresOnApproved() async throws {
+        let h = harness(clock: FakeClock())
+        var approvedCount = 0
+        h.vm.onApproved = { approvedCount += 1 }
+        let task = Task { await h.vm.present(identity: identity, tools: ["dictate"], canPersist: true) }
+        await waitForCallbacks(h.callbacks)
+        h.callbacks.onDecision?(.allowOnce)
+        _ = await task.value
+        #expect(approvedCount == 0)
+    }
+
+    @Test("Deny never fires onApproved")
+    func denyNeverFiresOnApproved() async throws {
+        let h = harness(clock: FakeClock())
+        var approvedCount = 0
+        h.vm.onApproved = { approvedCount += 1 }
+        let task = Task { await h.vm.present(identity: identity, tools: ["dictate"], canPersist: true) }
+        await waitForCallbacks(h.callbacks)
+        h.callbacks.onDecision?(.deny)
+        _ = await task.value
+        #expect(approvedCount == 0)
+    }
+
+    @Test("the timeout (never fires onApproved — it always resolves .deny)")
+    func timeoutNeverFiresOnApproved() async throws {
+        let clock = FakeClock()
+        let h = harness(clock: clock)
+        var approvedCount = 0
+        h.vm.onApproved = { approvedCount += 1 }
+        let task = Task { await h.vm.present(identity: identity, tools: ["dictate"], canPersist: true) }
+        await waitForCallbacks(h.callbacks)
+        await clock.waitForSleepers(1)
+        await clock.advance(by: MCPApprovalViewModel.timeout)
+        _ = await task.value
+        #expect(approvedCount == 0)
     }
 }

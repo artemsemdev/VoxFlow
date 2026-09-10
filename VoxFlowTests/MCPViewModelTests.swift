@@ -4,18 +4,29 @@ import VoxFlowStorage
 import VoxFlowTestSupport
 @testable import VoxFlow
 
+/// Fakes `MCPApprovalObserving` — the hook `MCPApprovalViewModel` fires when a decision that
+/// persists a grant (`.allow`) resolves. Review fix (Important #2): lets `MCPViewModelTests` drive
+/// "a client was approved while Settings is open" without a real `NSPanel`/`MCPToolRunner`.
+@MainActor
+final class FakeApprovalObserver: MCPApprovalObserving {
+    var onApproved: (() -> Void)?
+}
+
 @Suite("MCPViewModel")
 @MainActor
 struct MCPViewModelTests {
     private func harness(now: @escaping @Sendable () -> Date = { Date(timeIntervalSince1970: 1_700_000_000) })
-        throws -> (settings: MCPSettings, tokenStore: FakeTokenStore, pasteboard: FakePasteboard, server: FakeMCPServer, store: MCPClientStore, vm: MCPViewModel) {
+        throws -> (settings: MCPSettings, tokenStore: FakeTokenStore, pasteboard: FakePasteboard, server: FakeMCPServer,
+                   store: MCPClientStore, observer: FakeApprovalObserver, vm: MCPViewModel) {
         let tokenStore = FakeTokenStore()
         let settings = MCPSettings(store: InMemoryKeyValueStore(), token: tokenStore)
         let pasteboard = FakePasteboard()
         let store = try MCPClientStore(database: VoxFlowDatabase.inMemory())
         let server = FakeMCPServer(store: store)
-        let vm = MCPViewModel(settings: settings, pasteboard: pasteboard, server: server, clientStoreProvider: server, now: now)
-        return (settings, tokenStore, pasteboard, server, store, vm)
+        let observer = FakeApprovalObserver()
+        let vm = MCPViewModel(settings: settings, pasteboard: pasteboard, server: server, clientStoreProvider: server,
+                              approvalObserver: observer, now: now)
+        return (settings, tokenStore, pasteboard, server, store, observer, vm)
     }
 
     // MARK: endpoint / token copy
@@ -171,6 +182,28 @@ struct MCPViewModelTests {
         await h.vm.revoke(record.id)
         #expect(h.vm.clients.isEmpty)
         #expect(try h.store.all().isEmpty)
+    }
+
+    // MARK: refresh on approval, while Settings is open (review fix, Important #2)
+
+    @Test("a client approved while the view model is live (ST-06a's \"Always allow\", the approval observer firing) refreshes the connected-clients list")
+    func approvalWhileLiveRefreshesClients() async throws {
+        let h = try harness()
+        #expect(h.vm.clients.isEmpty)
+        try h.store.approve(name: "Cursor", path: "/Applications/Cursor.app", now: Date())
+        h.observer.onApproved?()
+        for _ in 0..<10_000 where h.vm.clients.isEmpty { await Task.yield() }
+        #expect(h.vm.clients.map(\.name) == ["Cursor"])
+    }
+
+    @Test("without an approval signal (e.g. Allow once, which MCPApprovalViewModel never reports) the list stays as it was")
+    func noApprovalSignalNoRefresh() async throws {
+        let h = try harness()
+        try h.store.approve(name: "Cursor", path: "/Applications/Cursor.app", now: Date())
+        // No `h.observer.onApproved?()` call — simulating "Allow once", which never fires it
+        // (`MCPApprovalViewModelTests.allowOnceNeverFiresOnApproved`).
+        await Task.yield()
+        #expect(h.vm.clients.isEmpty)
     }
 }
 

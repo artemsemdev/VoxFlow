@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import VoxFlowMCP
 
 /// ST-06a: the floating "wants to use VoxFlow" client-request panel — copies `MenuBarHintPanel`'s
 /// non-activating `NSPanel` shape (never steals key focus or brings VoxFlow forward) for the same
@@ -9,14 +10,13 @@ import SwiftUI
 final class MCPApprovalPanel: NSPanel {
     private static let panelSize = NSSize(width: 340, height: 280)
 
-    init(name: String, pid: Int32?, tools: [String], canPersist: Bool,
-         onAlwaysAllow: @escaping () -> Void, onAllowOnce: @escaping () -> Void, onDeny: @escaping () -> Void) {
+    init(name: String, pid: Int32?, tools: [String], canPersist: Bool, onDecision: @escaping (MCPClientDecision) -> Void) {
         let hosting = NSHostingController(rootView: MCPApprovalContentView(
             title: MCPApprovalCopy.title(name: name),
             message: MCPApprovalCopy.body(tools: tools),
             processLine: MCPApprovalCopy.processLine(name: name, pid: pid),
-            canPersist: canPersist,
-            onAlwaysAllow: onAlwaysAllow, onAllowOnce: onAllowOnce, onDeny: onDeny))
+            buttons: MCPApprovalButtons.offered(canPersist: canPersist),
+            onDecision: onDecision))
         super.init(contentRect: NSRect(origin: .zero, size: Self.panelSize),
                     styleMask: [.nonactivatingPanel, .borderless, .fullSizeContentView],
                     backing: .buffered, defer: true)
@@ -55,21 +55,19 @@ extension MCPApprovalPanel: MCPApprovalPanelPresenting {}
 
 /// ST-06a's content: icon, title, body, process line, and the decision buttons — centered, matching
 /// the canvas's alert-card family (SYS-DISK, MW-06c, ST-06r all share this icon-plus-centered-text
-/// layout; `MCPRegenerateAlertPreview`, formerly in `SettingsRenderTests`, now `MCPRenderTests`, is
-/// the same style). Not `private` — `MCPRenderTests` renders it directly for the design-fidelity
-/// comparison. Views hold no rules: every string here is handed in already-built by
-/// `MCPApprovalCopy` (`MCPApprovalViewModel.swift`); `canPersist` (`MCPApprovalPresenting`'s own
-/// doc, `MCPToolRunner.swift`) is the one rule this view does act on directly — hiding "Always
-/// allow" is the actual mechanism behind "the presenter must not offer Always allow" for an
-/// unresolved ("Unknown app") peer.
+/// layout). Not `private` — `MCPRenderTests` renders it directly for the design-fidelity comparison.
+///
+/// Review fix (Important #1): this view holds **no** rule about which buttons to offer or how to
+/// style them — `buttons` arrives already resolved (`MCPApprovalButtons.offered(canPersist:)`,
+/// tested directly in `MCPApprovalButtonsTests`); this just renders the list and forwards whichever
+/// button's `decision` was pressed to `onDecision`. Every string is likewise handed in already-built
+/// by `MCPApprovalCopy`.
 struct MCPApprovalContentView: View {
     let title: String
     let message: String
     let processLine: String
-    let canPersist: Bool
-    let onAlwaysAllow: () -> Void
-    let onAllowOnce: () -> Void
-    let onDeny: () -> Void
+    let buttons: [MCPApprovalButtonSpec]
+    let onDecision: (MCPClientDecision) -> Void
 
     var body: some View {
         VStack(spacing: 14) {
@@ -91,21 +89,20 @@ struct MCPApprovalContentView: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
             VStack(spacing: 6) {
-                if canPersist {
-                    Button("Always allow", action: onAlwaysAllow)
-                        .buttonStyle(.borderedProminent).controlSize(.small).frame(maxWidth: .infinity)
+                // Two branches, not one `.buttonStyle(isProminent ? .borderedProminent : .bordered)`:
+                // `.bordered`/`.borderedProminent` are different concrete `ButtonStyle` types, which
+                // a ternary can't unify (confirmed empirically — see the task report).
+                ForEach(buttons) { spec in
+                    if spec.isProminent {
+                        Button(spec.label) { onDecision(spec.decision) }
+                            .buttonStyle(.borderedProminent).controlSize(.small)
+                            .tint(spec.isDestructive ? .red : nil).frame(maxWidth: .infinity)
+                    } else {
+                        Button(spec.label) { onDecision(spec.decision) }
+                            .buttonStyle(.bordered).controlSize(.small)
+                            .tint(spec.isDestructive ? .red : nil).frame(maxWidth: .infinity)
+                    }
                 }
-                if canPersist {
-                    Button("Allow once", action: onAllowOnce)
-                        .buttonStyle(.bordered).controlSize(.small).frame(maxWidth: .infinity)
-                } else {
-                    // No "Always allow" above (an unresolved peer, `canPersist == false`) — "Allow
-                    // once" is the closest thing to a primary action, so it takes the prominent style.
-                    Button("Allow once", action: onAllowOnce)
-                        .buttonStyle(.borderedProminent).controlSize(.small).frame(maxWidth: .infinity)
-                }
-                Button("Deny", action: onDeny)
-                    .buttonStyle(.bordered).controlSize(.small).tint(.red).frame(maxWidth: .infinity)
             }
             .padding(.top, 4)
         }

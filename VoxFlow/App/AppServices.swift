@@ -406,7 +406,7 @@ final class AppServices {
                                                 historyService: historyService, fileTranscribing: transcriber, pathPolicy: mcpPathPolicy,
                                                 clock: clock, approvalPresenter: mcpApprovalPresenter, serverVersion: Self.appVersion)
         let mcpViewModel = MCPViewModel(settings: mcpSettings, pasteboard: SystemPasteboard(), server: mcpServerService,
-                                        clientStoreProvider: mcpServerService)
+                                        clientStoreProvider: mcpServerService, approvalObserver: mcpApprovalPresenter)
         // ST-01 "Play sounds…" — bound here (Task 3's `SettingsServices` built this but never bound
         // it to a live coordinator; wiring `bind(to:)` into the real launch sequence was left to
         // this task, see its file-scope note).

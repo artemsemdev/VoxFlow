@@ -38,7 +38,8 @@ struct MCPRenderTests {
         try store.approve(name: "Claude Desktop", path: "/Applications/Claude.app", now: now.addingTimeInterval(-30))
         let server = FakeMCPServer(store: store)
         server.portToReturn = 7331
-        let vm = MCPViewModel(settings: settings, pasteboard: FakePasteboard(), server: server, clientStoreProvider: server, now: { now })
+        let vm = MCPViewModel(settings: settings, pasteboard: FakePasteboard(), server: server, clientStoreProvider: server,
+                              approvalObserver: FakeApprovalObserver(), now: { now })
         await vm.setEnabled(true)
         await vm.refreshClients()
         try Self.render(MCPSettingsBody(mcp: vm), name: "settings", to: directory)
@@ -48,8 +49,8 @@ struct MCPRenderTests {
             title: MCPApprovalCopy.title(name: "Cursor"),
             message: MCPApprovalCopy.body(tools: ["transcribe_file", "dictate"]),
             processLine: MCPApprovalCopy.processLine(name: "Cursor", pid: 4812),
-            canPersist: true,
-            onAlwaysAllow: {}, onAllowOnce: {}, onDeny: {})
+            buttons: MCPApprovalButtons.offered(canPersist: true),
+            onDecision: { _ in })
         try Self.render(approvalContent.frame(width: 340), name: "approval", to: directory)
 
         // ST-06r (canvas page 6, moved here from `SettingsRenderTests` — Task 3): `.alert()` itself
