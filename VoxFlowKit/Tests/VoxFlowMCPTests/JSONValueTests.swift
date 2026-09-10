@@ -4,8 +4,8 @@ import Testing
 
 @Suite("JSONValue")
 struct JSONValueTests {
-    @Test("round-trips a nested object through JSONEncoder/JSONDecoder, preserving integer-vs-double")
-    func roundTripsNestedObjectPreservingNumberKind() throws {
+    @Test("round-trips a nested object through JSONEncoder/JSONDecoder")
+    func roundTripsNestedObject() throws {
         let value = JSONValue.object([
             "name": .string("VoxFlow"),
             "count": .int(42),
@@ -38,6 +38,22 @@ struct JSONValueTests {
             return
         }
         #expect(inner == 7)
+    }
+
+    @Test("a fractional number round-trips as .double")
+    func fractionalValueRoundTripsAsDouble() throws {
+        let data = try JSONEncoder().encode(JSONValue.double(3.5))
+        let decoded = try JSONDecoder().decode(JSONValue.self, from: data)
+        #expect(decoded == .double(3.5))
+    }
+
+    @Test("a whole-number double is NOT preserved across the wire: it encodes as a plain integer and decodes back as .int, by design")
+    func wholeNumberDoubleIsNotPreservedAcrossEncodeDecode() throws {
+        let data = try JSONEncoder().encode(JSONValue.double(3.0))
+        #expect(String(data: data, encoding: .utf8) == "3")
+
+        let decoded = try JSONDecoder().decode(JSONValue.self, from: data)
+        #expect(decoded == .int(3))
     }
 
     @Test("subscript and typed accessors read object fields")

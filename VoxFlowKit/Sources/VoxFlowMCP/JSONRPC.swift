@@ -1,8 +1,14 @@
 import Foundation
 
-/// A minimal JSON tree: null/bool/int/double/string/array/object. Integers and doubles stay
-/// distinguishable through encode/decode (`.int(20)` round-trips as `.int`, not `.double`) so
-/// `tools/call` arguments like `limit: 20` decode as integers rather than floating-point.
+/// A minimal JSON tree: null/bool/int/double/string/array/object.
+///
+/// On decode, a JSON number with no fractional part becomes `.int`; one with a fractional part
+/// becomes `.double` — so `tools/call` arguments like `limit: 20` decode as `.int(20)` rather than
+/// floating-point. This distinction is **not** preserved across an encode/decode round trip for a
+/// whole-number double: `.double(3.0)` encodes to the JSON literal `3` (JSON has one number type,
+/// there is no way to write "3 but it's a double" on the wire), and decoding `3` back always
+/// chooses `.int` over `.double`. Nothing on the MCP surface needs `3.0` to read back differently
+/// from `3`; if a future caller does, it must not rely on `JSONValue` for that distinction.
 public enum JSONValue: Sendable, Equatable {
     case null
     case bool(Bool)

@@ -178,6 +178,34 @@ struct MCPHTTPPolicyTests {
         }
     }
 
+    @Test("a modern body with no MCP-Protocol-Version header at all is rejected")
+    func missingProtocolVersionHeaderRejected() {
+        let headers = authorizedHeaders(["mcp-method": "tools/list"]) // no mcp-protocol-version
+        let body = modernBody(version: MCPProtocolVersion.current, method: "tools/list")
+        let verdict = policy.verdict(for: request(headers: headers, body: body), token: token, boundPort: boundPort)
+        #expect(verdict == .status(400, JSONRPCError(code: -32020, message: MCPError.headerMismatch.message)))
+    }
+
+    @Test("a modern body with a matching MCP-Protocol-Version but no Mcp-Method header is rejected")
+    func missingMcpMethodHeaderRejected() {
+        let headers = authorizedHeaders(["mcp-protocol-version": MCPProtocolVersion.current]) // no mcp-method
+        let body = modernBody(version: MCPProtocolVersion.current, method: "tools/list")
+        let verdict = policy.verdict(for: request(headers: headers, body: body), token: token, boundPort: boundPort)
+        #expect(verdict == .status(400, JSONRPCError(code: -32020, message: MCPError.headerMismatch.message)))
+    }
+
+    @Test("a modern tools/call body with matching version and method headers but no Mcp-Name header is rejected")
+    func missingMcpNameHeaderRejected() {
+        let headers = authorizedHeaders([
+            "mcp-protocol-version": MCPProtocolVersion.current,
+            "mcp-method": "tools/call",
+            // no mcp-name
+        ])
+        let body = modernBody(version: MCPProtocolVersion.current, method: "tools/call", name: "transcribe_file")
+        let verdict = policy.verdict(for: request(headers: headers, body: body), token: token, boundPort: boundPort)
+        #expect(verdict == .status(400, JSONRPCError(code: -32020, message: MCPError.headerMismatch.message)))
+    }
+
     @Test("an unsupported _meta protocol version is rejected naming both supported versions")
     func unsupportedVersionRejected() {
         let headers = authorizedHeaders(["mcp-protocol-version": "1999-01-01", "mcp-method": "tools/list"])
@@ -192,8 +220,8 @@ struct MCPHTTPPolicyTests {
         #expect(supported == MCPProtocolVersion.supported)
     }
 
-    @Test("a legacy body with no _meta and no MCP headers proceeds")
-    func legacyBodyProceeds() {
+    @Test("regression guard: a legacy body (no _meta) proceeds even though it carries none of the modern MCP headers — the missing-header check above applies only to modern (_meta-carrying) bodies")
+    func legacyBodyProceedsWithoutModernHeadersRegressionGuard() {
         let verdict = policy.verdict(
             for: request(headers: authorizedHeaders(), body: legacyInitializeBody()),
             token: token, boundPort: boundPort
