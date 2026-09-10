@@ -6,11 +6,19 @@ import VoxFlowMCP
 import VoxFlowStorage
 
 /// ST-06a: the client-approval dialog seam. `MCPToolRunner` asks this at most once per unapproved
-/// client per runner lifetime (session) before letting any tool call through; Task 4 implements the
-/// real SwiftUI panel, tests use a fake. `tools` are the wire names of every tool enabled right now
-/// (for the dialog's "wants access to: …" copy), not just the one tool that triggered the prompt.
+/// client at a time (concurrent first calls for the same client await the same in-flight answer —
+/// see `authorize`); Task 4 implements the real SwiftUI panel, tests use a fake. `tools` are the
+/// wire names of every tool enabled right now (for the dialog's "wants access to: …" copy), not
+/// just the one tool that triggered the prompt.
+///
+/// `canPersist` is `false` only when `identity.path` is empty (peer resolution didn't fully
+/// resolve) — review finding I7/item 8: every unresolvable peer displays as the same `"Unknown
+/// app"` identity, so persisting an approval for one would silently approve *all* of them. The
+/// presenter must not offer "Always allow" when this is `false`; `MCPToolRunner` refuses to call
+/// `MCPClientStore.approve` for such an identity regardless of what the presenter answers, falling
+/// back to a session-scoped allow (see `.allowOnce`) if it answers `.allow` anyway.
 protocol MCPApprovalPresenting: Sendable {
-    func present(identity: MCPClientIdentity, tools: [String]) async -> MCPClientDecision
+    func present(identity: MCPClientIdentity, tools: [String], canPersist: Bool) async -> MCPClientDecision
 }
 
 /// Ties the MCP server's pieces together: `MCPHTTPPolicy` (transport-level validation) →
@@ -51,17 +59,22 @@ final class MCPToolRunner: MCPRequestHandling, Sendable {
     /// request is rejected until this is set — same fail-closed default as an unset token would be.
     var boundPort: UInt16 = 0
 
-    /// `(name, path)` keys mirrored from `mcp_clients` for every *persisted* approval, loaded once
-    /// per runner lifetime and kept current in memory afterwards (an "Always allow" answer adds to
-    /// it directly rather than re-querying). `MCPClientStore` is blocking SQLite I/O (its own doc:
-    /// "call this off the main actor") — every access below runs inside `Task.detached`, the same
-    /// pattern `HistoryService`/`HistoryWriter` already use to keep blocking store calls off this
-    /// actor even though the *caller* (this class) lives on it.
-    private var approvedKeys: Set<String>?
     /// Session-only: a "Deny" answer never writes to `mcp_clients` (persistence is opt-in via
     /// "Always allow", never opt-out) but must still stop the presenter being asked again this
-    /// session — `ClientRegistry.decision` checks this before `approvedKeys`.
+    /// session — `ClientRegistry.decision` checks this before the (read-through, see `isApproved`)
+    /// persisted set.
     private var deniedThisSession: Set<String> = []
+    /// Session-only "Allow once" grants (review item 4 / plan ruling 5, amended): the seam sees a
+    /// client identity, not a TCP connection, so `Allow once` is scoped to the rest of this runner's
+    /// lifetime (the app session) and is never written to `mcp_clients`. Also where an `.allow`
+    /// answer for an identity with no persistable path (`canPersist == false`, review item 8) lands.
+    private var sessionAllowed: Set<String> = []
+    /// One in-flight `approvalPresenter.present` call per client key (review item 3): a second
+    /// concurrent call for the same unapproved client awaits this task's result instead of opening
+    /// a second dialog. Set and read only inside `authorize`/`presentationDecision`, both of which
+    /// run to completion (no `await`) between checking and inserting — see `presentationDecision`'s
+    /// doc for why that makes the check-then-insert atomic on this actor.
+    private var pendingPresentations: [String: Task<MCPClientDecision, Never>] = [:]
 
     init(settings: MCPSettings, coordinator: DictationCoordinator, controller: DictationController,
          historyService: HistoryService, fileTranscribing: any FileTranscribing, pathPolicy: PathPolicy,
@@ -139,26 +152,47 @@ final class MCPToolRunner: MCPRequestHandling, Sendable {
     /// *every* call (ST-06 "Connected clients" wants every client that ever tried, not only
     /// approved ones — and `recordSighting` never touches `approved`, so this can't silently
     /// de-approve/re-approve anyone; see `MCPClientStore`'s doc), then resolves through
-    /// `ClientRegistry.decision` (deniedThisSession → approvedKeys → ask) and, only on `.ask`, calls
-    /// the presenter — exactly once, since its answer always lands in one of `approvedKeys`/
-    /// `deniedThisSession` before returning, so the *next* call for the same client short-circuits
-    /// before ever reaching the presenter again.
+    /// `ClientRegistry.decision` over `sessionAllowed`/`deniedThisSession` and a *read-through*
+    /// query of `mcp_clients` (review item 2 — no cache, so Revoke/Regenerate take effect on the
+    /// very next call, not only after a relaunch) and, only on `.ask`, calls the presenter through
+    /// `presentationDecision`, which de-duplicates concurrent callers (review item 3).
     private func authorize(_ identity: MCPClientIdentity, toolNames: [String]) async -> Bool {
-        await ensureApprovedKeysLoaded()
         let key = ClientRegistry.key(identity)
+        // Review item 8: never persist an approval for an identity whose peer resolution didn't
+        // fully resolve (empty `path`) — every such peer displays as the same "Unknown app" and
+        // would otherwise all share one approval.
+        let canPersist = !identity.path.isEmpty
         await recordSighting(identity)
-        switch clientRegistry.decision(for: identity, approved: approvedKeys ?? [], deniedThisSession: deniedThisSession, allowedOnce: []) {
+        // `ClientRegistry.decision` takes the full `approved` set (Task 2's pure-function shape);
+        // the read-through check below only ever needs to know about `key`, so it's wrapped as a
+        // single-element set rather than fetching every approved key just to discard the rest.
+        let approvedNow: Set<String> = await isApproved(key) ? [key] : []
+        switch clientRegistry.decision(for: identity, approved: approvedNow, deniedThisSession: deniedThisSession, allowedOnce: sessionAllowed) {
         case .allow:
+            return true
+        case .allowOnce:
+            // `ClientRegistry.decision` never itself returns this (it only reads persisted/session
+            // state) — unreachable, kept only for exhaustiveness against `MCPClientDecision`.
             return true
         case .deny:
             return false
         case .ask:
-            switch await approvalPresenter.present(identity: identity, tools: toolNames) {
+            switch await presentationDecision(for: identity, toolNames: toolNames, canPersist: canPersist) {
             case .allow:
-                approvedKeys?.insert(key)
-                let store = clientStore
-                let name = identity.name, path = identity.path, seenAt = now()
-                _ = await Task.detached(priority: .utility) { try? store.approve(name: name, path: path, now: seenAt) }.value
+                if canPersist {
+                    let store = clientStore
+                    let name = identity.name, path = identity.path, seenAt = now()
+                    _ = await Task.detached(priority: .utility) { try? store.approve(name: name, path: path, now: seenAt) }.value
+                } else {
+                    // The presenter shouldn't offer "Always allow" when `canPersist` is false, but
+                    // if it answers `.allow` anyway, degrade to a session-scoped grant rather than
+                    // either persisting a collapsible key or denying a client the presenter just
+                    // approved.
+                    sessionAllowed.insert(key)
+                }
+                return true
+            case .allowOnce:
+                sessionAllowed.insert(key)
                 return true
             case .deny, .ask:
                 // A presenter is only ever asked when the registry itself returned `.ask`, so an
@@ -170,17 +204,38 @@ final class MCPToolRunner: MCPRequestHandling, Sendable {
         }
     }
 
+    /// Runs `approvalPresenter.present` at most once per `identity`'s key at any given time: the
+    /// `if let existing … return` check and the `pendingPresentations[key] = task` write below it
+    /// are separated by no `await`, so — this method being `@MainActor`-isolated like the rest of
+    /// this class — no other call can observe the key as "not pending" in between; a second
+    /// concurrent call for the same key always finds the first's task already registered and awaits
+    /// its `.value` instead of presenting again (review item 3).
+    private func presentationDecision(for identity: MCPClientIdentity, toolNames: [String], canPersist: Bool) async -> MCPClientDecision {
+        let key = ClientRegistry.key(identity)
+        if let existing = pendingPresentations[key] { return await existing.value }
+        let presenter = approvalPresenter
+        let task = Task<MCPClientDecision, Never> { await presenter.present(identity: identity, tools: toolNames, canPersist: canPersist) }
+        pendingPresentations[key] = task
+        let decision = await task.value
+        pendingPresentations[key] = nil
+        return decision
+    }
+
     private func recordSighting(_ identity: MCPClientIdentity) async {
         let store = clientStore
         let name = identity.name, path = identity.path, seenAt = now()
         _ = await Task.detached(priority: .utility) { try? store.recordSighting(name: name, path: path, now: seenAt) }.value
     }
 
-    private func ensureApprovedKeysLoaded() async {
-        guard approvedKeys == nil else { return }
+    /// Read-through: no cache, so a Revoke or a token Regenerate (which drops every approved row)
+    /// takes effect on the very next `authorize` call, not only after this runner is rebuilt
+    /// (review item 2). `mcp_clients` is a handful of rows; reading it every approval decision is
+    /// cheap and — like every other `MCPClientStore` access here — runs off this actor via
+    /// `Task.detached`.
+    private func isApproved(_ key: String) async -> Bool {
         let store = clientStore
         let rows = await Task.detached(priority: .utility) { (try? store.all()) ?? [] }.value
-        approvedKeys = Set(rows.filter(\.approved).map { ClientRegistry.key(MCPClientIdentity(name: $0.name, path: $0.path, pid: nil)) })
+        return rows.contains { $0.approved && ClientRegistry.key(MCPClientIdentity(name: $0.name, path: $0.path, pid: nil)) == key }
     }
 
     // MARK: transcribe_file
@@ -211,40 +266,78 @@ final class MCPToolRunner: MCPRequestHandling, Sendable {
 
     // MARK: dictate
 
+    /// Authoritative in-runner busy gate (review item 1/C1): `coordinator.isHUDActive` is derived
+    /// from `DictationCoordinator`'s state *mirror*, which only updates several actor-hops after
+    /// `startProgrammaticDictation()` enqueues its commands — two concurrent `dictate` calls can
+    /// both read `isHUDActive == false` and both pass. This flag is set synchronously, before this
+    /// method's first `await`, and cleared in a `defer`, so — this class being `@MainActor` and
+    /// this prefix containing no suspension point — a second call arriving while the first is still
+    /// in flight always observes it `true` and is refused deterministically; there is no window
+    /// where both can pass. `coordinator.isHUDActive`/`pausedUntil` stay as a secondary guard: they
+    /// still catch a dictation the user started with the hotkey, which this flag knows nothing about.
+    private var dictateInFlight = false
+
     private func dictate() async -> ToolOutcome {
         guard !coordinator.isHUDActive else { return .toolFailure(.busy, message: MCPToolError.dictationAlreadyRunning) }
         guard coordinator.pausedUntil == nil else { return .toolFailure(.busy, message: MCPToolError.dictationPaused) }
+        guard !dictateInFlight else { return .toolFailure(.busy, message: MCPToolError.dictationAlreadyRunning) }
+        dictateInFlight = true
+        defer { dictateInFlight = false }
 
         // Subscribe *before* starting the capture (`DictationController.results()`'s documented
         // contract) — the underlying `AsyncStream` is `.unbounded`, so a result yielded before this
-        // function's own child task starts iterating it is buffered, not lost.
+        // function's own child task starts iterating it is buffered, not lost. Same for `states()`
+        // (review item 6's fast-failure race, below) — both subscriptions are registered, still
+        // synchronously ahead of `dictateInFlight`'s own suspension-free prefix, before anything
+        // starts.
         let resultsStream = await controller.results()
+        let statesStream = await controller.states()
         coordinator.startProgrammaticDictation()
         let config = await controller.config
+        // Each tool owns its own timeout budget; the transport's connection watchdog is only a
+        // last-resort guard against a permanently pinned connection (order of 20 minutes), not a
+        // per-request timeout — it does not need to, and must not, be shorter than this.
         let timeout = config.maxDuration + config.processingTimeout
 
-        // Race the first `results()` element against the timeout, on the injected clock. Whichever
-        // child finishes first via `group.next()` wins; `group.cancelAll()` then cancels the loser —
-        // the `for await` child's `next()` returns `nil` promptly on cancellation (firing
-        // `onTermination`, so `results()`'s subscriber entry is removed, not leaked) and the sleeper
-        // child's `clock.sleep` throws `CancellationError`, swallowed by `try?`. Either way
-        // `withTaskGroup` awaits the cancelled child to finish before returning, so this never
-        // leaves an orphaned subscriber or an orphaned sleeper behind.
-        let outcome: DictationResult? = await withTaskGroup(of: DictationResult?.self) { group in
+        // Three-way race, on the injected clock: the first `results()` element, the capture
+        // reaching a terminal state with no result (review item 6 — Escape, a transcription
+        // failure, an empty transcript, no microphone, an excluded app, no model installed), or the
+        // timeout. Whichever child finishes first via `group.next()` wins; `group.cancelAll()` then
+        // cancels the other two — a cancelled `for await` child's `next()` returns `nil` promptly
+        // (firing `onTermination`, so the `results()`/`states()` subscriber entries are removed, not
+        // leaked) and a cancelled `clock.sleep` throws `CancellationError`, swallowed by `try?`.
+        // `withTaskGroup` awaits every child before returning, so this never leaves an orphaned
+        // subscriber or sleeper behind.
+        let outcome: DictateRaceOutcome = await withTaskGroup(of: DictateRaceOutcome.self) { group in
             group.addTask {
-                for await result in resultsStream { return result }
-                return nil
+                for await result in resultsStream { return .result(result) }
+                return .timedOut
+            }
+            group.addTask {
+                for await state in statesStream {
+                    if let reason = MCPToolError.dictationFailureReason(for: state) { return .failed(reason) }
+                }
+                return .timedOut
             }
             group.addTask { [clock] in
                 try? await clock.sleep(for: timeout)
-                return nil
+                return .timedOut
             }
-            let first = await group.next() ?? nil
+            let first = await group.next() ?? .timedOut
             group.cancelAll()
             return first
         }
-        guard let outcome else { return .toolFailure(.timedOut, message: MCPToolError.dictationTimedOut) }
-        return .success(outcome.text)
+        switch outcome {
+        case .result(let result): return .success(result.text)
+        case .failed(let reason): return .toolFailure(.captureFailed, message: reason)
+        case .timedOut: return .toolFailure(.timedOut, message: MCPToolError.dictationTimedOut)
+        }
+    }
+
+    private enum DictateRaceOutcome {
+        case result(DictationResult)
+        case failed(String)
+        case timedOut
     }
 
     // MARK: search_history

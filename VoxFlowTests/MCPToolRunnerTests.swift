@@ -25,20 +25,30 @@ private final class RotatingKeyProvider: HistoryKeyProviding, Sendable {
     func rotate() { key.withLock { $0 = SymmetricKey(size: .bits256) } }
 }
 
-/// Records every `present(identity:tools:)` call and answers a scripted decision — `MCPToolRunner`'s
-/// approval seam (`MCPApprovalPresenting`) is defined in `MCPToolRunner.swift`; Task 4 supplies the
-/// real SwiftUI panel, this is the test double.
+/// Records every `present(identity:tools:canPersist:)` call and answers a scripted decision —
+/// `MCPToolRunner`'s approval seam (`MCPApprovalPresenting`) is defined in `MCPToolRunner.swift`;
+/// Task 4 supplies the real SwiftUI panel, this is the test double. `gate`, when given, makes
+/// `present` suspend on it before answering — lets a test hold a first "ask" open long enough to
+/// start a second concurrent call and prove it's deduplicated rather than presenting twice.
 private final class FakeApprovalPresenter: MCPApprovalPresenting, Sendable {
-    private struct State { var decision: MCPClientDecision; var calls: [(identity: MCPClientIdentity, tools: [String])] = [] }
+    private struct State {
+        var decision: MCPClientDecision
+        var calls: [(identity: MCPClientIdentity, tools: [String], canPersist: Bool)] = []
+    }
     private let state: Mutex<State>
+    private let gate: Gate?
 
-    init(decision: MCPClientDecision) { state = Mutex(State(decision: decision)) }
+    init(decision: MCPClientDecision, gate: Gate? = nil) {
+        state = Mutex(State(decision: decision))
+        self.gate = gate
+    }
 
     var callCount: Int { state.withLock { $0.calls.count } }
-    var lastCall: (identity: MCPClientIdentity, tools: [String])? { state.withLock { $0.calls.last } }
+    var lastCall: (identity: MCPClientIdentity, tools: [String], canPersist: Bool)? { state.withLock { $0.calls.last } }
 
-    func present(identity: MCPClientIdentity, tools: [String]) async -> MCPClientDecision {
-        state.withLock { $0.calls.append((identity, tools)) }
+    func present(identity: MCPClientIdentity, tools: [String], canPersist: Bool) async -> MCPClientDecision {
+        state.withLock { $0.calls.append((identity, tools, canPersist)) }
+        if let gate { await gate.wait() }
         return state.withLock { $0.decision }
     }
 }
@@ -63,11 +73,13 @@ struct MCPToolRunnerTests {
         return settings
     }
 
-    func makeDictation(clock: FakeClock, transcriber: FakeDictationTranscriber, mic: FakeMicrophone = FakeMicrophone())
+    func makeDictation(clock: FakeClock, transcriber: FakeDictationTranscriber, mic: FakeMicrophone = FakeMicrophone(),
+                       preflight: Preflight = Preflight(excludedApp: nil, secureInput: false, microphone: .granted, model: .loaded),
+                       loadModel: @escaping @Sendable () async throws -> Void = {})
         -> (DictationCoordinator, DictationController) {
         let controller = DictationController(config: FlowBarConfig(), microphone: mic, transcriber: transcriber, inserter: FakeTextInserter(), clock: clock,
-                                             preflight: { Preflight(excludedApp: nil, secureInput: false, microphone: .granted, model: .loaded) },
-                                             loadModel: {}, options: { TranscriptionOptions() }, onSave: { _, _ in }, copyToClipboard: { _ in })
+                                             preflight: { preflight },
+                                             loadModel: loadModel, options: { TranscriptionOptions() }, onSave: { _, _ in }, copyToClipboard: { _ in })
         let dictationSettings = DictationSettings(store: InMemoryKeyValueStore())
         let permissions = FakePermissions(microphone: .granted, requestResult: .granted, accessibility: true)
         let coordinator = DictationCoordinator(controller: controller, settings: dictationSettings, permissions: permissions,
@@ -291,6 +303,179 @@ struct MCPToolRunnerTests {
         #expect(response.error?.message == "Dictation timed out.")
     }
 
+    // MARK: dictate — concurrency (review C1)
+
+    @Test("two concurrent dictate calls: dictateInFlight is authoritative — exactly one capture starts, the other is refused with -32002, and the single result goes only to the first")
+    func concurrentDictateCallsOnlyOneWins() async throws {
+        let clock = FakeClock()
+        let mic = FakeMicrophone()
+        let preflightGate = Gate()
+        let transcriber = FakeDictationTranscriber(result: DictationResult(text: "only mine", rawText: "only mine",
+                                                                            segments: [], language: nil, duration: 1, lowConfidence: false))
+        // Built directly (not via `makeDictation`) with a *gated* preflight — resolving preflight
+        // immediately would let the FSM (and so `coordinator.isHUDActive`) catch up before task2
+        // gets a chance to run; gating it keeps `isHUDActive` observably `false` for as long as the
+        // test needs, proving the refusal below comes from `dictateInFlight`, not the mirror.
+        let controller = DictationController(config: FlowBarConfig(), microphone: mic, transcriber: transcriber, inserter: FakeTextInserter(), clock: clock,
+                                             preflight: { await preflightGate.wait(); return Preflight(excludedApp: nil, secureInput: false, microphone: .granted, model: .loaded) },
+                                             loadModel: {}, options: { TranscriptionOptions() }, onSave: { _, _ in }, copyToClipboard: { _ in })
+        let dictationSettings = DictationSettings(store: InMemoryKeyValueStore())
+        let permissions = FakePermissions(microphone: .granted, requestResult: .granted, accessibility: true)
+        let coordinator = DictationCoordinator(controller: controller, settings: dictationSettings, permissions: permissions,
+                                               navigation: Navigation(), clock: clock)
+        coordinator.start()
+        let (runner, settings) = try makeRunner(coordinator: coordinator, controller: controller, clock: clock)
+
+        let req1 = toolCallRequest(name: "dictate", arguments: .object([:]), token: settings.token, id: .number(1))
+        let req2 = toolCallRequest(name: "dictate", arguments: .object([:]), token: settings.token, id: .number(2))
+
+        let task1 = Task { await runner.handle(req1, peer: identity) }
+        // `dictate()`'s guard-and-set prefix (including `dictateInFlight = true` and subscribing to
+        // `results()`/`states()`) runs within a handful of actor hops, all *before* the gated
+        // `preflight()` deep inside the coordinator's command queue is ever reached — give it
+        // generous room to get there while nothing FSM-visible can happen yet.
+        for _ in 0..<20 { await Task.yield() }
+        #expect(!coordinator.isHUDActive)   // the (stale) coordinator mirror hasn't caught up — by design
+
+        let task2 = Task { await runner.handle(req2, peer: identity) }
+        let (status2, body2) = await task2.value
+        let response2 = try decode(body2)
+        #expect(status2 == 200)
+        #expect(response2.error?.code == -32002)
+        #expect(response2.error?.message == "A dictation is already running.")
+
+        await preflightGate.open()
+        await mic.waitUntilCapturing()
+        mic.emit(rms: 0.3, seconds: 1)
+        await transcriber.waitUntilReceived(1)
+        await clock.waitForSleepers(3)
+        await clock.advance(by: 3)
+        let (status1, body1) = await task1.value
+        let response1 = try decode(body1)
+        #expect(status1 == 200)
+        #expect(text(from: response1.result) == "only mine")
+    }
+
+    // MARK: dictate — fast failure (review item 6, -32005)
+
+    @Test("MCPToolError.dictationFailureReason renders the fixed copy for every terminal failure state, verbatim")
+    func dictationFailureReasonCopy() {
+        #expect(MCPToolError.dictationFailureReason(for: .discarded) == "Dictation was discarded.")
+        #expect(MCPToolError.dictationFailureReason(for: .didntCatch(rawAvailable: false)) == "VoxFlow didn't catch that.")
+        #expect(MCPToolError.dictationFailureReason(for: .didntCatch(rawAvailable: true)) == "VoxFlow didn't catch that.")
+        #expect(MCPToolError.dictationFailureReason(for: .micUnavailable(.denied)) == "Microphone access needed.")
+        #expect(MCPToolError.dictationFailureReason(for: .micUnavailable(.noDevice)) == "No microphone.")
+        #expect(MCPToolError.dictationFailureReason(for: .micUnavailable(.granted)) == "Microphone unavailable.")
+        #expect(MCPToolError.dictationFailureReason(for: .micUnavailable(.inUse(by: "Zoom"))) == "Microphone in use by Zoom.")
+        #expect(MCPToolError.dictationFailureReason(for: .micUnavailable(.inUse(by: nil))) == "Microphone in use by another app.")
+        #expect(MCPToolError.dictationFailureReason(for: .excluded(app: "1Password")) == "Dictation is off in 1Password.")
+        #expect(MCPToolError.dictationFailureReason(for: .modelNotInstalled(sizeBytes: 100)) == "The speech model isn't installed.")
+        #expect(MCPToolError.dictationFailureReason(for: .error("boom")) == "boom")
+        // States that still might produce (or already produced) a result are not failures.
+        #expect(MCPToolError.dictationFailureReason(for: .idle) == nil)
+        #expect(MCPToolError.dictationFailureReason(for: .inserted(appName: "Mail", words: 3, limitReached: false)) == nil)
+        #expect(MCPToolError.dictationFailureReason(for: .copied) == nil)
+    }
+
+    @Test("dictate fails fast with -32005 when the capture is discarded (Escape)")
+    func dictateFailsFastOnDiscarded() async throws {
+        let clock = FakeClock()
+        let mic = FakeMicrophone()
+        let (coordinator, controller) = makeDictation(clock: clock, transcriber: FakeDictationTranscriber(result: .empty, hold: Gate()), mic: mic)
+        let (runner, settings) = try makeRunner(coordinator: coordinator, controller: controller, clock: clock)
+
+        let request = toolCallRequest(name: "dictate", arguments: .object([:]), token: settings.token)
+        let task = Task { await runner.handle(request, peer: identity) }
+        await mic.waitUntilCapturing()
+        coordinator.escape()
+        let (status, body) = await task.value
+        let response = try decode(body)
+        #expect(status == 200)
+        #expect(response.error?.code == -32005)
+        #expect(response.error?.message == "Dictation was discarded.")
+    }
+
+    @Test("dictate fails fast with -32005 when the capture didn't catch anything (empty transcript)")
+    func dictateFailsFastOnDidntCatch() async throws {
+        let clock = FakeClock()
+        let mic = FakeMicrophone()
+        let (coordinator, controller) = makeDictation(clock: clock, transcriber: FakeDictationTranscriber(result: .empty), mic: mic)
+        let (runner, settings) = try makeRunner(coordinator: coordinator, controller: controller, clock: clock)
+
+        let request = toolCallRequest(name: "dictate", arguments: .object([:]), token: settings.token)
+        let task = Task { await runner.handle(request, peer: identity) }
+        await mic.waitUntilCapturing()
+        await clock.waitForSleepers(3)   // cap + silence + this dictate call's own timeout
+        await clock.advance(by: 3)        // FlowBarConfig.silenceStop default — well short of the full budget
+        let (status, body) = await task.value
+        let response = try decode(body)
+        #expect(status == 200)
+        #expect(response.error?.code == -32005)
+        #expect(response.error?.message == "VoxFlow didn't catch that.")
+    }
+
+    @Test("dictate fails fast with -32005 when the speech model fails to load")
+    func dictateFailsFastOnModelLoadError() async throws {
+        struct LoadFailed: Error {}
+        let clock = FakeClock()
+        let (coordinator, controller) = makeDictation(clock: clock, transcriber: FakeDictationTranscriber(result: .empty),
+                                                       preflight: Preflight(excludedApp: nil, secureInput: false, microphone: .granted, model: .installedNotLoaded),
+                                                       loadModel: { throw LoadFailed() })
+        let (runner, settings) = try makeRunner(coordinator: coordinator, controller: controller, clock: clock)
+
+        let request = toolCallRequest(name: "dictate", arguments: .object([:]), token: settings.token)
+        let (status, body) = await runner.handle(request, peer: identity)
+        let response = try decode(body)
+        #expect(status == 200)
+        #expect(response.error?.code == -32005)
+        #expect(response.error?.message == "Couldn't load the speech model")
+    }
+
+    @Test("dictate fails fast with -32005 when the microphone is unavailable")
+    func dictateFailsFastOnMicUnavailable() async throws {
+        let clock = FakeClock()
+        let (coordinator, controller) = makeDictation(clock: clock, transcriber: FakeDictationTranscriber(result: .empty),
+                                                       preflight: Preflight(excludedApp: nil, secureInput: false, microphone: .denied, model: .loaded))
+        let (runner, settings) = try makeRunner(coordinator: coordinator, controller: controller, clock: clock)
+
+        let request = toolCallRequest(name: "dictate", arguments: .object([:]), token: settings.token)
+        let (status, body) = await runner.handle(request, peer: identity)
+        let response = try decode(body)
+        #expect(status == 200)
+        #expect(response.error?.code == -32005)
+        #expect(response.error?.message == "Microphone access needed.")
+    }
+
+    @Test("dictate fails fast with -32005 when dictation is excluded in the (notional) focused app")
+    func dictateFailsFastOnExcludedApp() async throws {
+        let clock = FakeClock()
+        let (coordinator, controller) = makeDictation(clock: clock, transcriber: FakeDictationTranscriber(result: .empty),
+                                                       preflight: Preflight(excludedApp: "1Password", secureInput: false, microphone: .granted, model: .loaded))
+        let (runner, settings) = try makeRunner(coordinator: coordinator, controller: controller, clock: clock)
+
+        let request = toolCallRequest(name: "dictate", arguments: .object([:]), token: settings.token)
+        let (status, body) = await runner.handle(request, peer: identity)
+        let response = try decode(body)
+        #expect(status == 200)
+        #expect(response.error?.code == -32005)
+        #expect(response.error?.message == "Dictation is off in 1Password.")
+    }
+
+    @Test("dictate fails fast with -32005 when the speech model isn't installed")
+    func dictateFailsFastOnModelNotInstalled() async throws {
+        let clock = FakeClock()
+        let (coordinator, controller) = makeDictation(clock: clock, transcriber: FakeDictationTranscriber(result: .empty),
+                                                       preflight: Preflight(excludedApp: nil, secureInput: false, microphone: .granted, model: .notInstalled(sizeBytes: 100)))
+        let (runner, settings) = try makeRunner(coordinator: coordinator, controller: controller, clock: clock)
+
+        let request = toolCallRequest(name: "dictate", arguments: .object([:]), token: settings.token)
+        let (status, body) = await runner.handle(request, peer: identity)
+        let response = try decode(body)
+        #expect(status == 200)
+        #expect(response.error?.code == -32005)
+        #expect(response.error?.message == "The speech model isn't installed.")
+    }
+
     // MARK: search_history
 
     @Test("search_history with history disabled → -32004 and the readable reason")
@@ -464,5 +649,99 @@ struct MCPToolRunnerTests {
         let request = toolCallRequest(name: "search_history", arguments: .object(["query": .string("")]), token: settings.token)
         _ = await runner.handle(request, peer: unresolved)
         #expect(presenter.lastCall?.identity.name == "Unknown app")
+    }
+
+    // MARK: approval — concurrency, revoke, Allow once, unresolved identity (review items 2/3/4/8)
+
+    @Test("two concurrent first calls from the same unapproved client ask the presenter once and both get the same decision")
+    func concurrentFirstCallsAskPresenterOnce() async throws {
+        let gate = Gate()
+        let presenter = FakeApprovalPresenter(decision: .allow, gate: gate)
+        let (coordinator, controller) = makeDictation(clock: FakeClock(), transcriber: FakeDictationTranscriber(result: .empty))
+        let (runner, settings) = try makeRunner(coordinator: coordinator, controller: controller, clock: FakeClock(), approvalPresenter: presenter)
+
+        let req1 = toolCallRequest(name: "search_history", arguments: .object(["query": .string("")]), token: settings.token, id: .number(1))
+        let req2 = toolCallRequest(name: "search_history", arguments: .object(["query": .string("")]), token: settings.token, id: .number(2))
+        let task1 = Task { await runner.handle(req1, peer: identity) }
+        // Wait until task1 has actually reached (and registered) the presenter call before starting
+        // task2 — proves task2 finds the in-flight decision already recorded, not a race on who gets
+        // there first.
+        while presenter.callCount == 0 { await Task.yield() }
+        let task2 = Task { await runner.handle(req2, peer: identity) }
+
+        await gate.open()
+        let (status1, _) = await task1.value
+        let (status2, _) = await task2.value
+        #expect(status1 == 200)
+        #expect(status2 == 200)
+        #expect(presenter.callCount == 1)
+    }
+
+    @Test("a revoke between two calls makes the second call ask the presenter again")
+    func revokeBetweenCallsAsksAgain() async throws {
+        let clientStore = try MCPClientStore(database: VoxFlowDatabase.inMemory())
+        let presenter = FakeApprovalPresenter(decision: .allow)
+        let (coordinator, controller) = makeDictation(clock: FakeClock(), transcriber: FakeDictationTranscriber(result: .empty))
+        let (runner, settings) = try makeRunner(coordinator: coordinator, controller: controller, clock: FakeClock(),
+                                                clientStore: clientStore, approvalPresenter: presenter)
+
+        let first = toolCallRequest(name: "search_history", arguments: .object(["query": .string("")]), token: settings.token, id: .number(1))
+        let (status1, _) = await runner.handle(first, peer: identity)
+        #expect(status1 == 200)
+        #expect(presenter.callCount == 1)
+        let rows = try clientStore.all()
+        #expect(rows.count == 1 && rows[0].approved == true)
+
+        try clientStore.revoke(id: rows[0].id)
+
+        let second = toolCallRequest(name: "search_history", arguments: .object(["query": .string("")]), token: settings.token, id: .number(2))
+        let (status2, _) = await runner.handle(second, peer: identity)
+        #expect(status2 == 200)             // the fake presenter answers `.allow` again
+        #expect(presenter.callCount == 2)   // asked again — the revoke took effect on the very next call
+    }
+
+    @Test("Allow once is scoped to the app session and never persisted, but the presenter is not asked again this session")
+    func allowOnceIsSessionScopedNotPersisted() async throws {
+        let clientStore = try MCPClientStore(database: VoxFlowDatabase.inMemory())
+        let presenter = FakeApprovalPresenter(decision: .allowOnce)
+        let (coordinator, controller) = makeDictation(clock: FakeClock(), transcriber: FakeDictationTranscriber(result: .empty))
+        let (runner, settings) = try makeRunner(coordinator: coordinator, controller: controller, clock: FakeClock(),
+                                                clientStore: clientStore, approvalPresenter: presenter)
+
+        let first = toolCallRequest(name: "search_history", arguments: .object(["query": .string("")]), token: settings.token, id: .number(1))
+        let (status1, _) = await runner.handle(first, peer: identity)
+        #expect(status1 == 200)
+        #expect(try clientStore.all().isEmpty)   // never persisted
+
+        let second = toolCallRequest(name: "search_history", arguments: .object(["query": .string("")]), token: settings.token, id: .number(2))
+        let (status2, _) = await runner.handle(second, peer: identity)
+        #expect(status2 == 200)
+        #expect(presenter.callCount == 1)        // not asked again this session
+        #expect(try clientStore.all().isEmpty)   // still never persisted
+    }
+
+    @Test("an unidentified client's Always allow does not persist — canPersist is false and the answer degrades to a session-scoped grant")
+    func unresolvedIdentityAllowDoesNotPersist() async throws {
+        let clientStore = try MCPClientStore(database: VoxFlowDatabase.inMemory())
+        // The presenter shouldn't offer "Always allow" when `canPersist` is false (Task 4's job) —
+        // this scripts `.allow` anyway to prove the runner itself refuses to persist it regardless.
+        let presenter = FakeApprovalPresenter(decision: .allow)
+        let (coordinator, controller) = makeDictation(clock: FakeClock(), transcriber: FakeDictationTranscriber(result: .empty))
+        let (runner, settings) = try makeRunner(coordinator: coordinator, controller: controller, clock: FakeClock(),
+                                                clientStore: clientStore, approvalPresenter: presenter)
+
+        let unresolved = MCPClientIdentity(name: "", path: "", pid: nil)
+        let first = toolCallRequest(name: "search_history", arguments: .object(["query": .string("")]), token: settings.token, id: .number(1))
+        let (status1, _) = await runner.handle(first, peer: unresolved)
+        #expect(status1 == 200)
+        #expect(presenter.lastCall?.canPersist == false)
+        #expect(try clientStore.all().isEmpty)   // never persisted despite `.allow`
+
+        // The `.allow` degraded to a session-scoped grant, so the same (still-unresolved) identity
+        // isn't asked again this session.
+        let second = toolCallRequest(name: "search_history", arguments: .object(["query": .string("")]), token: settings.token, id: .number(2))
+        let (status2, _) = await runner.handle(second, peer: unresolved)
+        #expect(status2 == 200)
+        #expect(presenter.callCount == 1)
     }
 }

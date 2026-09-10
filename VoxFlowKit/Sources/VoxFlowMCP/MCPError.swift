@@ -18,6 +18,11 @@ public enum MCPError: Sendable, Equatable, Error {
     case busy
     case timedOut
     case historyUnavailable
+    /// A `dictate` capture reached a terminal state without producing a result (Escape, a
+    /// transcription failure, an empty transcript, no microphone, an excluded app, no model
+    /// installed) — the tool fails fast with the state's own readable reason instead of holding the
+    /// caller for the full timeout budget (Task 3 review item 6).
+    case captureFailed
     case unsupportedProtocolVersion(supported: [String])
 
     public var code: Int {
@@ -32,6 +37,7 @@ public enum MCPError: Sendable, Equatable, Error {
         case .busy: return -32002
         case .timedOut: return -32003
         case .historyUnavailable: return -32004
+        case .captureFailed: return -32005
         case .unsupportedProtocolVersion: return -32000
         }
     }
@@ -48,6 +54,7 @@ public enum MCPError: Sendable, Equatable, Error {
         case .busy: return "Server busy"
         case .timedOut: return "Timed out"
         case .historyUnavailable: return "History unavailable"
+        case .captureFailed: return "Capture failed"
         case .unsupportedProtocolVersion: return "Unsupported protocol version"
         }
     }

@@ -17,9 +17,14 @@ public struct MCPClientIdentity: Sendable, Hashable {
 }
 
 /// What to do with a connecting client: let it through, refuse it outright, or show the ST-06a
-/// approval dialog.
+/// approval dialog. `ClientRegistry.decision(for:...)` (persisted-state lookup) only ever returns
+/// `.allow`/`.deny`/`.ask`; `.allowOnce` is a human's live answer from the approval presenter
+/// (`MCPApprovalPresenting.present`, Task 3) — plan ruling 5, amended in the Task 3 review: the
+/// seam sees a client identity, not a TCP connection, so `Allow once` is scoped to the rest of the
+/// app session and is never persisted to `mcp_clients`.
 public enum MCPClientDecision: Sendable, Equatable {
     case allow
+    case allowOnce
     case deny
     case ask
 }
