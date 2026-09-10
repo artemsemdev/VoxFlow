@@ -117,3 +117,87 @@ struct HTTPMessageTests {
         #expect(HTTPMessage.headerTerminatorEnd(in: data, searchingFrom: 4) == 8)
     }
 }
+
+/// Task 2 re-review round 2, N3: the size caps, the `413` decision, and the scan-offset advance
+/// were already a pure step over accumulated `Data` — `HTTPFraming` is that seam made explicit, and
+/// (unlike the idle timer / connection cap, which need a real socket) it's unit-tested without one.
+@Suite("HTTPFraming")
+struct HTTPFramingTests {
+    @Test("a header block just under the 16 KB cap completes")
+    func headerUnderCapCompletes() {
+        var framing = HTTPFraming()
+        let padding = String(repeating: "a", count: 16_000)
+        let head = "POST /mcp HTTP/1.1\r\nContent-Length: 0\r\nX-Pad: \(padding)\r\n\r\n"
+        #expect(head.utf8.count < HTTPMessage.maxHeaderBytes)
+
+        let step = framing.advance(appending: Data(head.utf8))
+        guard case .complete(let request) = step else {
+            Issue.record("expected .complete, got \(step)")
+            return
+        }
+        #expect(request.method == "POST")
+        #expect(request.path == "/mcp")
+    }
+
+    @Test("a header block over the 16 KB cap, with no terminator yet, is tooLarge")
+    func headerOverCapIsTooLarge() {
+        var framing = HTTPFraming()
+        // No `\r\n\r\n` anywhere in this — the terminator search must still be running.
+        let oversized = Data(repeating: 0x41, count: HTTPMessage.maxHeaderBytes + 1)
+        #expect(framing.advance(appending: oversized) == .tooLarge)
+    }
+
+    @Test("a body that keeps the whole request comfortably under the 1 MB cap completes")
+    func bodyUnderCapCompletes() {
+        var framing = HTTPFraming()
+        let bodyLength = HTTPMessage.maxRequestBytes - 1_000
+        let head = "POST /mcp HTTP/1.1\r\nContent-Length: \(bodyLength)\r\n\r\n"
+        #expect(head.utf8.count + bodyLength < HTTPMessage.maxRequestBytes)
+
+        #expect(framing.advance(appending: Data(head.utf8)) == .needMore)
+        let step = framing.advance(appending: Data(repeating: 0x62, count: bodyLength))
+        guard case .complete(let request) = step else {
+            Issue.record("expected .complete, got \(step)")
+            return
+        }
+        #expect(request.body.count == bodyLength)
+    }
+
+    @Test("a body that pushes the whole request over the 1 MB cap is tooLarge")
+    func bodyOverCapIsTooLarge() {
+        var framing = HTTPFraming()
+        let head = "POST /mcp HTTP/1.1\r\nContent-Length: \(HTTPMessage.maxRequestBytes)\r\n\r\n"
+        #expect(framing.advance(appending: Data(head.utf8)) == .needMore)
+        // head.count + this already exceeds the cap, regardless of the declared Content-Length.
+        let step = framing.advance(appending: Data(repeating: 0x63, count: HTTPMessage.maxRequestBytes))
+        #expect(step == .tooLarge)
+    }
+
+    /// N3's "assert via a counter": proves the header is decoded exactly once, no matter how many
+    /// chunks the body — or even the header itself — arrives in. This is the actual fix for N2 (the
+    /// re-review found `ConnectionHandler` re-parsing the whole header block on every chunk of a
+    /// streaming body, a pre-auth CPU cost an unauthenticated peer could force repeatedly).
+    @Test("a request split across many single-byte chunks completes exactly once, with the header decoded exactly once")
+    func splitAcrossManyChunksParsesHeaderOnce() {
+        var framing = HTTPFraming()
+        let full = "POST /mcp HTTP/1.1\r\nContent-Length: 5\r\n\r\nhello"
+        var completions = 0
+        for byte in Array(full.utf8) {
+            if case .complete = framing.advance(appending: Data([byte])) {
+                completions += 1
+            }
+        }
+        #expect(completions == 1)
+        #expect(framing.headerParseCount == 1)
+    }
+
+    @Test("a tooLarge step never produces a request")
+    func tooLargeNeverCompletes() {
+        var framing = HTTPFraming()
+        let step = framing.advance(appending: Data(repeating: 0x41, count: HTTPMessage.maxRequestBytes + 1))
+        #expect(step == .tooLarge)
+        if case .complete = step {
+            Issue.record("a tooLarge request must never also report complete")
+        }
+    }
+}

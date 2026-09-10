@@ -2,8 +2,8 @@ import Foundation
 import VoxFlowMCP
 
 /// The HTTP/1.1 request parser and response writer for the loopback MCP listener. Pure — no
-/// sockets — so `LoopbackListener`'s `ConnectionHandler` feeds it accumulated bytes and this stays
-/// fully unit-testable.
+/// sockets — so `LoopbackListener`'s `ConnectionHandler` (via `HTTPFraming`, below) feeds it
+/// accumulated bytes and this stays fully unit-testable.
 enum HTTPMessage {
     private static let headerTerminator = Array("\r\n\r\n".utf8)
 
@@ -14,13 +14,40 @@ enum HTTPMessage {
     static let maxHeaderBytes = 16 * 1024
     static let maxRequestBytes = 1 * 1024 * 1024
 
+    /// The request line and headers, decoded once the terminator has been found ending at
+    /// `headerEnd` (the index just past `\r\n\r\n`, i.e. where the body starts). Shared by
+    /// `parse(_:)` (one-shot, whole-buffer use) and `HTTPFraming` (incremental use across many
+    /// chunks, which — Task 2 re-review round 2, N2 — decodes this exactly once and caches it,
+    /// rather than re-running `parseHeader` from scratch on every chunk of a streaming body).
+    struct ParsedHeader: Equatable {
+        var method: String
+        var path: String
+        var headers: [String: String]
+        var headerEnd: Data.Index
+        var contentLength: Int
+    }
+
     /// Attempts to parse one HTTP request from `data` accumulated so far from a connection.
     /// `nil` while the header block (`\r\n\r\n`) hasn't fully arrived, or while fewer than
     /// `Content-Length` body bytes have arrived; extra bytes beyond `Content-Length` are ignored
-    /// (truncated to the declared length). Header names are lowercased.
+    /// (truncated to the declared length). Header names are lowercased. One-shot: re-scans `data`
+    /// from the start every call, which is fine for a whole buffer already in hand (tests, or any
+    /// other one-off caller) but not for framing a connection's bytes incrementally — see
+    /// `HTTPFraming` for that.
     static func parse(_ data: Data) -> MCPHTTPRequest? {
-        guard let headerEnd = firstRange(of: headerTerminator, in: data) else { return nil }
-        guard let headerText = String(data: data[data.startIndex..<headerEnd.lowerBound], encoding: .utf8) else { return nil }
+        guard let headerEnd = headerTerminatorEnd(in: data, searchingFrom: data.startIndex) else { return nil }
+        guard let header = parseHeader(data, headerEnd: headerEnd) else { return nil }
+        return request(from: header, data: data)
+    }
+
+    /// Decodes the request line and header lines given that the terminator has already been found
+    /// (as `headerTerminatorEnd` would report it). `nil` if the request line has fewer than two
+    /// space-separated tokens, or the header block isn't valid UTF-8.
+    static func parseHeader(_ data: Data, headerEnd: Data.Index) -> ParsedHeader? {
+        guard let headerTextEnd = data.index(headerEnd, offsetBy: -headerTerminator.count, limitedBy: data.startIndex) else {
+            return nil // headerEnd claimed to be past a 4-byte terminator but isn't; malformed input.
+        }
+        guard let headerText = String(data: data[data.startIndex..<headerTextEnd], encoding: .utf8) else { return nil }
 
         let lines = headerText.components(separatedBy: "\r\n")
         guard let requestLine = lines.first else { return nil }
@@ -37,14 +64,20 @@ enum HTTPMessage {
             headers[key] = value
         }
 
-        let bodyStart = headerEnd.upperBound
         let contentLength = headers["content-length"].flatMap(Int.init) ?? 0
-        guard contentLength > 0 else {
-            return MCPHTTPRequest(method: method, path: path, headers: headers, body: Data())
+        return ParsedHeader(method: method, path: path, headers: headers, headerEnd: headerEnd, contentLength: contentLength)
+    }
+
+    /// Assembles the final request once `header.contentLength` bytes of body have arrived in
+    /// `data`; `nil` if they haven't yet.
+    static func request(from header: ParsedHeader, data: Data) -> MCPHTTPRequest? {
+        let bodyStart = header.headerEnd
+        guard header.contentLength > 0 else {
+            return MCPHTTPRequest(method: header.method, path: header.path, headers: header.headers, body: Data())
         }
-        guard data.distance(from: bodyStart, to: data.endIndex) >= contentLength else { return nil }
-        let bodyEnd = data.index(bodyStart, offsetBy: contentLength)
-        return MCPHTTPRequest(method: method, path: path, headers: headers, body: Data(data[bodyStart..<bodyEnd]))
+        guard data.distance(from: bodyStart, to: data.endIndex) >= header.contentLength else { return nil }
+        let bodyEnd = data.index(bodyStart, offsetBy: header.contentLength)
+        return MCPHTTPRequest(method: header.method, path: header.path, headers: header.headers, body: Data(data[bodyStart..<bodyEnd]))
     }
 
     /// Renders an HTTP/1.1 response: status line, then (when `body` is present) `Content-Type:
@@ -77,9 +110,9 @@ enum HTTPMessage {
     }
 
     /// The index just past the first `\r\n\r\n` in `data`, searching only from `searchFrom`
-    /// onward — lets a caller accumulating bytes across many chunks (`ConnectionHandler`) remember
-    /// how far it has already scanned and resume there, rather than re-scanning the whole buffer
-    /// from the start on every chunk (Task 2 review, C1: that rescan is quadratic in the number of
+    /// onward — lets a caller accumulating bytes across many chunks (`HTTPFraming`) remember how
+    /// far it has already scanned and resume there, rather than re-scanning the whole buffer from
+    /// the start on every chunk (Task 2 review, C1: that rescan is quadratic in the number of
     /// chunks an unauthenticated peer can send before hitting `maxHeaderBytes`). A caller that
     /// hasn't found the terminator yet should pass back `max(data.count - 3, 0)` as the next
     /// `searchFrom`, so a terminator split across a chunk boundary is still found.
@@ -103,5 +136,66 @@ enum HTTPMessage {
             index = data.index(after: index)
         }
         return nil
+    }
+}
+
+/// A pure, socket-free state machine that frames one HTTP request out of the byte chunks a
+/// connection hands it over time. Extracted from `ConnectionHandler` (Task 2 re-review round 2,
+/// N2/N3):
+///
+/// - **N2**: once the header terminator is found, `advance(appending:)` decodes it via
+///   `HTTPMessage.parseHeader` exactly once and caches the result — a peer dripping a large body
+///   one byte at a time no longer forces a full header re-decode (string conversion, line split,
+///   header-dictionary rebuild) on every single byte, which — landing on the one shared transport
+///   queue every connection uses — was a pre-auth CPU DoS one layer up from the buffer-size Critical.
+/// - **N3**: the size caps, the `413` decision, and the scan-offset advance were already a pure step
+///   over accumulated `Data` (the seam `headerTerminatorEnd` proved it); this type *is* that seam,
+///   so it — unlike the idle timer and the connection cap, which need a real `NWConnection` — is
+///   unit-tested without a socket.
+struct HTTPFraming {
+    enum Step: Equatable {
+        case needMore
+        case tooLarge
+        case complete(MCPHTTPRequest)
+    }
+
+    private var data = Data()
+    private var searchFrom = 0
+    private var header: HTTPMessage.ParsedHeader?
+
+    /// Test-only signal (N3's "assert via a counter"): how many times the header block has
+    /// actually been decoded. Must stay `1` no matter how many chunks arrive after the terminator.
+    private(set) var headerParseCount = 0
+
+    init() {}
+
+    /// Feeds one more chunk in; call once per `NWConnection.receive` completion (an empty/no chunk
+    /// is a harmless no-op append, useful for re-checking state without new bytes).
+    mutating func advance(appending chunk: Data) -> Step {
+        if !chunk.isEmpty { data.append(chunk) }
+        guard data.count <= HTTPMessage.maxRequestBytes else { return .tooLarge }
+
+        if header == nil {
+            guard let headerEnd = HTTPMessage.headerTerminatorEnd(in: data, searchingFrom: searchFrom) else {
+                guard data.count <= HTTPMessage.maxHeaderBytes else { return .tooLarge }
+                // Resume just before the tail next time, so a terminator split across a chunk
+                // boundary is still found — never re-scan bytes already searched.
+                searchFrom = max(data.count - 3, 0)
+                return .needMore
+            }
+            guard let parsed = HTTPMessage.parseHeader(data, headerEnd: headerEnd) else {
+                // Malformed request line/headers even though the terminator arrived — matches
+                // `HTTPMessage.parse`'s own behavior of treating this as "not yet complete" rather
+                // than a hard failure; the idle timeout (`ConnectionHandler`'s job, not this
+                // type's) is what eventually closes a connection stuck here.
+                return .needMore
+            }
+            header = parsed
+            headerParseCount += 1
+        }
+
+        guard let header else { return .needMore } // unreachable (just assigned above), kept for exhaustiveness
+        guard let request = HTTPMessage.request(from: header, data: data) else { return .needMore }
+        return .complete(request)
     }
 }

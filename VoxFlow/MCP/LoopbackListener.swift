@@ -49,6 +49,18 @@ actor LoopbackListener {
     private var listener: NWListener?
     private var connections: [UUID: ConnectionHandler] = [:]
 
+    /// Task 2 re-review round 2, N1: `start()` suspends (it awaits each candidate's `.ready`/
+    /// `.failed`), so without this the actor's isolation alone does **not** make it idempotent or
+    /// reentrancy-safe — two concurrent calls, two sequential calls, or a `stop()` racing an
+    /// in-flight call could each bind a second port and overwrite `listener` without cancelling the
+    /// first, leaving an orphaned, still-serving `NWListener` that `stop()` can never reach (it only
+    /// ever knows about `listener`). `inFlightStart` is how a second caller (concurrent or
+    /// sequential-while-starting) joins the *same* attempt instead of beginning another;
+    /// `generation` is how `stop()` invalidates an attempt that's already suspended awaiting
+    /// readiness, so it discards whatever it eventually binds instead of publishing it.
+    private var inFlightStart: Task<Void, Error>?
+    private var generation = 0
+
     private(set) var boundPort: UInt16?
 
     init(portRange: ClosedRange<UInt16> = 7331...7340, resolver: any PeerResolving, handler: any MCPRequestHandling) {
@@ -57,6 +69,8 @@ actor LoopbackListener {
         self.handler = handler
     }
 
+    /// Idempotent and reentrancy-safe (see the property doc above): a no-op if already bound;
+    /// joins the existing attempt if one is already in flight; otherwise starts exactly one scan.
     /// Tries each port in `portRange` in order, actually waiting for each candidate to reach
     /// `.ready` (bound) or `.failed` (busy) before deciding — Task 2 review, I1:
     /// `NWListener(using:on:)` does **not** throw on a busy port; the bind failure is delivered
@@ -64,6 +78,25 @@ actor LoopbackListener {
     /// alone always "succeeds" and the fallback range is never reached. `boundPort` is published
     /// only for a listener that has actually reached `.ready`.
     func start() async throws {
+        if listener != nil { return } // already running.
+        if let inFlightStart {
+            try await inFlightStart.value // join the attempt already underway.
+            return
+        }
+
+        let myGeneration = generation
+        let task = Task { try await self.performScan(generation: myGeneration) }
+        inFlightStart = task
+        defer { inFlightStart = nil }
+        try await task.value
+    }
+
+    /// The actual port scan, run by exactly one `Task` per attempt (see `start()`). `myGeneration`
+    /// is captured at the moment the attempt began; if `stop()` runs while this is suspended inside
+    /// `waitUntilReady`, it bumps `generation`, and the mismatch here tells this attempt to cancel
+    /// whatever it just bound and discard it silently rather than re-publish a listener the caller
+    /// already asked to shut down.
+    private func performScan(generation myGeneration: Int) async throws {
         for candidate in portRange {
             guard let port = NWEndpoint.Port(rawValue: candidate) else { continue }
             let parameters = NWParameters.tcp
@@ -75,7 +108,12 @@ actor LoopbackListener {
                 Task { await self.accept(connection) }
             }
 
-            guard await Self.waitUntilReady(newListener) else {
+            let ready = await Self.waitUntilReady(newListener)
+            guard generation == myGeneration else {
+                newListener.cancel() // superseded by a stop() while we were awaiting readiness.
+                return
+            }
+            guard ready else {
                 newListener.cancel()
                 continue
             }
@@ -83,6 +121,7 @@ actor LoopbackListener {
             boundPort = candidate
             return
         }
+        guard generation == myGeneration else { return } // stop() already cleaned up; stay quiet.
         throw MCPServerError.noFreePort
     }
 
@@ -111,8 +150,13 @@ actor LoopbackListener {
 
     /// Cancels the listener and every live connection (Task 2 review, I2: `stop()` used to cancel
     /// only the listener, so already-accepted connections kept reading and `respond` kept
-    /// answering them after the user turned the server off in Settings).
+    /// answering them after the user turned the server off in Settings). Also bumps `generation`
+    /// (Task 2 re-review round 2, N1), so an in-flight `start()` — suspended inside
+    /// `waitUntilReady`, unaware `stop()` has run — discards whatever it binds afterward instead of
+    /// re-publishing a listener the caller just asked to shut down. Safe to call more than once:
+    /// `listener?.cancel()` on `nil` and an empty `connections` loop are both no-ops.
     func stop() {
+        generation += 1
         listener?.cancel()
         listener = nil
         boundPort = nil
@@ -177,29 +221,26 @@ actor LoopbackListener {
 }
 
 /// One accepted connection: reads until a full HTTP request is framed, hands it to the handler,
-/// writes the response, and closes. `final class … : Sendable` with a `Mutex`-boxed receive buffer
-/// (spike gotcha 3) — a recursive local `func receive()` captured by `NWConnection.receive`'s
+/// writes the response, and closes. `final class … : Sendable` with a `Mutex`-boxed `HTTPFraming`
+/// value (spike gotcha 3) — a recursive local `func receive()` captured by `NWConnection.receive`'s
 /// `@Sendable` completion doesn't compile under Swift 6 ("concurrently-executed local function must
 /// be marked `@Sendable`" plus a non-Sendable capture), so `receive()` is a method instead.
 ///
 /// Task 2 review, C1/I2: bounds and lifecycle a single unauthenticated local process could otherwise
-/// abuse before any token check ever runs — a 16 KB header cap, a 1 MB whole-request cap, a 30 s idle
-/// deadline, and a handler timeout, all funneled through one `finish()` so `onFinish` (which lets
-/// `LoopbackListener` drop this connection from its registry) fires exactly once no matter which path
-/// ends the connection.
+/// abuse before any token check ever runs — `HTTPFraming`'s 16 KB header cap and 1 MB whole-request
+/// cap, a 30 s idle deadline, and a last-resort connection watchdog, all funneled through one
+/// `finish()` so `onFinish` (which lets `LoopbackListener` drop this connection from its registry)
+/// fires exactly once no matter which path ends the connection.
 final class ConnectionHandler: Sendable {
     /// Task 2 review, I2: no bytes at all for this long closes the connection.
     private static let idleTimeout: TimeInterval = 30
-    /// Task 2 review, I2: a hung `handler.handle` can't pin a connection open forever.
-    private static let handlerTimeout: TimeInterval = 30
-
-    /// Everything mutated while framing one request, behind a single lock so the buffer and the
-    /// "how far have we already searched for the terminator" offset never drift apart.
-    private struct ReceiveState {
-        var data = Data()
-        var searchFrom = 0
-        var headerFound = false
-    }
+    /// Task 3 review / plan amendment (aefea6e): **not** a per-tool timeout — the transport doesn't
+    /// know which tool a request names, and shouldn't learn. Each tool owns its own budget
+    /// (`dictate` runs up to ~920 s; `transcribe_file` on a long recording takes minutes), so 30 s
+    /// here would have returned nothing to the client while the real work continued, and made the
+    /// tools' own timeout paths unreachable. This exists only as a last-resort guard against a
+    /// connection pinned open forever by a handler that never returns at all.
+    private static let connectionWatchdog: TimeInterval = 20 * 60
 
     private let connection: NWConnection
     private let queue: DispatchQueue
@@ -207,7 +248,11 @@ final class ConnectionHandler: Sendable {
     private let handler: any MCPRequestHandling
     private let onFinish: @Sendable () -> Void
 
-    private let receiveState = Mutex(ReceiveState())
+    /// Task 2 re-review round 2, N2/N3: the request-framing state machine (size caps, terminator
+    /// search offset, and — the point of N2 — a header decoded exactly once) lives in the pure,
+    /// unit-tested `HTTPFraming`, not inline here; this `Mutex` is only about giving concurrent
+    /// `NWConnection.receive` completions exclusive access to the one `HTTPFraming` value.
+    private let framing = Mutex(HTTPFraming())
     private let idleWork = Mutex<DispatchWorkItem?>(nil)
     private let finished = Mutex(false)
 
@@ -248,48 +293,23 @@ final class ConnectionHandler: Sendable {
 
     private func receive() {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [self] chunk, _, isComplete, error in
-            var tooLarge = false
-            var readyRequest: MCPHTTPRequest?
+            if let chunk, !chunk.isEmpty {
+                resetIdleTimer()
+            }
+            let step = framing.withLock { $0.advance(appending: chunk ?? Data()) }
 
-            receiveState.withLock { state in
-                if let chunk, !chunk.isEmpty {
-                    state.data.append(chunk)
-                    resetIdleTimer()
-                }
-                guard state.data.count <= HTTPMessage.maxRequestBytes else {
-                    tooLarge = true
+            switch step {
+            case .tooLarge:
+                closeWithStatus(413)
+            case .complete(let request):
+                respond(to: request)
+            case .needMore:
+                guard error == nil, !isComplete else {
+                    connection.cancel()
                     return
                 }
-                if !state.headerFound {
-                    if HTTPMessage.headerTerminatorEnd(in: state.data, searchingFrom: state.searchFrom) != nil {
-                        state.headerFound = true
-                    } else {
-                        guard state.data.count <= HTTPMessage.maxHeaderBytes else {
-                            tooLarge = true
-                            return
-                        }
-                        // Resume the next search just before the tail, so a terminator split
-                        // across a chunk boundary is still found — never re-scan from the start.
-                        state.searchFrom = max(state.data.count - 3, 0)
-                        return
-                    }
-                }
-                readyRequest = HTTPMessage.parse(state.data)
+                receive()
             }
-
-            if tooLarge {
-                closeWithStatus(413)
-                return
-            }
-            if let readyRequest {
-                respond(to: readyRequest)
-                return
-            }
-            guard error == nil, !isComplete else {
-                connection.cancel()
-                return
-            }
-            receive()
         }
     }
 
@@ -297,8 +317,8 @@ final class ConnectionHandler: Sendable {
     /// deliberately: a `withTaskGroup`-based race would still block this connection's teardown on
     /// the slow task's eventual completion (structured concurrency awaits every child before the
     /// group returns, cancellation or not), which is exactly the "pinned forever" failure mode the
-    /// timeout exists to prevent. Instead, a queue timer independently cancels the *connection*
-    /// after `handlerTimeout`; a `Mutex`-guarded flag makes whichever of {timer, handler} arrives
+    /// watchdog exists to prevent. Instead, a queue timer independently cancels the *connection*
+    /// after `connectionWatchdog`; a `Mutex`-guarded flag makes whichever of {timer, handler} arrives
     /// second a no-op, so a slow handler that eventually does return can never send a response onto
     /// a connection this already closed.
     private func respond(to request: MCPHTTPRequest) {
@@ -313,7 +333,7 @@ final class ConnectionHandler: Sendable {
             guard shouldTimeOut else { return }
             connection.cancel() // the handler hung; don't pin the connection open waiting for it.
         }
-        queue.asyncAfter(deadline: .now() + Self.handlerTimeout, execute: timeoutWork)
+        queue.asyncAfter(deadline: .now() + Self.connectionWatchdog, execute: timeoutWork)
 
         Task {
             let (status, body) = await handler.handle(request, peer: identity)
