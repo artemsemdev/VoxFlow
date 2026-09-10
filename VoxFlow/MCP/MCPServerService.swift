@@ -64,6 +64,8 @@ final class MCPServerService: MCPServerControlling, MCPClientStoreProviding {
     private let serverVersion: String
     private let resolver: any PeerResolving
     private let portRange: ClosedRange<UInt16>
+    /// Injectable only for the integration test's framing-deadline case; production uses the default.
+    private let framingDeadline: TimeInterval
 
     private var clientStore: MCPClientStore?
     private var runner: MCPToolRunner?
@@ -74,7 +76,8 @@ final class MCPServerService: MCPServerControlling, MCPClientStoreProviding {
     init(settings: MCPSettings, coordinator: DictationCoordinator, controller: DictationController,
          historyService: HistoryService, fileTranscribing: any FileTranscribing, pathPolicy: PathPolicy,
          clock: any MonotonicClock, approvalPresenter: any MCPApprovalPresenting, serverVersion: String,
-         resolver: any PeerResolving = LibprocPeerResolver(), portRange: ClosedRange<UInt16> = 7331...7340) {
+         resolver: any PeerResolving = LibprocPeerResolver(), portRange: ClosedRange<UInt16> = 7331...7340,
+         framingDeadline: TimeInterval = ConnectionHandler.defaultFramingDeadline) {
         self.settings = settings
         self.coordinator = coordinator
         self.controller = controller
@@ -86,6 +89,7 @@ final class MCPServerService: MCPServerControlling, MCPClientStoreProviding {
         self.serverVersion = serverVersion
         self.resolver = resolver
         self.portRange = portRange
+        self.framingDeadline = framingDeadline
     }
 
     /// Resolves (building on first call) the runner, then starts the listener. Publishes the bound
@@ -95,7 +99,8 @@ final class MCPServerService: MCPServerControlling, MCPClientStoreProviding {
     /// busy; `boundPort` stays `nil` in that case.
     func start() async throws {
         let runner = await resolvedRunner()
-        let listener = self.listener ?? LoopbackListener(portRange: portRange, resolver: resolver, handler: runner)
+        let listener = self.listener ?? LoopbackListener(portRange: portRange, resolver: resolver, handler: runner,
+                                                        framingDeadline: framingDeadline)
         self.listener = listener
         try await listener.start()
         let port = await listener.boundPort

@@ -23,6 +23,10 @@ final class MCPViewModel {
     struct MCPClientRow: Identifiable, Equatable {
         let id: Int64
         let name: String
+        /// The executable the grant is keyed on. Shown because two different binaries can share a
+        /// name: without it, two rows look identical and the user cannot tell which Revoke removes
+        /// which (final review F5).
+        let path: String
         let lastUsedText: String
     }
 
@@ -155,7 +159,7 @@ final class MCPViewModel {
         let store = await clientStoreProvider.resolvedClientStore()
         let rows = await Task.detached(priority: .utility) { (try? store.all()) ?? [] }.value
         let current = now()
-        clients = rows.map { MCPClientRow(id: $0.id, name: $0.name, lastUsedText: "Last used \(Self.relativeTime(from: $0.lastSeen, now: current))") }
+        clients = rows.map { MCPClientRow(id: $0.id, name: $0.name, path: $0.path, lastUsedText: "Last used \(Self.relativeTime(from: $0.lastSeen, now: current))") }
     }
 
     private static func endpointText(for port: UInt16?) -> String {

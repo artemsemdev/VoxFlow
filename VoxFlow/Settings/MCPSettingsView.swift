@@ -176,6 +176,9 @@ struct MCPSettingsBody: View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
                 Text(client.name).fontWeight(.medium)
+                if !client.path.isEmpty {
+                    Text(client.path).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                }
                 Text(client.lastUsedText).font(.caption).foregroundStyle(.secondary)
             }
             Spacer()

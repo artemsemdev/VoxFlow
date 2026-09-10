@@ -91,7 +91,8 @@ private struct IntegrationServer {
 private func makeIntegrationServer(
     fileTranscribing: any FileTranscribing = FakeFileTranscriber(),
     pathPolicy: PathPolicy? = nil,
-    dictate: Bool = true, transcribeFile: Bool = true, searchHistory: Bool = true
+    dictate: Bool = true, transcribeFile: Bool = true, searchHistory: Bool = true,
+    framingDeadline: TimeInterval = ConnectionHandler.defaultFramingDeadline
 ) -> IntegrationServer {
     let settings = MCPSettings(store: InMemoryKeyValueStore(), token: FakeTokenStore(stored: "vf_integration_test_token"))
     settings.toolDictate = dictate
@@ -125,7 +126,8 @@ private func makeIntegrationServer(
 
     let service = MCPServerService(settings: settings, coordinator: coordinator, controller: controller, historyService: historyService,
                                    fileTranscribing: fileTranscribing, pathPolicy: resolvedPathPolicy, clock: clock,
-                                   approvalPresenter: AlwaysAllowPresenter(), serverVersion: "2.0.0-integration-test", resolver: resolver)
+                                   approvalPresenter: AlwaysAllowPresenter(), serverVersion: "2.0.0-integration-test", resolver: resolver,
+                                   framingDeadline: framingDeadline)
 
     return IntegrationServer(service: service, settings: settings, coordinator: coordinator, controller: controller,
                              mic: mic, historyService: historyService)
@@ -141,10 +143,12 @@ private func withIntegrationServer<T: Sendable>(
     fileTranscribing: any FileTranscribing = FakeFileTranscriber(),
     pathPolicy: PathPolicy? = nil,
     dictate: Bool = true, transcribeFile: Bool = true, searchHistory: Bool = true,
+    framingDeadline: TimeInterval = ConnectionHandler.defaultFramingDeadline,
     _ body: (IntegrationServer) async throws -> T
 ) async throws -> T {
     let server = makeIntegrationServer(fileTranscribing: fileTranscribing, pathPolicy: pathPolicy,
-                                       dictate: dictate, transcribeFile: transcribeFile, searchHistory: searchHistory)
+                                       dictate: dictate, transcribeFile: transcribeFile, searchHistory: searchHistory,
+                                       framingDeadline: framingDeadline)
     try await server.service.start()
     do {
         let result = try await body(server)
@@ -462,6 +466,36 @@ struct MCPServerIntegrationTests {
             let closedCount = fds.filter { RawSocket.isClosedWithoutData($0, timeoutMilliseconds: 1000) }.count
             #expect(closedCount >= 1)   // the cap is enforced: 17 connections cannot all be served
             #expect(closedCount < 17)   // …and it did not refuse everything, which would mean the cap is wrong
+        }
+    }
+
+    // MARK: the framing deadline (final review F2)
+
+    @Test("a peer that never completes a request is closed by the framing deadline, no matter how it drips bytes")
+    func framingDeadlineClosesAnIncompleteRequest() async throws {
+        // The deadline is injected short so this needs no 30 s wait. What it proves is the property
+        // the fix is about: the deadline is *absolute*, so arriving bytes cannot postpone it. The
+        // socket drips a byte every 50 ms for well over the deadline and must still be closed —
+        // before the fix, each byte refreshed the timer and the connection lived forever, letting
+        // sixteen such peers lock out every real client pre-auth.
+        let deadline: TimeInterval = 0.5
+        try await withIntegrationServer(framingDeadline: deadline) { server in
+            let port = server.port
+            try #require(port != 0)
+
+            let fd = RawSocket.connect(port: port)
+            try #require(fd >= 0)
+            defer { close(fd) }
+
+            // A request line and headers that will never be terminated, then a slow drip.
+            RawSocket.sendAll(fd, Data("POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\n".utf8))
+            let start = ContinuousClock.now
+            var closed = false
+            while ContinuousClock.now - start < .seconds(deadline * 6) {
+                if RawSocket.isClosedWithoutData(fd, timeoutMilliseconds: 50) { closed = true; break }
+                RawSocket.sendAll(fd, Data("x".utf8))   // keep dripping — this must not buy more time
+            }
+            #expect(closed, "the framing deadline never fired: a byte-dripping peer held its slot")
         }
     }
 }

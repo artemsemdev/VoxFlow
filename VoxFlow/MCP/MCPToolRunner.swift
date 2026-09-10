@@ -141,7 +141,10 @@ final class MCPToolRunner: MCPRequestHandling, Sendable {
         // Final review F1: this is the first and only place the peer is actually resolved — the
         // request's token has already been checked by the policy above, so the ~5 ms process walk
         // is now something only an authenticated caller can trigger.
-        let resolved = peer.identity()
+        // Re-review: `MCPToolRunner` is `@MainActor`, and the walk is a blocking ~5 ms / ~14,000
+        // syscalls — the transport's own ruling is "never on `.main`". Hop off, same as the store
+        // read below.
+        let resolved = await Task.detached(priority: .userInitiated) { peer.identity() }.value
         let identity = resolved.name.isEmpty ? MCPClientIdentity(name: "Unknown app", path: resolved.path, pid: resolved.pid) : resolved
         let toolNames = MCPToolID.allCases.filter { enabledTools.contains($0) }.map(\.name)
         guard await authorize(identity, toolNames: toolNames) else {

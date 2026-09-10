@@ -46,6 +46,7 @@ actor LoopbackListener {
     private let portRange: ClosedRange<UInt16>
     private let resolver: any PeerResolving
     private let handler: any MCPRequestHandling
+    private let framingDeadline: TimeInterval
     private var listener: NWListener?
     private var connections: [UUID: ConnectionHandler] = [:]
 
@@ -67,10 +68,15 @@ actor LoopbackListener {
     /// (final review F6).
     private static let readinessTimeout: TimeInterval = 5
 
-    init(portRange: ClosedRange<UInt16> = 7331...7340, resolver: any PeerResolving, handler: any MCPRequestHandling) {
+    /// `framingDeadline` is injectable only so a test can drive it without waiting the real 30 s
+    /// (final review F2 shipped uncovered; two of the three prior regressions on this file were in
+    /// this timer's arming and disarming). Production always uses the default.
+    init(portRange: ClosedRange<UInt16> = 7331...7340, resolver: any PeerResolving, handler: any MCPRequestHandling,
+         framingDeadline: TimeInterval = ConnectionHandler.defaultFramingDeadline) {
         self.portRange = portRange
         self.resolver = resolver
         self.handler = handler
+        self.framingDeadline = framingDeadline
     }
 
     /// Idempotent and reentrancy-safe (see the property doc above): a no-op if already bound;
@@ -228,7 +234,7 @@ actor LoopbackListener {
 
         let id = UUID()
         let connectionHandler = ConnectionHandler(
-            connection: connection, queue: mcpTransportQueue, peer: peer, handler: handler,
+            connection: connection, queue: mcpTransportQueue, peer: peer, handler: handler, framingDeadline: framingDeadline,
             onFinish: { [weak self] in Task { await self?.remove(id) } }
         )
         connections[id] = connectionHandler
@@ -273,7 +279,7 @@ final class ConnectionHandler: Sendable {
     /// client out, all before any token was checked. It is now an **absolute** deadline armed once
     /// when the connection becomes ready and disarmed only when a request has been framed; the
     /// 20-minute watchdog below takes over from there.
-    private static let framingDeadline: TimeInterval = 30
+    static let defaultFramingDeadline: TimeInterval = 30
     /// Task 3 review / plan amendment (aefea6e): **not** a per-tool timeout — the transport doesn't
     /// know which tool a request names, and shouldn't learn. Each tool owns its own budget
     /// (`dictate` runs up to ~920 s; `transcribe_file` on a long recording takes minutes), so 30 s
@@ -286,6 +292,7 @@ final class ConnectionHandler: Sendable {
     private let queue: DispatchQueue
     private let peer: MCPPeer
     private let handler: any MCPRequestHandling
+    private let framingDeadline: TimeInterval
     private let onFinish: @Sendable () -> Void
 
     /// Task 2 re-review round 2, N2/N3: the request-framing state machine (size caps, terminator
@@ -296,11 +303,13 @@ final class ConnectionHandler: Sendable {
     private let idleWork = Mutex<DispatchWorkItem?>(nil)
     private let finished = Mutex(false)
 
-    init(connection: NWConnection, queue: DispatchQueue, peer: MCPPeer, handler: any MCPRequestHandling, onFinish: @escaping @Sendable () -> Void) {
+    init(connection: NWConnection, queue: DispatchQueue, peer: MCPPeer, handler: any MCPRequestHandling,
+         framingDeadline: TimeInterval = ConnectionHandler.defaultFramingDeadline, onFinish: @escaping @Sendable () -> Void) {
         self.connection = connection
         self.queue = queue
         self.peer = peer
         self.handler = handler
+        self.framingDeadline = framingDeadline
         self.onFinish = onFinish
     }
 
@@ -433,7 +442,7 @@ final class ConnectionHandler: Sendable {
             previous?.cancel()
             let work = DispatchWorkItem { [connection] in connection.cancel() }
             previous = work
-            queue.asyncAfter(deadline: .now() + Self.framingDeadline, execute: work)
+            queue.asyncAfter(deadline: .now() + framingDeadline, execute: work)
         }
     }
 }
