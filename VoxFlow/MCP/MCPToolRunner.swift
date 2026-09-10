@@ -150,7 +150,7 @@ final class MCPToolRunner: MCPRequestHandling, Sendable {
 
     /// `identity` is already the display identity (empty name substituted). Records a sighting for
     /// *every* call (ST-06 "Connected clients" wants every client that ever tried, not only
-    /// approved ones — and `recordSighting` never touches `approved`, so this can't silently
+    /// approved ones — and `touchLastSeen` only ever updates an approved client's timestamp, so this can't silently
     /// de-approve/re-approve anyone; see `MCPClientStore`'s doc), then resolves through
     /// `ClientRegistry.decision` over `sessionAllowed`/`deniedThisSession` and a *read-through*
     /// query of `mcp_clients` (review item 2 — no cache, so Revoke/Regenerate take effect on the
@@ -162,7 +162,7 @@ final class MCPToolRunner: MCPRequestHandling, Sendable {
         // fully resolve (empty `path`) — every such peer displays as the same "Unknown app" and
         // would otherwise all share one approval.
         let canPersist = !identity.path.isEmpty
-        await recordSighting(identity)
+        await touchLastSeen(identity)
         // `ClientRegistry.decision` takes the full `approved` set (Task 2's pure-function shape);
         // the read-through check below only ever needs to know about `key`, so it's wrapped as a
         // single-element set rather than fetching every approved key just to discard the rest.
@@ -221,10 +221,10 @@ final class MCPToolRunner: MCPRequestHandling, Sendable {
         return decision
     }
 
-    private func recordSighting(_ identity: MCPClientIdentity) async {
+    private func touchLastSeen(_ identity: MCPClientIdentity) async {
         let store = clientStore
         let name = identity.name, path = identity.path, seenAt = now()
-        _ = await Task.detached(priority: .utility) { try? store.recordSighting(name: name, path: path, now: seenAt) }.value
+        _ = await Task.detached(priority: .utility) { try? store.touchLastSeen(name: name, path: path, now: seenAt) }.value
     }
 
     /// Read-through: no cache, so a Revoke or a token Regenerate (which drops every approved row)

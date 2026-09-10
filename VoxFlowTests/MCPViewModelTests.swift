@@ -152,8 +152,8 @@ struct MCPViewModelTests {
     func refreshClientsRendersRows() async throws {
         let now = Date(timeIntervalSince1970: 1_700_000_000)
         let h = try harness(now: { now })
-        try h.store.recordSighting(name: "Cursor", path: "/Applications/Cursor.app", now: now.addingTimeInterval(-90))     // 1.5 min ago
-        try h.store.recordSighting(name: "Claude Desktop", path: "/Applications/Claude.app", now: now.addingTimeInterval(-30))  // 30 s ago
+        try h.store.approve(name: "Cursor", path: "/Applications/Cursor.app", now: now.addingTimeInterval(-90))     // 1.5 min ago
+        try h.store.approve(name: "Claude Desktop", path: "/Applications/Claude.app", now: now.addingTimeInterval(-30))  // 30 s ago
 
         await h.vm.refreshClients()
         #expect(h.vm.clients.map(\.name) == ["Claude Desktop", "Cursor"])
@@ -164,7 +164,7 @@ struct MCPViewModelTests {
     @Test("revoke removes the client and refreshes the list")
     func revokeRemovesClient() async throws {
         let h = try harness()
-        let record = try h.store.recordSighting(name: "Cursor", path: "/Applications/Cursor.app", now: Date())
+        let record = try h.store.approve(name: "Cursor", path: "/Applications/Cursor.app", now: Date())
         await h.vm.refreshClients()
         #expect(h.vm.clients.count == 1)
 

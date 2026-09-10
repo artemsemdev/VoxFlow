@@ -35,7 +35,7 @@ struct MCPRenderTests {
         let store = try MCPClientStore(database: VoxFlowDatabase.inMemory())
         let now = Date(timeIntervalSince1970: 1_700_000_000)
         try store.approve(name: "Cursor", path: "/Applications/Cursor.app", now: now.addingTimeInterval(-90))
-        try store.recordSighting(name: "Claude Desktop", path: "/Applications/Claude.app", now: now.addingTimeInterval(-30))
+        try store.approve(name: "Claude Desktop", path: "/Applications/Claude.app", now: now.addingTimeInterval(-30))
         let server = FakeMCPServer(store: store)
         server.portToReturn = 7331
         let vm = MCPViewModel(settings: settings, pasteboard: FakePasteboard(), server: server, clientStoreProvider: server, now: { now })

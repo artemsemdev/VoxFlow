@@ -22,21 +22,25 @@ public final class MCPClientStore: Sendable {
     /// security-relevant flag must not be a mandatory parameter of "I saw this client" — so
     /// recording a sighting and approving are now two separate calls, and only `approve` ever sets
     /// the flag.
+    ///
+    /// Controller ruling after the Task 3/4 review: a row exists **if and only if** the client has
+    /// been granted persistent access. `touchLastSeen` therefore only ever *updates* — it never
+    /// inserts. Recording a row for every process that connects would put a client in ST-06's
+    /// "Connected clients" that the user never approved (the canvas says approving is what adds it
+    /// there), and would mint one shared row for every unidentifiable process. Returns whether a
+    /// row was actually there to touch.
     @discardableResult
-    public func recordSighting(name: String, path: String, now: Date) throws -> MCPClientRecord {
+    public func touchLastSeen(name: String, path: String, now: Date) throws -> Bool {
         try queue.write { db in
-            try db.execute(
-                sql: """
-                    INSERT INTO mcp_clients (name, path, approved, first_seen, last_seen) VALUES (?,?,0,?,?)
-                    ON CONFLICT(name, path) DO UPDATE SET last_seen = excluded.last_seen
-                    """,
-                arguments: [name, path, now.timeIntervalSince1970, now.timeIntervalSince1970])
-            return try Self.fetch(db, name: name, path: path)
+            try db.execute(sql: "UPDATE mcp_clients SET last_seen = ? WHERE name = ? AND path = ?",
+                           arguments: [now.timeIntervalSince1970, name, path])
+            return db.changesCount > 0
         }
     }
 
-    /// Marks `(name, path)` approved (ST-06a "Always allow"), inserting the row first if this is
-    /// the client's first sighting. Also touches `lastSeen`, so an approval doubles as a sighting.
+    /// Marks `(name, path)` approved (ST-06a "Always allow"), inserting the row — this is the only
+    /// call that ever creates one (see `touchLastSeen`). Also sets `lastSeen`, so an approval
+    /// doubles as a sighting. `revoke`/`revokeAll` delete, keeping "a row means approved" true.
     @discardableResult
     public func approve(name: String, path: String, now: Date) throws -> MCPClientRecord {
         try queue.write { db in
