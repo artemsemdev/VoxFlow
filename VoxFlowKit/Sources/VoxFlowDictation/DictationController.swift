@@ -36,6 +36,8 @@ public actor DictationController {
     private var timers: [FlowBarTimer: (generation: UInt64, task: Task<Void, Never>)] = [:]
     private var nextTimerGeneration: UInt64 = 0
     private var subscribers: [UUID: AsyncStream<FlowBarState>.Continuation] = [:]
+    /// Multi-subscriber fan-out for `results()`, same shape as `subscribers` above.
+    private var resultSubscribers: [UUID: AsyncStream<DictationResult>.Continuation] = [:]
     public private(set) var lastResult: DictationResult?
     private var lastAppName: String?
     /// A config set mid-dictation (`updateConfig` while not `.idle`) waits here rather than
@@ -116,6 +118,35 @@ public actor DictationController {
     }
     private func removeSubscriber(_ id: UUID) { subscribers[id] = nil }
 
+    /// Every completed capture's result, in order — fed from the same place `.saveHistory` invokes
+    /// `onSave` (guarded by `!captureIsEphemeral`, exactly like `onSave`), *not* a second call site
+    /// off `finished(_:capture:)`. That means a capture whose result is only copied to the clipboard
+    /// because "Keep history" is off (`HistoryWriter.save` no-ops on that setting, after this method
+    /// has already run) still produces a result here — an MCP `dictate` call observes exactly what a
+    /// hotkey dictation produced, not only what got persisted.
+    ///
+    /// Same multi-subscriber fan-out as `currentAndChanges()`/`states()`: each call gets its own
+    /// unbounded `AsyncStream`, registered in `resultSubscribers` synchronously (this method runs on
+    /// the actor, so registration can't race a concurrent `.saveHistory` effect), and every
+    /// subscriber's continuation is yielded to — once each — inside that single actor-isolated loop,
+    /// so two concurrent subscribers see the same results, in the same order, with no drops (nothing
+    /// is dropped: `.unbounded` buffers if a subscriber isn't awaiting `next()` yet) and no
+    /// duplicates (each subscriber's continuation is yielded to exactly once per result). A
+    /// subscriber's `onTermination` removes it from `resultSubscribers`, so a finished/cancelled
+    /// subscriber is never retained or yielded to again — matching `removeSubscriber` for `states()`.
+    ///
+    /// Unlike `currentAndChanges()`, there is no "current result" to replay: a subscriber that
+    /// arrives after a result was yielded misses it, so a caller (the `dictate` tool) must subscribe
+    /// before starting the capture.
+    public func results() -> AsyncStream<DictationResult> {
+        let id = UUID()
+        let (stream, continuation) = AsyncStream<DictationResult>.makeStream(bufferingPolicy: .unbounded)
+        resultSubscribers[id] = continuation
+        continuation.onTermination = { [weak self] _ in Task { await self?.removeResultSubscriber(id) } }
+        return stream
+    }
+    private func removeResultSubscriber(_ id: UUID) { resultSubscribers[id] = nil }
+
     public func fnDown() async { handle(.fnDown(await preflight())) }
     public func fnUp() { handle(.fnUp) }
     public func escape() { handle(.escape) }
@@ -175,6 +206,10 @@ public actor DictationController {
             // the expected, common path for those captures, not an error condition.
             if let result = lastResult, !captureIsEphemeral {
                 let appName = lastAppName
+                // See `results()`'s doc comment: broadcast here, alongside `onSave`, not from a
+                // second call site — this is the one place a finished, non-ephemeral capture's
+                // result is known.
+                for c in resultSubscribers.values { c.yield(result) }
                 Task { await self.onSave(result, appName) }
             }
         }

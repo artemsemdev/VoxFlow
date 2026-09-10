@@ -283,6 +283,48 @@ struct DictationControllerTests {
         #expect(await h.controller.state == .paused(until: 3600))
     }
 
+    @Test("results() yields one element per completed capture, in order, to two concurrent subscribers")
+    func resultsYieldsInOrderToTwoSubscribers() async throws {
+        let h = await Harness()
+        // Subscribed before the first capture starts — the documented contract (a late subscriber
+        // misses whatever already happened).
+        var subscriberA = await h.controller.results().makeAsyncIterator()
+        var subscriberB = await h.controller.results().makeAsyncIterator()
+
+        // First capture, push-to-talk, driven to completion.
+        await h.controller.fnDown(); _ = await h.next()                 // armed
+        await h.mic.waitUntilCapturing()
+        await h.clock.waitForSleepers(1); await h.clock.advance(by: 0.25)
+        _ = await h.next()                                               // listening
+        h.mic.emit(rms: 0.3, seconds: 1)
+        await h.transcriber.waitUntilReceived(1)
+        await h.controller.fnUp()
+        guard case .processing = await h.next() else { Issue.record("expected processing"); return }
+        await h.mic.waitUntilStopped()
+        #expect(await h.next() == .inserted(appName: "Mail", words: 3, limitReached: false))
+        await h.clock.waitForSleepers(1); await h.clock.advance(by: 1.5)  // dismiss
+        #expect(await h.next() == .idle)
+
+        // Second capture, same shape.
+        await h.controller.fnDown(); _ = await h.next()
+        await h.mic.waitUntilCapturing()
+        await h.clock.waitForSleepers(1); await h.clock.advance(by: 0.25)
+        _ = await h.next()
+        h.mic.emit(rms: 0.3, seconds: 1)
+        await h.transcriber.waitUntilReceived(2)
+        await h.controller.fnUp()
+        guard case .processing = await h.next() else { Issue.record("expected processing"); return }
+        await h.mic.waitUntilStopped()
+        #expect(await h.next() == .inserted(appName: "Mail", words: 3, limitReached: false))
+
+        // Both concurrent subscribers see exactly two results, in order: one per completed capture,
+        // no drops, no duplicates.
+        #expect(await subscriberA.next()?.text == "hello there world")
+        #expect(await subscriberB.next()?.text == "hello there world")
+        #expect(await subscriberA.next()?.text == "hello there world")
+        #expect(await subscriberB.next()?.text == "hello there world")
+    }
+
     @Test("currentAndChanges yields the current state before any subsequent change (M3)")
     func currentAndChangesYieldsCurrentFirst() async throws {
         let h = await Harness()
