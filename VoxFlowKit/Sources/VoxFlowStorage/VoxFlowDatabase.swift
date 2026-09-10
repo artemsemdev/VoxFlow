@@ -54,6 +54,16 @@ public final class VoxFlowDatabase: Sendable {
                   bundle_id TEXT PRIMARY KEY, app_name TEXT NOT NULL, style TEXT NOT NULL);
                 """)
         }
+        migrator.registerMigration("v3") { db in
+            try db.execute(sql: """
+                CREATE TABLE mcp_clients (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  name TEXT NOT NULL, path TEXT NOT NULL,
+                  approved BOOLEAN NOT NULL DEFAULT 0,
+                  first_seen DOUBLE NOT NULL, last_seen DOUBLE NOT NULL,
+                  UNIQUE(name, path));
+                """)
+        }
         return migrator
     }
 }
