@@ -205,6 +205,12 @@ private enum RawSocket {
             }
         }
         guard result == 0 else { close(fd); return -1 }
+        // Writing to a socket the server has already reset raises SIGPIPE, which nothing in this
+        // repo ignores — it would kill the whole test binary rather than fail one test. The
+        // deadline test deliberately keeps writing while the server is closing under it, so every
+        // raw socket here opts out (final re-review 2).
+        var on: Int32 = 1
+        setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
         return fd
     }
 
@@ -233,7 +239,12 @@ private enum RawSocket {
         setReceiveTimeout(fd, milliseconds: timeoutMilliseconds)
         var buffer = [UInt8](repeating: 0, count: 16)
         let n = recv(fd, &buffer, buffer.count, 0)
-        return n == 0
+        if n == 0 { return true }   // orderly FIN
+        // A server that closes with bytes still unread sends RST, not FIN, so the read fails
+        // instead of returning 0. Both mean "the peer is gone" for these tests; only a timeout
+        // (EAGAIN/EWOULDBLOCK) means "still open, just quiet" (final re-review 2).
+        if n < 0, errno == ECONNRESET || errno == EPIPE { return true }
+        return false
     }
 
     /// Reads whatever the peer sends within `timeoutMilliseconds`, stopping early once at least
