@@ -96,6 +96,18 @@ cd VoxFlowKit && VOXFLOW_STYLE_MODEL=/path/to/qwen2.5-3b-instruct-q4_k_m.gguf sw
 Without either, it prints `skipped: style model not installed` and returns — this is why it's
 absent from CI.
 
+### MCP server
+
+Settings › MCP Server turns on a loopback-only MCP server so Cursor or Claude Desktop can use
+VoxFlow as a tool (`transcribe_file`, `dictate`, `search_history`) over `127.0.0.1` with a token
+from the Keychain. It's off by default and needs no setup beyond turning it on and copying the
+token — connecting a client, approving it, revoking it, and what to do if the port moves are all
+covered in [docs/runbooks/connect-an-mcp-client.md](docs/runbooks/connect-an-mcp-client.md); the
+design is [ADR-008](docs/adr/008-loopback-mcp-server.md).
+`VoxFlowTests`' `MCPServerIntegrationTests` exercises the real server over a real loopback socket
+(as part of `xcodebuild … test`, not a separate step) and skips, with a printed reason, if it can't
+bind a port in 7331–7340 or if no speech model is installed for its `transcribe_file` case.
+
 ### Contacts permission
 
 VoxFlow does not ask for Contacts access at launch. It prompts only if you turn on "Learn names

@@ -37,6 +37,24 @@ final class Recorder<Element: Sendable>: Sendable {
     }
 }
 
+/// Returns a different scripted result for each successive `transcribe()` call. `FakeDictationTranscriber`
+/// only ever has one fixed `result`, which can't express two *distinguishable* captures — needed so
+/// `resultsYieldsInOrderToTwoSubscribers` can actually fail on duplication or misordering instead of
+/// two identical captures making every ordering look the same (Task 3 review item 7).
+private actor SequencedTranscriber: DictationTranscribing {
+    private let results: [DictationResult]
+    private var index = 0
+
+    init(_ results: [DictationResult]) { self.results = results }
+
+    func transcribe(_ chunks: AsyncStream<AudioChunk>, options: TranscriptionOptions,
+                    onEvent: @Sendable @escaping (DictationEvent) async -> Void) async throws -> DictationResult {
+        for await _ in chunks {}
+        defer { index += 1 }
+        return results[min(index, results.count - 1)]
+    }
+}
+
 @Suite("DictationController", .timeLimit(.minutes(1)))
 struct DictationControllerTests {
     final class Harness {
@@ -281,6 +299,51 @@ struct DictationControllerTests {
         await h.controller.fnDown()
         #expect(h.mic.startCount == 0)
         #expect(await h.controller.state == .paused(until: 3600))
+    }
+
+    @Test("results() yields one element per completed capture, in order, to two concurrent subscribers")
+    func resultsYieldsInOrderToTwoSubscribers() async throws {
+        // Two *distinct* scripted texts, one per capture — a same-text version can't tell apart
+        // "dropped", "duplicated", and "in order" (review item 7); this one can.
+        let first = DictationResult(text: "alpha capture", rawText: "alpha capture", segments: [], language: nil, duration: 1, lowConfidence: false)
+        let second = DictationResult(text: "bravo capture", rawText: "bravo capture", segments: [], language: nil, duration: 1, lowConfidence: false)
+        let transcriber = SequencedTranscriber([first, second])
+        let mic = FakeMicrophone()
+        let clock = FakeClock()
+        let controller = DictationController(config: FlowBarConfig(), microphone: mic, transcriber: transcriber, inserter: FakeTextInserter(), clock: clock,
+                                             preflight: { Preflight(excludedApp: nil, secureInput: false, microphone: .granted, model: .loaded) },
+                                             loadModel: {}, options: { TranscriptionOptions() }, onSave: { _, _ in }, copyToClipboard: { _ in })
+        var states = await controller.states().makeAsyncIterator()
+        // Subscribed before either capture starts — the documented contract (a late subscriber
+        // misses whatever already happened).
+        var subscriberA = await controller.results().makeAsyncIterator()
+        var subscriberB = await controller.results().makeAsyncIterator()
+
+        func driveOneCapture() async {
+            await controller.fnDown()
+            _ = await states.next()                                    // armed
+            await mic.waitUntilCapturing()
+            await clock.waitForSleepers(1); await clock.advance(by: 0.25)
+            _ = await states.next()                                    // listening
+            mic.emit(rms: 0.3, seconds: 1)
+            await controller.fnUp()
+            guard case .processing = await states.next() else { Issue.record("expected processing"); return }
+            await mic.waitUntilStopped()
+            _ = await states.next()                                    // inserted
+            await clock.waitForSleepers(1); await clock.advance(by: 1.5) // dismiss
+            _ = await states.next()                                    // idle
+        }
+
+        await driveOneCapture()
+        await driveOneCapture()
+
+        // Both concurrent subscribers see exactly capture 1 then capture 2, in that order — a
+        // dropped, duplicated, or reordered element would fail one of these four, unlike the
+        // original same-text version.
+        #expect(await subscriberA.next()?.text == "alpha capture")
+        #expect(await subscriberA.next()?.text == "bravo capture")
+        #expect(await subscriberB.next()?.text == "alpha capture")
+        #expect(await subscriberB.next()?.text == "bravo capture")
     }
 
     @Test("currentAndChanges yields the current state before any subsequent change (M3)")

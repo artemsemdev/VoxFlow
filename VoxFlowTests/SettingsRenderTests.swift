@@ -10,16 +10,17 @@ import VoxFlowStorage
 import VoxFlowTestSupport
 @testable import VoxFlow
 
-/// Design-fidelity renders (Task 4 Step 3/4, extended in Task 3 for General/MCP) — gated behind
-/// `VOXFLOW_RENDER` so normal test runs never touch disk. Run with
+/// Design-fidelity renders (Task 4 Step 3/4, extended in Task 3 for General, and by phase 6's own
+/// Task 4 for MCP — see `MCPRenderTests`, which now owns that tab) — gated behind `VOXFLOW_RENDER`
+/// so normal test runs never touch disk. Run with
 /// `TEST_RUNNER_VOXFLOW_RENDER=1 xcodebuild … -only-testing:VoxFlowTests/SettingsRenderTests`
 /// (see `OnboardingRenderTests` for why the `TEST_RUNNER_` prefix is needed), then compare the PNGs
-/// in `.superpowers/design/renders/` against `canvas.pdf` page 5 (ST-06a/ST-06r alert style), page 6
-/// (ST-06r copy, ST-04n, ST-03v) and page 9 (ST-05d) and this task's text-report copy — the Settings
-/// tabs themselves are interactive in the canvas HTML and weren't captured on separate PDF pages.
-/// Renders `HotkeysSettingsBody`/`AudioSettingsBody`/`PrivacySettingsBody`/`GeneralSettingsBody`/
-/// `MCPSettingsBody` directly rather than the `ScrollView`-wrapped `…View`s: `ImageRenderer` doesn't
-/// reliably capture `ScrollView` content (confirmed empirically — see the task report), the same
+/// in `.superpowers/design/renders/` against `canvas.pdf` page 6 (ST-04n, ST-03v) and page 9
+/// (ST-05d) — the Settings tabs themselves are interactive in the canvas HTML and weren't captured
+/// on separate PDF pages.
+/// Renders `HotkeysSettingsBody`/`AudioSettingsBody`/`PrivacySettingsBody`/`GeneralSettingsBody`
+/// directly rather than the `ScrollView`-wrapped `…View`s: `ImageRenderer` doesn't reliably capture
+/// `ScrollView` content (confirmed empirically — see the task report), the same
 /// reason `HistoryPage` factors its content into `HistoryPageBody`. `Models-baseline` is a
 /// same-style stand-in for `ModelsSettingsView` (ST-03, already shipped, out of this task's file
 /// scope) so the grouped-form look has a fresh baseline to compare the new tabs against.
@@ -105,18 +106,10 @@ struct SettingsRenderTests {
                                          flowBarPositioning: FakeFlowBarPositioning())
         try Self.render(GeneralSettingsBody(general: generalVM), name: "general", to: directory)
 
-        // MCP (ST-06, ST-06r) — UI only (ruling 5): disabled by default, a token already generated
-        // so "Access token" shows its masked form rather than the empty state.
-        let mcpSettings = MCPSettings(store: InMemoryKeyValueStore(), token: FakeTokenStore())
-        _ = mcpSettings.token   // force generation so the masked row has something to show
-        let mcpVM = MCPViewModel(settings: mcpSettings, pasteboard: FakePasteboard())
-        try Self.render(MCPSettingsBody(mcp: mcpVM), name: "mcp", to: directory)
-
-        // ST-06r "Regenerate the access token?" — `.alert()` itself is a native window `ImageRenderer`
-        // can't capture (same limitation noted above for `Toggle`/`Picker`), so this reproduces just
-        // its content (icon, title, message, stacked buttons) at the same card style as the MW-06c/
-        // SYS-DISK alerts on canvas page 5 — compare against canvas page 6 (ST-06r) for the exact copy.
-        try Self.render(MCPRegenerateAlertPreview(), name: "mcp-regenerate", to: directory)
+        // MCP (ST-06, ST-06a, ST-06r) — Task 4 backs this with the real server; its design-fidelity
+        // renders (enabled state, connected clients, the ST-06a panel, the ST-06r alert) now live in
+        // the dedicated `MCPRenderTests`, since `MCPSettingsBody` needs a real
+        // `MCPServerControlling`/`MCPClientStoreProviding` pair that doesn't belong in this file.
 
         // Models (ST-03, already shipped, out of this task's file scope) — a same-style stand-in
         // rendered alongside as the grouped-form baseline to compare the three new tabs against.
@@ -192,44 +185,6 @@ private struct ModelsBaselinePreview: View {
             }
             .background(.background.secondary, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
-    }
-}
-
-/// A same-style stand-in for the ST-06r "Regenerate the access token?" confirmation — `.alert()`
-/// itself is a native window `ImageRenderer` can't capture, so this reproduces the card layout the
-/// MW-06c/SYS-DISK alerts use on canvas page 5 (icon, centered title, centered message, stacked
-/// full-width buttons) with ST-06r's copy for a same-page visual comparison against canvas page 6.
-private struct MCPRegenerateAlertPreview: View {
-    var body: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "waveform")
-                .font(.system(size: 28))
-                .foregroundStyle(.white)
-                .frame(width: 56, height: 56)
-                .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            Text(MCPViewModel.regenerateTitle)
-                .font(.headline)
-                .multilineTextAlignment(.center)
-            Text(MCPViewModel.regenerateMessage)
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-            VStack(spacing: 8) {
-                Text("Regenerate and copy")
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
-                    .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    .foregroundStyle(.white)
-                Text("Cancel")
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
-                    .background(.background.secondary, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            }
-        }
-        .padding(24)
-        .frame(width: 320)
-        .background(.background, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .padding(40)
     }
 }
 

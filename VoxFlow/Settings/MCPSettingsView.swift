@@ -10,6 +10,10 @@ struct MCPSettingsView: View {
     var body: some View {
         ScrollView { MCPSettingsBody(mcp: mcp) }
             .frame(maxWidth: .infinity)
+            // Re-syncs with the real server every time this tab appears — it may already be
+            // running (started by `AppDelegate` at launch) before Settings was ever opened, and
+            // "Connected clients" should reflect the latest `mcp_clients` rows too.
+            .task { await mcp.refresh() }
     }
 }
 
@@ -26,7 +30,7 @@ struct MCPSettingsBody: View {
         .padding(20)
         .frame(maxWidth: 640, alignment: .leading)
         .alert(MCPViewModel.regenerateTitle, isPresented: alertIsPresented, presenting: mcp.alert) { _ in
-            Button("Regenerate and copy") { mcp.confirmRegenerate() }
+            Button("Regenerate and copy") { Task { await mcp.confirmRegenerate() } }
             Button("Cancel", role: .cancel) { mcp.dismissAlert() }
         } message: { _ in
             Text(MCPViewModel.regenerateMessage)
@@ -56,21 +60,30 @@ struct MCPSettingsBody: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Toggle("Enable MCP server", isOn: Binding(get: { settings.enabled }, set: { settings.enabled = $0 })).labelsHidden()
+                Toggle("Enable MCP server", isOn: enabledBinding).labelsHidden()
             }
-            Text("Server arrives in a later release.")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+            if let startFailure = mcp.startFailure {
+                Text(startFailure)
+                    .font(.caption2)
+                    .foregroundStyle(.red)
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
+    }
+
+    private var enabledBinding: Binding<Bool> {
+        Binding(get: { mcp.enabled }, set: { newValue in Task { await mcp.setEnabled(newValue) } })
     }
 
     private var endpointRow: some View {
         HStack {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Endpoint")
-                Text(MCPViewModel.endpoint).font(.caption.monospaced()).foregroundStyle(.secondary)
+                Text(mcp.boundEndpoint).font(.caption.monospaced()).foregroundStyle(.secondary)
+                if let portNote = mcp.portNote {
+                    Text(portNote).font(.caption2).foregroundStyle(.secondary)
+                }
             }
             Spacer()
             Button("Copy") { mcp.copyEndpoint() }.buttonStyle(.bordered).controlSize(.small)
@@ -141,13 +154,38 @@ struct MCPSettingsBody: View {
     private var connectedClientsCard: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Connected clients").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-            Text(MCPViewModel.connectedClientsEmptyText)
-                .font(.callout)
-                .foregroundStyle(.secondary)
+            if mcp.clients.isEmpty {
+                Text(MCPViewModel.connectedClientsEmptyText)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(mcp.clients.enumerated()), id: \.element.id) { index, client in
+                        clientRow(client)
+                        if index < mcp.clients.count - 1 { Divider() }
+                    }
+                }
+            }
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.background.secondary, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private func clientRow(_ client: MCPViewModel.MCPClientRow) -> some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(client.name).fontWeight(.medium)
+                if !client.path.isEmpty {
+                    Text(client.path).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                }
+                Text(client.lastUsedText).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("Revoke") { Task { await mcp.revoke(client.id) } }
+                .buttonStyle(.bordered).controlSize(.small).tint(.red)
+        }
+        .padding(.vertical, 6)
     }
 
     // MARK: ST-06r alert

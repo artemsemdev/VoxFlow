@@ -46,6 +46,8 @@ targets:
         product: VoxFlowStyling
       - package: VoxFlowKit
         product: VoxFlowLLM
+      - package: VoxFlowKit
+        product: VoxFlowMCP
     info:
       path: VoxFlow/Info.plist
       properties:
@@ -95,6 +97,8 @@ targets:
         product: VoxFlowStyling
       - package: VoxFlowKit
         product: VoxFlowLLM
+      - package: VoxFlowKit
+        product: VoxFlowMCP
       - package: VoxFlowKit
         product: VoxFlowTestSupport
     settings:

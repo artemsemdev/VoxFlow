@@ -138,6 +138,36 @@ final class DictationCoordinator {
         guard !isRequestingMicrophoneAccess else { return }
         commands.yield(.fn(t))
     }
+    /// The MCP `dictate` seam (Phase 6): starts a hands-free capture through `fn(_:)` — the same
+    /// public entry point, and so the same command queue, `FnKeyMonitor` uses — rather than calling
+    /// `DictationController` directly or touching `commands` itself. A hands-free listening state
+    /// only exists in `FlowBarMachine` after a tap (`.armed` released before the hold timer fires)
+    /// followed by a second `.fnDown` inside `doubleTapWindow` (`.tapped` → `.listening(handsFree)`)
+    /// — there is no FSM transition that reaches it from a single `.fnDown` — so this issues exactly
+    /// the same three commands a real double-tap does: down, up, down. Each goes through `fn(_:)`,
+    /// not `commands.yield` directly, so:
+    /// - preflight still runs (`fnDown()` still calls `await preflight()` before handling the event);
+    /// - the microphone-permission path is never bypassed: if `permissions.microphone() ==
+    ///   .notDetermined`, the *first* `.down` is diverted to the OS prompt exactly as a hotkey tap
+    ///   would be, and the queued `.up`/second `.down` are silently dropped by the very same
+    ///   `isRequestingMicrophoneAccess` guard a real rapid double-tap during a pending prompt would
+    ///   also lose — this call site doesn't special-case that, it just inherits it;
+    /// - the HUD and insertion are untouched: the resulting capture runs through the ordinary
+    ///   `.listening` → `.processing` → `.insert`/`.saveHistory` → `.inserted`/`.copied` path,
+    ///   observable the same way a hotkey dictation is (`states()`/`currentAndChanges()` on the
+    ///   controller, `state`/`isHUDActive` here).
+    ///
+    /// Enqueuing all three before any of them is awaited relies on the single command-consumer
+    /// task in `start()` processing `commandStream` strictly in order (see `rapidTapOrdering`/
+    /// `firstUseMicrophonePrompt` in `DictationCoordinatorTests`), so — outside the pending-
+    /// permission case above — this always resolves to hands-free, never push-to-talk or a lone
+    /// tap: nothing can observe the state in between.
+    func startProgrammaticDictation() {
+        fn(.down)
+        fn(.up)
+        fn(.down)
+    }
+
     func escape() { commands.yield(.escape) }
     func anyKey() { commands.yield(.anyKey) }
     func copyRaw() { commands.yield(.copyRaw) }

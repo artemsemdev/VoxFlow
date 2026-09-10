@@ -73,3 +73,23 @@ public struct StyleOverride: Sendable, Equatable {
         self.style = style
     }
 }
+
+/// A row in `mcp_clients`: an app that has connected to the loopback MCP server (design ST-06
+/// "Connected clients"), keyed by name+path (never pid — ruling 5).
+public struct MCPClientRecord: Sendable, Equatable, Identifiable {
+    public var id: Int64
+    public var name: String
+    public var path: String
+    public var approved: Bool
+    public var firstSeen: Date
+    public var lastSeen: Date
+
+    public init(id: Int64, name: String, path: String, approved: Bool, firstSeen: Date, lastSeen: Date) {
+        self.id = id
+        self.name = name
+        self.path = path
+        self.approved = approved
+        self.firstSeen = firstSeen
+        self.lastSeen = lastSeen
+    }
+}
