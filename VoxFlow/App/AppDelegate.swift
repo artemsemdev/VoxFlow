@@ -19,12 +19,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // XCTest" rule.
         if LaunchEnvironment.isRunningTests() == false {
             AppServices.shared.dictation.start()
+            // Phase 5: warm the style LLM into memory now (Metal shaders + weights) so the first
+            // dictation after launch doesn't pay that cost — `StyleModelLoader.warmUp()` is a no-op
+            // once already loaded, and never blocks dictation itself (`.utility`, unawaited here).
+            Task(priority: .utility) { await AppServices.shared.styleModelLoader.warmUp() }
             AppServices.shared.flowBar.bind(to: AppServices.shared.dictation)
             AppServices.shared.fnMonitor.start()
+            // MB-03/MB-04 (ruling 8): never starts under XCTest, same reasoning as everything else
+            // in this block — a test run must not touch the real Notification Center either.
+            AppServices.shared.notifications.start()
             // `HistoryService` opens lazily (Keychain access deferred to first use) — run that open
             // once here at a real launch so retention (design §5) runs at launch as the spec says,
-            // rather than waiting for the first History read/write to trigger it implicitly.
-            Task { await AppServices.shared.historyService.ready() }
+            // rather than waiting for the first History read/write to trigger it implicitly. C1:
+            // chained straight into `statsService.refresh()` so Home/the menu bar show real numbers
+            // the moment the store's open resolves, instead of only after someone navigates to Home.
+            Task {
+                await AppServices.shared.historyService.ready()
+                await AppServices.shared.statsService.refresh()
+            }
+            // C1: `ContentService` also opens lazily, and was previously only ever opened by a
+            // Dictionary/Snippets/Styles page (or by `noteUses` *after* the first dictation) —
+            // meaning the first dictation of every cold launch ignored the dictionary, snippets and
+            // per-app overrides. Opening it here, in parallel with history, means its snapshot boxes
+            // are already populated (or racing to be) before fn is ever pressed.
+            Task { await AppServices.shared.contentService.ready() }
+
+            // Phase 6 (ST-06): starts the real MCP server at launch when the user already had it
+            // enabled last session. A failure here (ports 7331–7340 all busy) is silently logged,
+            // not surfaced — there's no window guaranteed to be on screen at this point to show it
+            // in; `mcpViewModel.refresh()` (Settings › MCP Server's `.task`) re-syncs the toggle
+            // with reality the next time that page opens, same as `GeneralViewModel`'s own I3.
+            if AppServices.shared.mcpSettings.enabled {
+                Task { try? await AppServices.shared.mcpServerService.start() }
+            }
 
             // First launch (or onboarding never finished): show it instead of the main window —
             // closing whatever SwiftUI already opened for `MainWindowID.main` so the two don't both

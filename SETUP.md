@@ -67,6 +67,54 @@ Settings → Privacy) independently of onboarding. `HistoryService` also
 opens the store lazily, on first use rather than at construction, specifically so that launching
 the app as the XCTest host never prompts for Keychain access — see #143.
 
+### Style model
+
+The Formal / Casual / Very casual style cleanup (Styles page, Re-style, and the Files result's
+"Apply {Style} cleanup") is rule-based on its own; installing the style model upgrades the
+dictation and Re-style paths to LLM rewrites (Files cleanup stays rule-based either way — see
+[ADR-007](docs/adr/007-llm-styling-on-llama-cpp.md)). Download it from Settings › Models — the
+"Qwen2.5 3B Instruct (4-bit)" row, 2.1 GB, sha256-verified before it counts as installed, same
+download/pause/resume/remove flow as the speech models. It's saved to
+
+```
+~/Library/Application Support/VoxFlow/Models/qwen2.5-3b-instruct-q4_k_m.gguf
+```
+
+Without it (not yet downloaded, still downloading, or removed), styling falls back to the
+deterministic rule pipeline (`RuleStyler`) automatically — dictation, Re-style and Files cleanup
+all keep working, just without the LLM's tone rewriting. First launch after installing the model
+pays a one-time Metal shader compile (~20 s), which runs in the background right after dictation
+starts, not on your first dictation's critical path.
+
+`VoxFlowLLMTests`' integration test (tagged `.requiresModel`) exercises the real model and needs
+it installed at the path above, or `VOXFLOW_STYLE_MODEL` set to a GGUF file elsewhere:
+
+```bash
+cd VoxFlowKit && VOXFLOW_STYLE_MODEL=/path/to/qwen2.5-3b-instruct-q4_k_m.gguf swift test --filter LlamaEngineIntegrationTests
+```
+
+Without either, it prints `skipped: style model not installed` and returns — this is why it's
+absent from CI.
+
+### MCP server
+
+Settings › MCP Server turns on a loopback-only MCP server so Cursor or Claude Desktop can use
+VoxFlow as a tool (`transcribe_file`, `dictate`, `search_history`) over `127.0.0.1` with a token
+from the Keychain. It's off by default and needs no setup beyond turning it on and copying the
+token — connecting a client, approving it, revoking it, and what to do if the port moves are all
+covered in [docs/runbooks/connect-an-mcp-client.md](docs/runbooks/connect-an-mcp-client.md); the
+design is [ADR-008](docs/adr/008-loopback-mcp-server.md).
+`VoxFlowTests`' `MCPServerIntegrationTests` exercises the real server over a real loopback socket
+(as part of `xcodebuild … test`, not a separate step) and skips, with a printed reason, if it can't
+bind a port in 7331–7340 or if no speech model is installed for its `transcribe_file` case.
+
+### Contacts permission
+
+VoxFlow does not ask for Contacts access at launch. It prompts only if you turn on "Learn names
+from Contacts" on the Dictionary page — the prompt string is `NSContactsUsageDescription` in
+`project.yml`. Denying it (or later revoking it in System Settings → Privacy & Security →
+Contacts) snaps the toggle back off; no names are imported or read.
+
 ## Local code signing (once per Mac)
 
 macOS ties Microphone/Accessibility grants and Keychain access to the app's code signature. An

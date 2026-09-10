@@ -54,16 +54,21 @@ struct TranscriptResultView: View {
     }
 
     private var searchBar: some View {
-        // "Segment length" and "Apply Casual cleanup" (design 2f) aren't built here — they're
-        // phase 4/5 (segmentation controls, style rewriting), out of scope for this UI task.
-        HStack(spacing: 7) {
-            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-            TextField("Find in transcript", text: $resultModel.searchText)
-                .textFieldStyle(.plain)
+        // "Segment length" (design 2f, segmentation controls) isn't built here — it's a follow-up,
+        // out of scope for #112.
+        HStack(spacing: 16) {
+            HStack(spacing: 7) {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField("Find in transcript", text: $resultModel.searchText)
+                    .textFieldStyle(.plain)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            Spacer(minLength: 12)
+            Toggle(resultModel.cleanupLabel, isOn: $resultModel.applyCleanup)
+                .toggleStyle(.checkbox)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
     }
@@ -72,14 +77,7 @@ struct TranscriptResultView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 10) {
                 ForEach(Array(resultModel.visibleIndexedSegments.enumerated()), id: \.offset) { _, indexed in
-                    HStack(alignment: .top, spacing: 18) {
-                        Text("\(indexed.index)\n\(TimeCode.srt(indexed.segment.start)) → \(TimeCode.srt(indexed.segment.end))")
-                            .font(.system(.caption, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 190, alignment: .leading)
-                        Text(indexed.segment.text)
-                            .font(.system(.callout, design: .monospaced))
-                    }
+                    TranscriptSegmentRow(index: indexed.index, segment: indexed.segment)
                 }
             }
             .padding(16)
@@ -115,5 +113,25 @@ struct TranscriptResultView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
+    }
+}
+
+/// One transcript row (position, timecode, text) — its own type (not inline in `segmentList`'s
+/// `ForEach`) so `FilesRenderTests` can render rows outside a live `ScrollView`, which rasterizes
+/// blank under `ImageRenderer`, without hand-retyping the row and risking drift from production
+/// (the same reasoning `StylesRenderTests`' `AppListRow` reuse documents).
+struct TranscriptSegmentRow: View {
+    let index: Int
+    let segment: TranscriptSegment
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 18) {
+            Text("\(index)\n\(TimeCode.srt(segment.start)) → \(TimeCode.srt(segment.end))")
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .frame(width: 190, alignment: .leading)
+            Text(segment.text)
+                .font(.system(.callout, design: .monospaced))
+        }
     }
 }

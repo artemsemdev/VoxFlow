@@ -16,12 +16,14 @@ struct FlowBarView: View {
     private let source: Source
     let onOpenSettings: () -> Void
     let onCopyRaw: () -> Void
+    let onResume: () -> Void
 
     init(content: FlowBarContent, levels: [Float],
-         onOpenSettings: @escaping () -> Void = {}, onCopyRaw: @escaping () -> Void = {}) {
+         onOpenSettings: @escaping () -> Void = {}, onCopyRaw: @escaping () -> Void = {}, onResume: @escaping () -> Void = {}) {
         self.source = .fixed(content, levels: levels)
         self.onOpenSettings = onOpenSettings
         self.onCopyRaw = onCopyRaw
+        self.onResume = onResume
     }
 
     /// Production entry point — copy comes from `coordinator.state`/`elapsed`/`hotkeyMode`, re-read
@@ -31,12 +33,21 @@ struct FlowBarView: View {
         self.source = .coordinator(coordinator)
         self.onOpenSettings = { coordinator.openSettingsForCurrentError() }
         self.onCopyRaw = { coordinator.copyRaw() }
+        self.onResume = { coordinator.resume() }
     }
 
     private var content: FlowBarContent {
         switch source {
         case .fixed(let content, levels: _): content
-        case .coordinator(let coordinator): FlowBarContent.make(state: coordinator.state, elapsed: coordinator.elapsed, mode: coordinator.hotkeyMode)
+        case .coordinator(let coordinator):
+            // M4 (Task 4 review): `coordinator.now()` is a plain function call, not `@Observable`
+            // state, so it only actually gets re-read (and `.paused`'s "N min left" only actually
+            // ticks) when SwiftUI re-renders this `body` for some *other* reason — `state`/`elapsed`/
+            // `hotkeyMode` changing. None of those change while merely paused, so the pill's countdown
+            // is really a snapshot taken when `.paused` was entered, not a live clock. Harmless today
+            // (`FlowBarPresenter.pausedHideDelay` hides the pill again after 3 s), but would go stale
+            // if that delay ever grew, or if the pill started reappearing on menu-bar hover.
+            FlowBarContent.make(state: coordinator.state, elapsed: coordinator.elapsed, mode: coordinator.hotkeyMode, now: coordinator.now())
         }
     }
 
@@ -214,6 +225,8 @@ struct FlowBarView: View {
             .buttonStyle(.plain)
         case .copyRaw:
             pillButton("Copy raw", action: onCopyRaw)
+        case .resume:
+            pillButton("Resume", action: onResume)
         case .tryAgain:
             // fn is the action; the pill is a hint, not a control (FB-05) — no button, no action.
             // The canvas renders the trailing "fn" as plain dimmed text here, not a boxed keycap.

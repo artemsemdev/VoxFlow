@@ -11,13 +11,19 @@ final class DictationCoordinator {
     /// the order they were called, even though `DictationController.fnDown()` suspends internally on
     /// `preflight()` — four independent `Task { await controller… }` call sites would let the actor
     /// reorder them (e.g. a quick tap's `fnUp` overtaking a still-suspended `fnDown`).
-    private enum Command: Sendable { case fn(FnTransition), escape, anyKey, copyRaw }
+    private enum Command: Sendable { case fn(FnTransition), escape, anyKey, copyRaw, pause(seconds: TimeInterval), resume }
 
     static let barCount = 14
     private let controller: DictationController
     private let settings: DictationSettings
     private let permissions: any PermissionChecking
     private let navigation: Navigation
+    /// The coordinator's own "now" (`now()`, below) — ideally the same instance the controller's
+    /// clock uses (production wiring lives in `AppServices.swift`, outside this task's file scope),
+    /// so `pausedUntil`'s monotonic timeline projects onto a wall-clock `Date` consistently
+    /// wherever a reader (e.g. `MenuBarViewModel.pausedUntilText`) does that math. Defaulted so
+    /// every existing call site keeps compiling unchanged.
+    private let clock: any MonotonicClock
     /// Boxed outside main-actor isolation so `deinit` (nonisolated, may run on any thread) can cancel
     /// it without an isolation assertion — same pattern as `FilesViewModel.eventTask`.
     private nonisolated let mirror = Mutex<Task<Void, Never>?>(nil)
@@ -36,13 +42,23 @@ final class DictationCoordinator {
     private(set) var levels: [Float] = Array(repeating: 0, count: DictationCoordinator.barCount)
     private(set) var elapsed: TimeInterval = 0
     var hotkeyMode: HotkeyMode { settings.hotkeyMode }
-    var isHUDActive: Bool { state != .idle }
+    /// I1: `.paused` is excluded even though `state != .idle` — before FB-09 every non-idle state
+    /// was seconds long, but `.paused(until:)` lasts up to an hour, and `FnKeyMonitor` gates its
+    /// *global* `.keyDown` handler on this. Leaving `.paused` "HUD active" meant every keystroke in
+    /// every app, for the whole pause, forwarded an `anyKey()`/`escape()` command into the
+    /// coordinator for no visible effect (`FlowBarMachine` already ignores them from `.paused` —
+    /// see `default: return []`) — harmless, but a needless firehose into the dictation actor and a
+    /// hijacked Esc key system-wide. The paused pill itself is unaffected: `FlowBarPresenter` shows/
+    /// hides off `state`, never off this property.
+    var isHUDActive: Bool { state != .idle && pausedUntil == nil }
 
-    init(controller: DictationController, settings: DictationSettings, permissions: any PermissionChecking, navigation: Navigation) {
+    init(controller: DictationController, settings: DictationSettings, permissions: any PermissionChecking, navigation: Navigation,
+         clock: any MonotonicClock = SystemMonotonicClock()) {
         self.controller = controller
         self.settings = settings
         self.permissions = permissions
         self.navigation = navigation
+        self.clock = clock
         (commandStream, commands) = AsyncStream<Command>.makeStream()
     }
 
@@ -66,6 +82,8 @@ final class DictationCoordinator {
                 case .escape: await controller.escape()
                 case .anyKey: await controller.anyKey()
                 case .copyRaw: await controller.copyRaw()
+                case .pause(let seconds): await controller.pause(for: seconds)
+                case .resume: await controller.resume()
                 }
             }
         }
@@ -120,9 +138,55 @@ final class DictationCoordinator {
         guard !isRequestingMicrophoneAccess else { return }
         commands.yield(.fn(t))
     }
+    /// The MCP `dictate` seam (Phase 6): starts a hands-free capture through `fn(_:)` — the same
+    /// public entry point, and so the same command queue, `FnKeyMonitor` uses — rather than calling
+    /// `DictationController` directly or touching `commands` itself. A hands-free listening state
+    /// only exists in `FlowBarMachine` after a tap (`.armed` released before the hold timer fires)
+    /// followed by a second `.fnDown` inside `doubleTapWindow` (`.tapped` → `.listening(handsFree)`)
+    /// — there is no FSM transition that reaches it from a single `.fnDown` — so this issues exactly
+    /// the same three commands a real double-tap does: down, up, down. Each goes through `fn(_:)`,
+    /// not `commands.yield` directly, so:
+    /// - preflight still runs (`fnDown()` still calls `await preflight()` before handling the event);
+    /// - the microphone-permission path is never bypassed: if `permissions.microphone() ==
+    ///   .notDetermined`, the *first* `.down` is diverted to the OS prompt exactly as a hotkey tap
+    ///   would be, and the queued `.up`/second `.down` are silently dropped by the very same
+    ///   `isRequestingMicrophoneAccess` guard a real rapid double-tap during a pending prompt would
+    ///   also lose — this call site doesn't special-case that, it just inherits it;
+    /// - the HUD and insertion are untouched: the resulting capture runs through the ordinary
+    ///   `.listening` → `.processing` → `.insert`/`.saveHistory` → `.inserted`/`.copied` path,
+    ///   observable the same way a hotkey dictation is (`states()`/`currentAndChanges()` on the
+    ///   controller, `state`/`isHUDActive` here).
+    ///
+    /// Enqueuing all three before any of them is awaited relies on the single command-consumer
+    /// task in `start()` processing `commandStream` strictly in order (see `rapidTapOrdering`/
+    /// `firstUseMicrophonePrompt` in `DictationCoordinatorTests`), so — outside the pending-
+    /// permission case above — this always resolves to hands-free, never push-to-talk or a lone
+    /// tap: nothing can observe the state in between.
+    func startProgrammaticDictation() {
+        fn(.down)
+        fn(.up)
+        fn(.down)
+    }
+
     func escape() { commands.yield(.escape) }
     func anyKey() { commands.yield(.anyKey) }
     func copyRaw() { commands.yield(.copyRaw) }
+    /// FB-09: menu bar / Flow Bar pill "Pause dictation for 1 hour" and "Resume".
+    func pause(for seconds: TimeInterval) { commands.yield(.pause(seconds: seconds)) }
+    func resume() { commands.yield(.resume) }
+    /// Mirrors `state` — `nil` outside `.paused`. Monotonic (the controller's clock), like
+    /// `DictationController.pausedUntil`; converting to a wall-clock "until 10:41" is the menu
+    /// bar/pill's job (Task 4), not this coordinator's.
+    var pausedUntil: TimeInterval? {
+        if case .paused(let until) = state { until } else { nil }
+    }
+
+    /// This coordinator's own monotonic "now" (`clock.now()`) — what `FlowBarView` passes as
+    /// `FlowBarContent.make(now:)` for the `.paused` pill's "N min left" countdown (Task 4). Not
+    /// `@Observable` state: a plain function call, read only when SwiftUI re-renders for some other
+    /// reason (see review M4 at `FlowBarView.content`'s `.coordinator` case) — the countdown is a
+    /// snapshot at render time, not a live ticker.
+    func now() -> TimeInterval { clock.now() }
 
     /// Called from `MeteredMicrophone.onLevel` (wrapped in `Task { @MainActor in }` by the caller).
     func reportLevel(_ rms: Float) {

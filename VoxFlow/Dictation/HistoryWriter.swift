@@ -19,22 +19,32 @@ struct HistoryWriter: Sendable {
     /// a no-op so every existing call site (`HistoryWriter(storeBox:settings:now:)`) keeps compiling
     /// unchanged; `AppServices` passes `{ await historyService.ready() }`.
     var ready: @Sendable () async -> Void = {}
+    /// Called after a successful insert only — `HistoryService.notifyChanged()`'s intended
+    /// subscriber (`AppServices`, C1): without this, a dictation saved through this writer never
+    /// told `HistoryService`/`StatsService` anything changed, so Home and the menu bar's stats sat
+    /// stale for the whole session unless the store was touched some other way
+    /// (`delete`/`deleteAll`/`reinsert`, which already call `notifyChanged()` directly). Defaulted
+    /// to a no-op so every existing call site keeps compiling unchanged.
+    var onSaved: @Sendable () async -> Void = {}
     private static let log = Logger(subsystem: "dev.artemsem.voxflow", category: "history")
 
     static func draft(from result: DictationResult, appName: String?, now: Date) -> DictationDraft {
-        DictationDraft(text: result.text, rawText: result.rawText, appName: appName, style: nil,
+        DictationDraft(text: result.text, rawText: result.rawText, appName: appName, style: result.style,
                        language: result.language?.code, duration: result.duration, createdAt: now)
     }
 
     /// No-op when history is off or there's no store (Privacy toggle / storage unavailable). The
-    /// insert itself is blocking SQLite I/O, so it runs on a detached task off the caller's actor.
+    /// insert itself is blocking SQLite I/O, so it runs on a detached task off the caller's actor;
+    /// `onSaved()` only fires once that insert actually succeeded.
     func save(_ result: DictationResult, appName: String?) async {
         guard settings.current.keepHistory else { return }
         await ready()
         guard let store = storeBox.current else { return }
         let draft = Self.draft(from: result, appName: appName, now: now())
-        await Task.detached(priority: .utility) {
-            do { _ = try store.insert(draft) } catch { Self.log.error("history insert failed: \(String(describing: error))") }
+        let inserted = await Task.detached(priority: .utility) { () -> Bool in
+            do { _ = try store.insert(draft); return true }
+            catch { Self.log.error("history insert failed: \(String(describing: error))"); return false }
         }.value
+        if inserted { await onSaved() }
     }
 }

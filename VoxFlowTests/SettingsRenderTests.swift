@@ -10,17 +10,20 @@ import VoxFlowStorage
 import VoxFlowTestSupport
 @testable import VoxFlow
 
-/// Design-fidelity renders (Task 4 Step 3/4) — gated behind `VOXFLOW_RENDER` so normal test runs
-/// never touch disk. Run with `TEST_RUNNER_VOXFLOW_RENDER=1 xcodebuild … -only-testing:VoxFlowTests/SettingsRenderTests`
+/// Design-fidelity renders (Task 4 Step 3/4, extended in Task 3 for General, and by phase 6's own
+/// Task 4 for MCP — see `MCPRenderTests`, which now owns that tab) — gated behind `VOXFLOW_RENDER`
+/// so normal test runs never touch disk. Run with
+/// `TEST_RUNNER_VOXFLOW_RENDER=1 xcodebuild … -only-testing:VoxFlowTests/SettingsRenderTests`
 /// (see `OnboardingRenderTests` for why the `TEST_RUNNER_` prefix is needed), then compare the PNGs
-/// in `.superpowers/design/renders/` against `canvas.pdf` page 6 (ST-04n, ST-03v) and page 9 (ST-05d)
-/// and this task's text-report copy — the Settings tabs themselves are interactive in the canvas
-/// HTML and weren't captured on separate PDF pages. Renders `HotkeysSettingsBody`/`AudioSettingsBody`/
-/// `PrivacySettingsBody` directly rather than the `ScrollView`-wrapped `…View`s: `ImageRenderer`
-/// doesn't reliably capture `ScrollView` content (confirmed empirically — see the task report), the
-/// same reason `HistoryPage` factors its content into `HistoryPageBody`. `Models-baseline` is a
+/// in `.superpowers/design/renders/` against `canvas.pdf` page 6 (ST-04n, ST-03v) and page 9
+/// (ST-05d) — the Settings tabs themselves are interactive in the canvas HTML and weren't captured
+/// on separate PDF pages.
+/// Renders `HotkeysSettingsBody`/`AudioSettingsBody`/`PrivacySettingsBody`/`GeneralSettingsBody`
+/// directly rather than the `ScrollView`-wrapped `…View`s: `ImageRenderer` doesn't reliably capture
+/// `ScrollView` content (confirmed empirically — see the task report), the same
+/// reason `HistoryPage` factors its content into `HistoryPageBody`. `Models-baseline` is a
 /// same-style stand-in for `ModelsSettingsView` (ST-03, already shipped, out of this task's file
-/// scope) so the grouped-form look has a fresh baseline to compare the three new tabs against.
+/// scope) so the grouped-form look has a fresh baseline to compare the new tabs against.
 ///
 /// Known `ImageRenderer` limitation (confirmed empirically, not a real UI bug): AppKit-backed
 /// controls that draw their own interaction chrome — `Toggle`, `Picker` (any style, including
@@ -95,6 +98,18 @@ struct SettingsRenderTests {
         let privacyKeychain = makePrivacyModel(dir: TemporaryDirectory(),
                                                excluded: DictationSettings.defaultExcluded + ["com.example.discord"], secureEnclaveAvailable: false)
         try Self.render(PrivacySettingsBody(privacy: privacyKeychain), name: "privacy-2-keychain-and-extra-app", to: directory)
+
+        // General (ST-01): defaults straight out of `GeneralSettings`/`DictationSettings`.
+        let generalSettings = GeneralSettings(store: InMemoryKeyValueStore())
+        let generalVM = GeneralViewModel(settings: generalSettings, dictationSettings: DictationSettings(store: InMemoryKeyValueStore()),
+                                         loginItem: FakeLoginItem(), appearanceApplier: FakeAppearanceApplying(),
+                                         flowBarPositioning: FakeFlowBarPositioning())
+        try Self.render(GeneralSettingsBody(general: generalVM), name: "general", to: directory)
+
+        // MCP (ST-06, ST-06a, ST-06r) — Task 4 backs this with the real server; its design-fidelity
+        // renders (enabled state, connected clients, the ST-06a panel, the ST-06r alert) now live in
+        // the dedicated `MCPRenderTests`, since `MCPSettingsBody` needs a real
+        // `MCPServerControlling`/`MCPClientStoreProviding` pair that doesn't belong in this file.
 
         // Models (ST-03, already shipped, out of this task's file scope) — a same-style stand-in
         // rendered alongside as the grouped-form baseline to compare the three new tabs against.

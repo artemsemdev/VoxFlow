@@ -16,6 +16,7 @@ let package = Package(
         .library(name: "VoxFlowStorage", targets: ["VoxFlowStorage"]),
         .library(name: "VoxFlowStyling", targets: ["VoxFlowStyling"]),
         .library(name: "VoxFlowMCP", targets: ["VoxFlowMCP"]),
+        .library(name: "VoxFlowLLM", targets: ["VoxFlowLLM"]),
         .library(name: "VoxFlowTestSupport", targets: ["VoxFlowTestSupport"]),
     ],
     dependencies: [
@@ -32,11 +33,17 @@ let package = Package(
         .target(name: "VoxFlowStorage", dependencies: ["VoxFlowCore", .product(name: "GRDB", package: "GRDB.swift")]),
         .target(name: "VoxFlowStyling", dependencies: ["VoxFlowCore"]),
         .target(name: "VoxFlowMCP", dependencies: ["VoxFlowCore"]),
+        .target(name: "VoxFlowLLM", dependencies: ["VoxFlowCore", "llama"]),
 
         .binaryTarget(
             name: "whisper",
             url: "https://github.com/ggml-org/whisper.cpp/releases/download/v1.9.2/whisper-v1.9.2-xcframework.zip",
             checksum: "af74fed13ea7f2d5ca2a39d9f58ec177713fafd7cab63aef4e27b79f3ceca80b"
+        ),
+        .binaryTarget(
+            name: "llama",
+            url: "https://github.com/ggml-org/llama.cpp/releases/download/b10881/llama-b10881-xcframework.zip",
+            checksum: "7a86995c5f2127f897c0eeec78e0f32fec8fac750027ea1707885fbc5dbcebcd"
         ),
 
         .testTarget(name: "VoxFlowCoreTests", dependencies: ["VoxFlowCore", "VoxFlowTestSupport"]),
@@ -50,6 +57,7 @@ let package = Package(
         .testTarget(name: "VoxFlowStorageTests", dependencies: ["VoxFlowStorage", "VoxFlowCore", "VoxFlowTestSupport"]),
         .testTarget(name: "VoxFlowStylingTests", dependencies: ["VoxFlowStyling", "VoxFlowTestSupport"]),
         .testTarget(name: "VoxFlowMCPTests", dependencies: ["VoxFlowMCP", "VoxFlowTestSupport"]),
+        .testTarget(name: "VoxFlowLLMTests", dependencies: ["VoxFlowLLM", "VoxFlowTestSupport"]),
     ],
     swiftLanguageModes: [.v6]
 )

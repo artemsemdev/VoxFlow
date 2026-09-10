@@ -4,6 +4,7 @@ import Testing
 import VoxFlowCore
 import VoxFlowDictation
 import VoxFlowStorage
+import VoxFlowStyling
 import VoxFlowTestSupport
 @testable import VoxFlow
 
@@ -32,7 +33,7 @@ struct HistoryViewModelTests {
                        keyProvider: { FakeHistoryKeyProvider() }, clock: clock)
     }
 
-    static func draft(_ text: String, appName: String = "Slack", style: String? = "Very casual", language: String? = "en",
+    static func draft(_ text: String, appName: String = "Slack", style: String? = "veryCasual", language: String? = "en",
                       duration: TimeInterval = 9, at date: Date) -> DictationDraft {
         DictationDraft(text: text, rawText: text + " raw", appName: appName, style: style, language: language, duration: duration, createdAt: date)
     }
@@ -52,8 +53,15 @@ struct HistoryViewModelTests {
             service = HistoryViewModelTests.makeService(dir: dir, settings: settings, clock: clock)
         }
 
-        func vm(pasteboard: any Pasteboard = FakePasteboard()) -> HistoryViewModel {
-            HistoryViewModel(service: service, settings: settings, navigation: navigation, clock: clock, pasteboard: pasteboard)
+        /// `restyler` is nil-able (not defaulted to a real `Restyler`) so passing nothing here keeps
+        /// exercising `HistoryViewModel.init`'s own default, the same one production leaves unused
+        /// (`AppServices` always passes the real `services.restyler`).
+        func vm(pasteboard: any Pasteboard = FakePasteboard(), restyler: Restyler? = nil) -> HistoryViewModel {
+            if let restyler {
+                return HistoryViewModel(service: service, settings: settings, navigation: navigation, clock: clock,
+                                        pasteboard: pasteboard, restyler: restyler)
+            }
+            return HistoryViewModel(service: service, settings: settings, navigation: navigation, clock: clock, pasteboard: pasteboard)
         }
 
         @discardableResult
@@ -89,7 +97,7 @@ struct HistoryViewModelTests {
         var components = DateComponents()
         components.year = 2026; components.month = 3; components.day = 2; components.hour = 9; components.minute = 26
         let date = Calendar.current.date(from: components)!
-        let record = DictationRecord(id: 1, text: "hi", rawText: "hi", appName: "Slack", style: "Very casual",
+        let record = DictationRecord(id: 1, text: "hi", rawText: "hi", appName: "Slack", style: "veryCasual",
                                      language: "en", duration: 9, words: 15, createdAt: date)
 
         #expect(HistoryViewModel.metaLine(for: record) == "Slack · 9:26 AM · 0:09 · 15 words · Very casual · EN")
@@ -280,13 +288,116 @@ struct HistoryViewModelTests {
 
     @Test("M2: detailHeader includes the uppercased style when present, plain \"INSERTED\" otherwise")
     func detailHeaderVariants() {
-        let styled = DictationRecord(id: 1, text: "hi", rawText: "hi", appName: "Mail", style: "Very casual",
+        let styled = DictationRecord(id: 1, text: "hi", rawText: "hi", appName: "Mail", style: "veryCasual",
                                      language: "en", duration: 3, words: 4, createdAt: Date())
         let unstyled = DictationRecord(id: 2, text: "hi", rawText: "hi", appName: "Mail", style: nil,
                                        language: "en", duration: 3, words: 4, createdAt: Date())
 
         #expect(HistoryViewModel.detailHeader(for: styled) == "INSERTED · VERY CASUAL")
         #expect(HistoryViewModel.detailHeader(for: unstyled) == "INSERTED")
+    }
+
+    @Test("I1: styleLabel maps every TextStyle rawValue to its display name, and passes through an unrecognized value as-is")
+    func styleLabelMapsRawToDisplayName() {
+        #expect(HistoryViewModel.styleLabel("formal") == "Formal")
+        #expect(HistoryViewModel.styleLabel("casual") == "Casual")
+        #expect(HistoryViewModel.styleLabel("veryCasual") == "Very casual")
+        #expect(HistoryViewModel.styleLabel("verbatim") == "Verbatim")
+        #expect(HistoryViewModel.styleLabel("somethingUnknown") == "somethingUnknown")
+    }
+
+    /// A `Restyler` backed by `backend` with the same toggle defaults `RestylerTests.box()` uses
+    /// (fillers removed, auto-punctuate on) — enough for these tests, which only care whether the
+    /// LLM or the rule fallback answered.
+    private static func restyler(backend: FakeLLMBackend) -> Restyler {
+        Restyler(styler: LlamaStyler(backend: backend, clock: FakeClock()),
+                settings: StylingSettingsBox(StylingSettingsSnapshot(defaultStyle: .casual, removeFillers: true,
+                                                                     autoPunctuate: true, snippetSayPrefix: false)))
+    }
+
+    @Test("restyle updates the row's text/style, copies the result, and clears restylingID")
+    func restyleUpdatesRowAndCopies() async throws {
+        let h = Harness()
+        await h.seed(1)
+        let pasteboard = FakePasteboard()
+        let backend = FakeLLMBackend(reply: "Could we move it?")
+        let vm = h.vm(pasteboard: pasteboard, restyler: HistoryViewModelTests.restyler(backend: backend))
+        await vm.load()
+        let record = vm.records[0]
+
+        await vm.restyle(record, to: .formal)
+
+        let updated = vm.records.first { $0.id == record.id }
+        #expect(updated?.text == "Could we move it?")
+        #expect(updated?.style == "formal")
+        #expect(pasteboard.strings.last == "Could we move it?")
+        #expect(vm.restylingID == nil)
+    }
+
+    @Test("restyle falls back to the rule styler when the LLM backend is not ready")
+    func restyleFallsBackToRulesWhenNotReady() async throws {
+        let h = Harness()
+        await h.seed(1)
+        let backend = FakeLLMBackend(ready: false, reply: "should never be seen")
+        let vm = h.vm(restyler: HistoryViewModelTests.restyler(backend: backend))
+        await vm.load()
+        let record = vm.records[0]
+
+        await vm.restyle(record, to: .formal)
+
+        let expected = RuleStyler().styleSync(record.rawText, options: StylingOptions(style: .formal, removeFillers: true, autoPunctuate: true)).text
+        let updated = vm.records.first { $0.id == record.id }
+        #expect(updated?.text == expected)
+        #expect(await backend.prompts.isEmpty)
+    }
+
+    @Test("restyle is a no-op on an unreadable row")
+    func restyleIgnoresUnreadableRows() async throws {
+        let h = Harness()
+        let vm = h.vm()
+        let record = DictationRecord(id: 1, text: "", rawText: "", appName: "Mail", style: nil, language: nil,
+                                     duration: 3, words: 0, createdAt: Date(), isUnreadable: true)
+
+        await vm.restyle(record, to: .formal)
+
+        #expect(vm.restylingID == nil)
+    }
+
+    @Test("restyle is single-flight: a second call while one is in flight is ignored until the first finishes")
+    func restyleIsSingleFlight() async throws {
+        let h = Harness()
+        await h.seed(1)
+        let backend = FakeLLMBackend(reply: "styled")
+        await backend.set(hangs: true)
+        let vm = h.vm(restyler: HistoryViewModelTests.restyler(backend: backend))
+        await vm.load()
+        let record = vm.records[0]
+
+        let first = Task { await vm.restyle(record, to: .formal) }
+        await waitFor { vm.restylingID != nil }
+
+        await vm.restyle(record, to: .casual)   // guard trips on restylingID != nil — returns immediately
+        #expect(vm.restylingID == record.id)     // still the first call's in-flight id
+
+        await backend.release()
+        await first.value
+
+        #expect(vm.restylingID == nil)
+        #expect(await backend.prompts.count == 1)
+    }
+
+    @Test("currentStyle defaults to .casual for a nil or unrecognized style, and reads a known one back")
+    func currentStyleDefaultsToCasual() {
+        let nilStyle = DictationRecord(id: 1, text: "hi", rawText: "hi", appName: "Mail", style: nil, language: nil,
+                                       duration: 3, words: 2, createdAt: Date())
+        let unknown = DictationRecord(id: 2, text: "hi", rawText: "hi", appName: "Mail", style: "somethingUnknown",
+                                      language: nil, duration: 3, words: 2, createdAt: Date())
+        let known = DictationRecord(id: 3, text: "hi", rawText: "hi", appName: "Mail", style: "formal", language: nil,
+                                    duration: 3, words: 2, createdAt: Date())
+
+        #expect(HistoryViewModel.currentStyle(of: nilStyle) == .casual)
+        #expect(HistoryViewModel.currentStyle(of: unknown) == .casual)
+        #expect(HistoryViewModel.currentStyle(of: known) == .formal)
     }
 
     @Test("footer text: encrypted on, 30 days")

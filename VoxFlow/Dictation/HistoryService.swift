@@ -30,8 +30,24 @@ final class HistoryService {
     static let notOpenedYetReason = "not opened yet"
 
     private(set) var store: DictationStore?
+    /// The shared `VoxFlowDatabase` behind `store` — `nil` until the database *file* has opened, and
+    /// again only if opening that file itself fails. Deliberately independent of `store`/`status`:
+    /// dictionary/snippets/style overrides live on the same connection but need neither the history
+    /// key nor a working `DictationStore` (a `.keyLost`/other `DictationStore` failure disables
+    /// history alone, via `store`/`status`, and must not take `database` down with it — otherwise
+    /// `ContentService` dies whenever history does, for a table that isn't even encrypted). Once
+    /// non-nil, `reopen()` reuses this same instance rather than reopening the file again.
+    /// `ContentService` builds its three stores from this rather than opening a second connection.
+    private(set) var database: VoxFlowDatabase?
     private(set) var status: Status = .disabled(reason: HistoryService.notOpenedYetReason)
     let storeBox = HistoryStoreBox()
+    /// Fired after any write that changes what's on disk — `delete`/`deleteAll`/`reinsert` below call
+    /// it directly; `HistoryWriter`'s own insert path (which saves through `storeBox` rather than
+    /// this service) calls it too, via its `onSaved` hook wired in `AppServices.live()`
+    /// (`HistorySavedSink`, review C1). `StatsService.refresh()` is the intended subscriber so
+    /// Home's/the menu bar's numbers stay live after every dictation, not just after a History
+    /// delete/undo.
+    var onChange: (() -> Void)?
 
     private let url: URL
     private let settings: DictationSettings
@@ -117,6 +133,7 @@ final class HistoryService {
         await Task.detached(priority: .userInitiated) {
             do { try store.delete(id: id) } catch { log.error("history delete failed: \(String(describing: error))") }
         }.value
+        notifyChanged()
     }
 
     func deleteAll() async {
@@ -127,7 +144,26 @@ final class HistoryService {
         await Task.detached(priority: .userInitiated) {
             do { try store.deleteAll() } catch { log.error("history deleteAll failed: \(String(describing: error))") }
         }.value
+        notifyChanged()
     }
+
+    /// Re-style (MW-02s): replaces a stored row's text/style in place. Nil when the row no longer
+    /// exists (same "on success" notify rule as `reinsert`, below).
+    func updateStyled(id: Int64, text: String, style: String) async -> DictationRecord? {
+        ensureOpened()
+        await openTask?.value
+        guard let store else { return nil }
+        let log = Self.log
+        let updated: DictationRecord? = await Task.detached(priority: .userInitiated) { () -> DictationRecord? in
+            do { return try store.updateStyled(id: id, text: text, style: style) }
+            catch { log.error("history updateStyled failed: \(String(describing: error))"); return nil }
+        }.value
+        if updated != nil { notifyChanged() }
+        return updated
+    }
+
+    /// See `onChange`'s doc comment — called after every write that changes what's on disk.
+    func notifyChanged() { onChange?() }
 
     func count() async -> Int {
         ensureOpened()
@@ -146,10 +182,12 @@ final class HistoryService {
         let draft = DictationDraft(text: record.text, rawText: record.rawText, appName: record.appName, style: record.style,
                                    language: record.language, duration: record.duration, createdAt: record.createdAt)
         let log = Self.log
-        return await Task.detached(priority: .userInitiated) {
+        let inserted: DictationRecord? = await Task.detached(priority: .userInitiated) { () -> DictationRecord? in
             do { return try store.insert(draft) }
             catch { log.error("history reinsert failed: \(String(describing: error))"); return nil }
         }.value
+        if inserted != nil { notifyChanged() }
+        return inserted
     }
 
     private func performOpen() async {
@@ -160,9 +198,33 @@ final class HistoryService {
         let url = self.url
         let useKey = settings.encryptHistory
         let makeKeyProvider = keyProvider
+
+        // Step 1: open the database *file* — independent of the history key. Reuses `database` across
+        // a `reopen()` (only the key/cipher choice or retention window changed, never `url`) instead
+        // of reopening the file every time; only a fresh failure to open the file itself clears it.
+        let openedDatabase: VoxFlowDatabase
+        if let database {
+            openedDatabase = database
+        } else {
+            do {
+                openedDatabase = try await Task.detached(priority: .userInitiated) { try VoxFlowDatabase(url: url) }.value
+            } catch {
+                store = nil
+                database = nil
+                storeBox.set(nil)
+                status = .disabled(reason: String(describing: error))
+                Self.log.error("history database unavailable, history and content disabled: \(String(describing: error))")
+                return
+            }
+            database = openedDatabase
+        }
+
+        // Step 2: build the (possibly-encrypted) `DictationStore` on top of it. A failure here —
+        // `.keyLost` included — disables history alone: `database` stays published so `ContentService`
+        // (dictionary/snippets/style overrides, none of them encrypted) keeps working.
         do {
             let newStore = try await Task.detached(priority: .userInitiated) {
-                try DictationStore(databaseURL: url, keyProvider: useKey ? makeKeyProvider() : nil)
+                try DictationStore(database: openedDatabase, keyProvider: useKey ? makeKeyProvider() : nil)
             }.value
             store = newStore
             storeBox.set(newStore)
@@ -178,12 +240,12 @@ final class HistoryService {
             store = nil
             storeBox.set(nil)
             status = .disabled(reason: "history key lost")
-            Self.log.error("history key lost — history disabled")
+            Self.log.error("history key lost — history disabled (content database stays open)")
         } catch {
             store = nil
             storeBox.set(nil)
             status = .disabled(reason: String(describing: error))
-            Self.log.error("history store unavailable, history disabled: \(String(describing: error))")
+            Self.log.error("history store unavailable, history disabled (content database stays open): \(String(describing: error))")
         }
     }
 }

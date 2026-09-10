@@ -86,6 +86,29 @@ struct DictationCoordinatorTests {
         await wait(c) { if case .tapped(_) = $0 { true } else { false } }
     }
 
+    // MARK: startProgrammaticDictation — the MCP `dictate` seam
+
+    @Test("startProgrammaticDictation starts a hands-free capture through the same command queue as a real double-tap")
+    func programmaticDictationStartsHandsFree() async {
+        let (c, mic, _, _, _) = make()
+        c.startProgrammaticDictation()
+        await wait(c) { if case .listening(let l) = $0, l.mode == .handsFree { true } else { false } }
+        await mic.waitUntilCapturing()
+        #expect(c.isHUDActive)
+    }
+
+    @Test("startProgrammaticDictation defers to the microphone-permission prompt exactly like the hotkey — it doesn't bypass fn(_:)'s notDetermined diversion")
+    func programmaticDictationRespectsPendingMicPermission() async {
+        let (c, mic, _, perms, _) = make(permissionsMicrophone: .notDetermined, permissionsRequestResult: .granted)
+        c.startProgrammaticDictation()
+        while perms.requests == 0 { await Task.yield() }
+        // Give the (would-be, wrongly) swallowed up/down their chance to reach the controller.
+        for _ in 0..<50 { await Task.yield() }
+        #expect(c.state == .idle)
+        #expect(mic.startCount == 0)
+        #expect(perms.requests == 1)
+    }
+
     @Test("open settings routes by state: mic denied → Microphone pane; model missing → Settings › Models")
     func openSettings() async {
         let (denied, _, _, perms, _) = make(preflight: Preflight(excludedApp: nil, secureInput: false, microphone: .denied, model: .loaded))

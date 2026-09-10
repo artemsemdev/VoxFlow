@@ -51,13 +51,19 @@ struct FilesPage: View {
         }
         let settings = services.filesSettings
         let modelDisplayName = ModelCatalog.model(id: selected.document.modelID)?.displayName ?? selected.document.modelID
+        // "Apply {Style} cleanup" (design 2f, plan ruling 6) always styles for the *default* tone,
+        // not any per-app override — a file transcript has no "frontmost app" to key an override by.
+        let styling = services.stylingSettings.snapshot
         resultModel = ResultViewModel(
             document: selected.document, format: settings.outputFormat, timestamps: settings.timestamps,
             // No per-job record of "was auto-detect requested" survives onto `QueueItem`/
             // `TranscriptDocument` — this reads the *current* Files setting as the best available
             // proxy for what the job that produced this transcript most likely used.
             autoDetectedLanguage: settings.language == nil, modelDisplayName: modelDisplayName, savedURL: selected.url,
-            exporter: { services.exporter }, pasteboard: SystemPasteboard(), revealer: FinderRevealer())
+            exporter: { services.exporter },
+            cleanupStyle: styling.defaultStyle,
+            cleanupOptions: StylingOptions(style: styling.defaultStyle, removeFillers: styling.removeFillers, autoPunctuate: styling.autoPunctuate),
+            pasteboard: SystemPasteboard(), revealer: FinderRevealer())
     }
 
     private var queueBody: some View {

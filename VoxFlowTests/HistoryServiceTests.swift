@@ -44,6 +44,53 @@ struct HistoryServiceTests {
         #expect(service.status == .ready)
     }
 
+    @Test("database is nil until the first open resolves, then set alongside store")
+    func databaseExposedAfterOpen() async throws {
+        let dir = TemporaryDirectory()
+        let settings = DictationSettings(store: InMemoryKeyValueStore())
+        let service = makeService(dir: dir, settings: settings)
+        #expect(service.database == nil)
+        _ = await service.count()                                     // force the open to finish
+        #expect(service.database != nil)
+        #expect(service.status == .ready)
+    }
+
+    @Test("a key-lost open failure disables history but keeps the database open (dictionary/snippets/styles aren't encrypted)")
+    func databaseStaysOpenWhenKeyLost() async throws {
+        let dir = TemporaryDirectory()
+        let url = dir.file("voxflow.sqlite")
+        let sharedKey = SymmetricKey(size: .bits256)
+        _ = try DictationStore(databaseURL: url, keyProvider: FakeHistoryKeyProvider(key: sharedKey)).insert(draft("secret", at: Date()))
+
+        let settings = DictationSettings(store: InMemoryKeyValueStore())
+        let service = HistoryService(url: url, settings: settings,
+                                     keyProvider: { FakeHistoryKeyProvider(key: SymmetricKey(size: .bits256), isNew: true) }, clock: FakeClock())
+        _ = await service.count()
+
+        #expect(service.status == .disabled(reason: "history key lost"))
+        #expect(service.store == nil)
+        #expect(service.database != nil)
+    }
+
+    @Test("a database file that can never be opened leaves both store and database nil")
+    func databaseNilWhenFileUnopenable() async throws {
+        // A path inside a location that doesn't exist and can't be created (a file, not a directory,
+        // sits where a parent directory is needed) — `VoxFlowDatabase.init(url:)`'s own
+        // `createDirectory` fails, so the database never opens at all.
+        let dir = TemporaryDirectory()
+        let blocker = dir.file("blocker")
+        try Data().write(to: blocker)
+        let url = blocker.appendingPathComponent("nested").appendingPathComponent("voxflow.sqlite")
+
+        let settings = DictationSettings(store: InMemoryKeyValueStore())
+        let service = HistoryService(url: url, settings: settings, keyProvider: { FakeHistoryKeyProvider() }, clock: FakeClock())
+        _ = await service.count()
+
+        #expect(service.store == nil)
+        #expect(service.database == nil)
+        if case .disabled = service.status {} else { Issue.record("expected .disabled, got \(service.status)") }
+    }
+
     @Test("reopening with encryption off flags previously-encrypted rows as unreadable")
     func reopenWithoutEncryption() async throws {
         let dir = TemporaryDirectory()
@@ -91,6 +138,32 @@ struct HistoryServiceTests {
         #expect(restored?.text == "undo me")
         #expect(restored?.createdAt == original.createdAt)
         #expect(await service.count() == 1)
+    }
+
+    @Test("updateStyled replaces text/style and notifies change; an unknown id returns nil without notifying")
+    func updateStyledReplacesTextAndNotifies() async throws {
+        let dir = TemporaryDirectory()
+        let settings = DictationSettings(store: InMemoryKeyValueStore())
+        let service = makeService(dir: dir, settings: settings)
+        _ = await service.count()
+        let original = try #require(service.store).insert(draft("um restyle me", at: Date(timeIntervalSince1970: 700)))
+
+        var changeCount = 0
+        service.onChange = { changeCount += 1 }
+
+        let updated = await service.updateStyled(id: original.id, text: "Restyle me.", style: "formal")
+        #expect(updated?.text == "Restyle me.")
+        #expect(updated?.style == "formal")
+        #expect(updated?.rawText == original.rawText)
+        #expect(changeCount == 1)
+
+        let rows = await service.fetch(limit: 10)
+        #expect(rows.first?.text == "Restyle me.")
+        #expect(rows.first?.style == "formal")
+
+        let missing = await service.updateStyled(id: 999_999, text: "nope", style: "casual")
+        #expect(missing == nil)
+        #expect(changeCount == 1)   // no spurious notification for a no-op update
     }
 
     @Test("two overlapping reopen() calls: the last one's config wins, and the earlier reopen's runner is not leaked")

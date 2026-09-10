@@ -25,7 +25,7 @@ public struct Preflight: Sendable, Equatable {
     }
 }
 
-public enum FlowBarTimer: Sendable, Hashable { case hold, doubleTap, silence, cap, takingLonger, processingTimeout, dismiss, modelLoad }
+public enum FlowBarTimer: Sendable, Hashable { case hold, doubleTap, silence, cap, takingLonger, processingTimeout, dismiss, modelLoad, pauseEnd }
 
 public enum FlowBarEvent: Sendable, Equatable {
     case fnDown(Preflight), fnUp, escape, anyKey
@@ -39,6 +39,9 @@ public enum FlowBarEvent: Sendable, Equatable {
     case microphoneFailed(MicrophoneError)
     case insertionFinished(InsertionResult)
     case copyRawRequested
+    /// FB-09: "Pause dictation for 1 hour" from the menu bar or the Flow Bar pill.
+    case pause(seconds: TimeInterval)
+    case resume
 }
 
 public enum FlowBarEffect: Sendable, Equatable {
@@ -103,6 +106,10 @@ public enum FlowBarState: Sendable, Equatable {
     case modelNotInstalled(sizeBytes: Int64)
     case excluded(app: String)
     case error(String)
+    /// FB-09: dictation paused (menu bar / Flow Bar pill) until this monotonic time. Reachable from
+    /// `.idle` or any dismissable state; not itself dismissable — fn-down while paused is ignored
+    /// rather than treated as a retry (only `.resume` or the `.pauseEnd` timer clears it).
+    case paused(until: TimeInterval)
 
     public var isProcessing: Bool { if case .processing = self { true } else { false } }
 
@@ -147,6 +154,20 @@ public struct FlowBarMachine: Sendable, Equatable {
             state = .idle
             return [.cancelTimer(.dismiss)]
         case (let s, .timer(.dismiss)) where s.isDismissable:
+            state = .idle
+            return []
+
+        // ── FB-09 pause: from idle or any dismissable state; ignored mid-dictation ──
+        case (.idle, .pause(let seconds)):
+            state = .paused(until: now + seconds)
+            return [.startTimer(.pauseEnd, seconds: seconds)]
+        case (let s, .pause(let seconds)) where s.isDismissable:
+            state = .paused(until: now + seconds)
+            return [.cancelTimer(.dismiss), .startTimer(.pauseEnd, seconds: seconds)]
+        case (.paused, .resume):
+            state = .idle
+            return [.cancelTimer(.pauseEnd)]
+        case (.paused, .timer(.pauseEnd)):
             state = .idle
             return []
 

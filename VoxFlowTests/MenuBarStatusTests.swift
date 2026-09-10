@@ -14,6 +14,7 @@ struct MenuBarStatusTests {
         #expect(MenuBarStatus.text(for: processing) == "Cleaning up…")
         let inserted = FlowBarState.inserted(appName: "Mail", words: 3, limitReached: false)
         #expect(MenuBarStatus.text(for: inserted) == "Ready · on-device")
+        #expect(MenuBarStatus.text(for: .paused(until: 3600)) == "Paused")
     }
 
     @Test("hotkey line follows the hotkey mode")
@@ -31,5 +32,6 @@ struct MenuBarStatusTests {
         #expect(MenuBarStatus.dotColor(for: processing) == Palette.amber)
         let inserted = FlowBarState.inserted(appName: "Mail", words: 3, limitReached: false)
         #expect(MenuBarStatus.dotColor(for: inserted) == Palette.onDevice)
+        #expect(MenuBarStatus.dotColor(for: .paused(until: 3600)) == Palette.amber)
     }
 }

@@ -1,6 +1,56 @@
 import AppKit
 import SwiftUI
 
+/// Settings › General "Flow Bar position" (design ST-01, ruling 4) — where `FlowBarPanel` anchors
+/// the pill on the active display. `bottomCenter` matches design 1a and is the default.
+enum FlowBarPosition: String, CaseIterable, Identifiable, Sendable {
+    case bottomCenter, topCenter, bottomLeft, bottomRight
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .bottomCenter: "Bottom center"
+        case .topCenter: "Top center"
+        case .bottomLeft: "Bottom left"
+        case .bottomRight: "Bottom right"
+        }
+    }
+}
+
+/// Pure geometry behind `FlowBarPanel.present(on:)` — pulled out so `GeneralFlowBarPositionTests`
+/// can check every position's origin without a real `NSScreen`. `leftEdgeX`, when non-nil, is the
+/// x-anchor already established for the pill's current appearance (design 2a: "grows right, left
+/// edge fixed") and is echoed straight back, exactly as `present(on:)` did before this existed.
+enum FlowBarPositionMath {
+    static func origin(size: CGSize, visibleFrame: CGRect, position: FlowBarPosition, leftEdgeX: CGFloat?) -> CGPoint {
+        let x: CGFloat
+        switch position {
+        case .bottomCenter, .topCenter:
+            x = leftEdgeX ?? (visibleFrame.midX - size.width / 2)
+        case .bottomLeft:
+            x = leftEdgeX ?? (visibleFrame.minX + 24)
+        case .bottomRight:
+            x = leftEdgeX ?? (visibleFrame.maxX - size.width - 24)
+        }
+        let y: CGFloat
+        switch position {
+        case .bottomCenter, .bottomLeft, .bottomRight:
+            y = visibleFrame.minY + 24
+        case .topCenter:
+            y = visibleFrame.maxY - size.height - 24
+        }
+        return CGPoint(x: x, y: y)
+    }
+}
+
+/// What applies a `FlowBarPosition` — `FlowBarPanel` in production (directly), `FlowBarPresenter`
+/// by forwarding to its panel (see `FlowBarPresenter.swift`), a fake in `GeneralViewModelTests`.
+@MainActor
+protocol FlowBarPositioning: AnyObject {
+    func apply(_ position: FlowBarPosition)
+}
+
 /// The floating, non-activating panel that hosts `FlowBarView` (design 1a: "Floating pill,
 /// bottom-center of the active display"). Sits above full-screen apps and Stage Manager, on every
 /// Space, and never steals key focus or activates VoxFlow.
@@ -13,8 +63,10 @@ import SwiftUI
 /// `NSView.frameDidChangeNotification` observer, which depends on Auto Layout constraints this
 /// borderless panel never installs and so may not fire reliably.
 @MainActor
-final class FlowBarPanel: NSPanel, FlowBarPanelling, NSWindowDelegate {
+final class FlowBarPanel: NSPanel, FlowBarPanelling, FlowBarPositioning, NSWindowDelegate {
     private let hostingController: NSHostingController<FlowBarView>
+    /// Set by `apply(_:)` (Settings › General) — read by `present(on:)` via `FlowBarPositionMath`.
+    private var position: FlowBarPosition = .bottomCenter
     /// The x-origin established the last time the pill was (re)shown or moved to a new screen — held
     /// fixed across content growth so the pill grows to the *right*, left edge pinned (design 2a
     /// "ширина растёт вправо, левый край фиксирован"). Cleared on `show()` (each fresh appearance
@@ -83,16 +135,27 @@ final class FlowBarPanel: NSPanel, FlowBarPanelling, NSWindowDelegate {
         present(on: screen)
     }
 
-    /// Bottom-center of `screen`'s visible frame on first presentation (`leftEdgeX == nil`, design
-    /// 1a: `midX - width/2`, `minY + 24`); afterwards keeps the established left edge fixed as the
-    /// pill's width changes, so it only grows right (design 2a).
+    /// Anchored per `position` (design 1a default: bottom-center, `midX - width/2`, `minY + 24`) on
+    /// first presentation (`leftEdgeX == nil`); afterwards keeps the established left edge fixed as
+    /// the pill's width changes, so it only grows right (design 2a). Geometry itself lives in
+    /// `FlowBarPositionMath`, which is what's actually unit-tested.
     func present(on screen: NSScreen) {
         let size = frame.size
-        let x = leftEdgeX ?? (screen.visibleFrame.midX - size.width / 2)
-        leftEdgeX = x
-        let origin = NSPoint(x: x, y: screen.visibleFrame.minY + 24)
+        let origin = FlowBarPositionMath.origin(size: size, visibleFrame: screen.visibleFrame, position: position, leftEdgeX: leftEdgeX)
+        leftEdgeX = origin.x
         guard origin != frame.origin else { return }
         setFrame(NSRect(origin: origin, size: size), display: super.isVisible)
+    }
+
+    // MARK: - FlowBarPositioning
+
+    /// Settings › General "Flow Bar position" — re-anchors immediately (same as a screen change)
+    /// so a change while the pill is visible takes effect right away, not just on the next show.
+    func apply(_ position: FlowBarPosition) {
+        guard self.position != position else { return }
+        self.position = position
+        leftEdgeX = nil
+        reflow()
     }
 
     // MARK: - FlowBarPanelling

@@ -25,20 +25,54 @@ any app, style cleanup with a local LLM and an MCP server follow in 2.x (see the
 - Everything on this Mac: audio is processed in memory and discarded; the only network action is a
   model download you start. No account, no analytics.
 
-### Dictation (`develop`, in progress toward 2.1.0)
+### Dictation (`develop`, in progress toward 2.2.0)
 
 - Hold fn anywhere to dictate (double-tap for hands-free); a floating Flow Bar HUD shows listening,
   processing and the result. Recognized text is inserted into the focused field via Accessibility,
   or copied to the clipboard when there isn't a text field; finished dictations save to encrypted
   history unless the Privacy toggle turns that off.
-- Needs Microphone and Accessibility permission. First launch walks a five-step onboarding window
-  (welcome, permissions, hotkey mode, model, try it) with buttons to grant each permission and a
-  scratchpad to try dictation before the main window opens; SETUP.md explains how to reset it.
+- Needs Microphone and Accessibility permission, and Contacts (optional — only prompted if you turn
+  on "Learn names from Contacts" on the Dictionary page). First launch walks a five-step onboarding
+  window (welcome, permissions, hotkey mode, model, try it) with buttons to grant each permission
+  and a scratchpad to try dictation before the main window opens; SETUP.md explains how to reset it.
 - VoxFlow's own window is frontmost at launch, so click into the text field you want to dictate
   into (e.g. TextEdit) before the first fn press, or the dictation lands on the clipboard instead.
 - History page: search past dictations, expand a row for the full transcript, Copy, Delete with
-  Undo. Settings › Hotkeys (mode + shortcuts), Audio (input device, silence-stop, hands-free) and
-  Privacy (encrypt-at-rest toggle, retention) are built; General and MCP tabs follow in 2.2.
+  Undo; the expanded row shows the resolved style. Settings › Hotkeys (mode + shortcuts), Audio
+  (input device, silence-stop, hands-free) and Privacy (encrypt-at-rest toggle, retention) are
+  built.
+- Home page: today's words/dictations/speaking pace/time saved, a 7-day word chart with a streak,
+  your last 4 dictations, and (before your first dictation) a Setup card that tracks permissions,
+  the speech model and your hotkey live. Settings › General: launch at login, show in menu bar,
+  start/end sounds, appearance (Light/Dark/System), Flow Bar position, dictation language.
+- Settings › MCP Server: a loopback-only MCP server (`127.0.0.1`, tokened) that Cursor or Claude
+  Desktop (via `mcp-remote`) can connect to and use as a tool — `transcribe_file`, `dictate` and
+  `search_history` (off by default). A floating approval dialog gates every new client by name and
+  process, Connected clients lists who's approved with Revoke, and a path policy keeps
+  `transcribe_file` to files inside your home directory that you'd already open yourself. See
+  [docs/runbooks/connect-an-mcp-client.md](docs/runbooks/connect-an-mcp-client.md) and
+  [ADR-008](docs/adr/008-loopback-mcp-server.md).
+- Menu bar: click the status item for today's stats, a hands-free toggle, quick actions (History,
+  Settings, the language picker) and "Pause dictation for 1 hour" — fn does nothing while paused,
+  and the menu bar header reads "Paused until 10:41" until you resume. A model finishing a download
+  or a file finishing transcription while the window is in the background sends a notification
+  (never for an error) that takes you straight to Models or the result when you click it. See
+  [ADR-006](docs/adr/006-menu-bar-and-notifications.md).
+- Dictionary page: add names, terms, products and places with an optional phonetic hint; recognised
+  words feed the speech engine directly, and "Learn names from Contacts" imports names locally.
+- Snippets page: define a trigger (e.g. `/sig`) and a body with `cursor`/`date`/`clipboard`/`app`
+  placeholders; say or type the trigger in any app to expand it.
+- Styles page: pick a rewrite tone (Formal, Casual, Very casual, Verbatim) and per-app overrides;
+  rule-based styling (fillers removed, punctuation and capitalization added) runs on every
+  dictation before it's inserted — see [ADR-005](docs/adr/005-rule-based-styling-pipeline.md).
+- On-device style cleanup: an optional local LLM (Qwen2.5 3B Instruct via llama.cpp, Settings ›
+  Models) rewrites the tone step for Formal/Casual/Very casual on top of the same rule pass, with
+  automatic fallback to rule-based styling whenever the model is absent, still loading, too slow
+  or produces a bad answer — dictation never waits on it and never loses a result. "Re-style ▾" on
+  a History row rewrites a past dictation into another tone without re-recording and copies the
+  result; Files' result view can "Apply {Style} cleanup" to instantly rewrite every segment of a
+  finished transcript (rule-based only, no re-processing) — see
+  [ADR-007](docs/adr/007-llm-styling-on-llama-cpp.md).
 
 ## Roadmap
 

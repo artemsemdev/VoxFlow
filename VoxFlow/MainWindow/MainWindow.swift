@@ -11,10 +11,13 @@ struct MainWindow: View {
                 .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 260)
         } detail: {
             switch navigation.page {
+            case .home: HomePage()
             case .files: FilesPage()
             case .history: HistoryPage()
+            case .dictionary: DictionaryPage()
+            case .snippets: SnippetsPage()
+            case .styles: StylesPage()
             case .settings: SettingsPage()
-            default: PlaceholderPageView(page: navigation.page)
             }
         }
         .frame(minWidth: 900, minHeight: 600)

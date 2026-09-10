@@ -18,12 +18,17 @@ public final class FakeClock: MonotonicClock, Sendable {
         let id = UUID()
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
-                let waiters: [CheckedContinuation<Void, Never>] = state.withLock { s in
+                // Cancellation that lands between `checkCancellation` above and this registration has
+                // already run `onCancel` (which found no sleeper). Re-check under the same lock the
+                // handler uses, so a sleeper is never parked that nothing will ever resume.
+                let waiters: [CheckedContinuation<Void, Never>]? = state.withLock { s in
+                    guard !Task.isCancelled else { return nil }
                     s.sleepers.append(Sleeper(id: id, deadline: s.now + seconds, continuation: continuation))
                     let ready = s.waiters.filter { $0.count <= s.sleepers.count }
                     s.waiters.removeAll { $0.count <= s.sleepers.count }
                     return ready.map(\.continuation)
                 }
+                guard let waiters else { continuation.resume(throwing: CancellationError()); return }
                 waiters.forEach { $0.resume() }
             }
         } onCancel: {

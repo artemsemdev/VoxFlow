@@ -42,6 +42,12 @@ targets:
         product: VoxFlowDictation
       - package: VoxFlowKit
         product: VoxFlowStorage
+      - package: VoxFlowKit
+        product: VoxFlowStyling
+      - package: VoxFlowKit
+        product: VoxFlowLLM
+      - package: VoxFlowKit
+        product: VoxFlowMCP
     info:
       path: VoxFlow/Info.plist
       properties:
@@ -51,6 +57,7 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSMicrophoneUsageDescription: "VoxFlow listens only while you hold fn. Audio never leaves this Mac."
+        NSContactsUsageDescription: "VoxFlow reads first and last names from Contacts so it spells them right. Nothing is uploaded."
         CFBundleDocumentTypes:
           - CFBundleTypeName: Audio or video
             LSItemContentTypes:
@@ -87,6 +94,12 @@ targets:
       - package: VoxFlowKit
         product: VoxFlowStorage
       - package: VoxFlowKit
+        product: VoxFlowStyling
+      - package: VoxFlowKit
+        product: VoxFlowLLM
+      - package: VoxFlowKit
+        product: VoxFlowMCP
+      - package: VoxFlowKit
         product: VoxFlowTestSupport
     settings:
       base:
@@ -111,4 +124,5 @@ schemes:
         - package: VoxFlowKit/VoxFlowDictationTests
         - package: VoxFlowKit/VoxFlowStorageTests
         - package: VoxFlowKit/VoxFlowStylingTests
+        - package: VoxFlowKit/VoxFlowLLMTests
         - package: VoxFlowKit/VoxFlowMCPTests
