@@ -9,6 +9,7 @@ final class FakeMCPServer: MCPServerControlling, MCPClientStoreProviding {
     private(set) var boundPort: UInt16?
     private(set) var startCount = 0
     private(set) var stopCount = 0
+    private(set) var clearSessionDecisionsCount = 0
     /// Set to make the next (and every subsequent) `start()` throw — `MCPViewModelTests` exercises
     /// `MCPServerError.noFreePort` specifically, matching what the real `LoopbackListener` throws.
     var startError: (any Error)?
@@ -30,6 +31,8 @@ final class FakeMCPServer: MCPServerControlling, MCPClientStoreProviding {
         stopCount += 1
         boundPort = nil
     }
+
+    func clearSessionDecisions() async { clearSessionDecisionsCount += 1 }
 
     func resolvedClientStore() async -> MCPClientStore { store }
 }

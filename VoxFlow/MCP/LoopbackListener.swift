@@ -7,7 +7,7 @@ import VoxFlowMCP
 /// implementation (Task 4) composes `MCPHTTPPolicy` + `MCPRouter` + the tool implementations; this
 /// task only defines the seam.
 protocol MCPRequestHandling: Sendable {
-    func handle(_ request: MCPHTTPRequest, peer: MCPClientIdentity) async -> (status: Int, body: Data?)
+    func handle(_ request: MCPHTTPRequest, peer: MCPPeer) async -> (status: Int, body: Data?)
 }
 
 /// Transport-level failures — distinct from `MCPError` (the JSON-RPC/HTTP-policy error table),
@@ -62,6 +62,10 @@ actor LoopbackListener {
     private var generation = 0
 
     private(set) var boundPort: UInt16?
+
+    /// How long a candidate listener gets to report `.ready` or `.failed` before it is written off
+    /// (final review F6).
+    private static let readinessTimeout: TimeInterval = 5
 
     init(portRange: ClosedRange<UInt16> = 7331...7340, resolver: any PeerResolving, handler: any MCPRequestHandling) {
         self.portRange = portRange
@@ -135,6 +139,24 @@ actor LoopbackListener {
     private static func waitUntilReady(_ candidate: NWListener) async -> Bool {
         await withCheckedContinuation { continuation in
             let resumed = Mutex(false)
+            /// Final review F6: `.ready`/`.failed` are not the only outcomes. A listener parked in
+            /// `.waiting` used to suspend `start()` forever — and because the attempt stays
+            /// registered, every later `start()` joined the same stuck attempt, so the server could
+            /// never be switched on again for the rest of the session. Treat "neither answer within
+            /// the deadline" as a failed candidate and move on.
+            // Not cancelled when a state arrives: `DispatchWorkItem` isn't `Sendable`, so it can't be
+            // captured by the `@Sendable` state handler below. `resumed` already makes whichever of
+            // {state, deadline} lands second a no-op, so a stale firing costs one empty closure.
+            let deadline = DispatchWorkItem {
+                let shouldResume = resumed.withLock { alreadyResumed -> Bool in
+                    guard !alreadyResumed else { return false }
+                    alreadyResumed = true
+                    return true
+                }
+                guard shouldResume else { return }
+                continuation.resume(returning: false)
+            }
+            mcpTransportQueue.asyncAfter(deadline: .now() + Self.readinessTimeout, execute: deadline)
             candidate.stateUpdateHandler = { state in
                 let outcome: Bool? = resumed.withLock { alreadyResumed in
                     guard !alreadyResumed else { return nil }
@@ -189,19 +211,24 @@ actor LoopbackListener {
             return
         }
 
-        // Empty name signals "resolution failed entirely" to the caller (per the resolutions
-        // note, substituting display copy like "Unknown app" is Task 3's job, not the transport's).
-        let identity: MCPClientIdentity
-        if let peerPort = remotePort(of: connection),
-           let resolved = resolver.resolveProcess(peerPort: peerPort, serverPort: boundPort) {
-            identity = MCPClientIdentity(name: resolved.name, path: resolved.path, pid: resolved.pid)
-        } else {
-            identity = MCPClientIdentity(name: "", path: "", pid: nil)
+        // Final review F1: resolution is *deferred*, not done here. Walking every process's file
+        // descriptors costs ~5 ms and ~14,000 syscalls, and doing it on accept meant any local
+        // process could spend the listener's queue with a `connect()` loop before a single token
+        // was checked. `MCPPeer` resolves once, on demand, from inside the authenticated path.
+        // An empty name still signals "resolution failed entirely"; substituting display copy like
+        // "Unknown app" belongs to the runner, not the transport.
+        let peerPort = remotePort(of: connection)
+        let resolver = resolver
+        let peer = MCPPeer { @Sendable in
+            guard let peerPort, let resolved = resolver.resolveProcess(peerPort: peerPort, serverPort: boundPort) else {
+                return MCPClientIdentity(name: "", path: "", pid: nil)
+            }
+            return MCPClientIdentity(name: resolved.name, path: resolved.path, pid: resolved.pid)
         }
 
         let id = UUID()
         let connectionHandler = ConnectionHandler(
-            connection: connection, queue: mcpTransportQueue, identity: identity, handler: handler,
+            connection: connection, queue: mcpTransportQueue, peer: peer, handler: handler,
             onFinish: { [weak self] in Task { await self?.remove(id) } }
         )
         connections[id] = connectionHandler
@@ -240,8 +267,13 @@ actor LoopbackListener {
 /// `finish()` so `onFinish` (which lets `LoopbackListener` drop this connection from its registry)
 /// fires exactly once no matter which path ends the connection.
 final class ConnectionHandler: Sendable {
-    /// Task 2 review, I2: no bytes at all for this long closes the connection.
-    private static let idleTimeout: TimeInterval = 30
+    /// How long an accepted connection may take to deliver a complete request. Final review F2:
+    /// this used to be refreshed on every chunk, so a peer dripping one byte at a time held its
+    /// slot forever — and with the connection cap at 16, sixteen such peers locked every real
+    /// client out, all before any token was checked. It is now an **absolute** deadline armed once
+    /// when the connection becomes ready and disarmed only when a request has been framed; the
+    /// 20-minute watchdog below takes over from there.
+    private static let framingDeadline: TimeInterval = 30
     /// Task 3 review / plan amendment (aefea6e): **not** a per-tool timeout — the transport doesn't
     /// know which tool a request names, and shouldn't learn. Each tool owns its own budget
     /// (`dictate` runs up to ~920 s; `transcribe_file` on a long recording takes minutes), so 30 s
@@ -252,7 +284,7 @@ final class ConnectionHandler: Sendable {
 
     private let connection: NWConnection
     private let queue: DispatchQueue
-    private let identity: MCPClientIdentity
+    private let peer: MCPPeer
     private let handler: any MCPRequestHandling
     private let onFinish: @Sendable () -> Void
 
@@ -264,10 +296,10 @@ final class ConnectionHandler: Sendable {
     private let idleWork = Mutex<DispatchWorkItem?>(nil)
     private let finished = Mutex(false)
 
-    init(connection: NWConnection, queue: DispatchQueue, identity: MCPClientIdentity, handler: any MCPRequestHandling, onFinish: @escaping @Sendable () -> Void) {
+    init(connection: NWConnection, queue: DispatchQueue, peer: MCPPeer, handler: any MCPRequestHandling, onFinish: @escaping @Sendable () -> Void) {
         self.connection = connection
         self.queue = queue
-        self.identity = identity
+        self.peer = peer
         self.handler = handler
         self.onFinish = onFinish
     }
@@ -282,7 +314,7 @@ final class ConnectionHandler: Sendable {
         connection.stateUpdateHandler = { [self] state in
             switch state {
             case .ready:
-                resetIdleTimer()
+                armFramingDeadline()
                 receive()
             case .failed, .waiting:
                 // Task 2 review, I2: unhandled before, these connections leaked — held alive by the
@@ -301,9 +333,6 @@ final class ConnectionHandler: Sendable {
 
     private func receive() {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [self] chunk, _, isComplete, error in
-            if let chunk, !chunk.isEmpty {
-                resetIdleTimer()
-            }
             let step = framing.withLock { $0.advance(appending: chunk ?? Data()) }
 
             switch step {
@@ -330,11 +359,11 @@ final class ConnectionHandler: Sendable {
     /// second a no-op, so a slow handler that eventually does return can never send a response onto
     /// a connection this already closed.
     private func respond(to request: MCPHTTPRequest) {
-        // Re-review finding 4: the idle deadline exists to close a connection that stops *sending*
-        // before a request is framed. The request is framed now, so it must be disarmed here —
-        // otherwise it fires 30 s after the last byte and cancels the connection out from under a
-        // tool that is legitimately still working (`dictate` runs up to ~920 s), which made the
-        // 20-minute watchdog below unreachable and returned nothing to the client.
+        // Re-review finding 4: the framing deadline exists to close a connection that never
+        // delivers a whole request. One is framed now, so it must be disarmed here — otherwise it
+        // fires and cancels the connection out from under a tool that is legitimately still working
+        // (`dictate` runs up to ~920 s), which made the 20-minute watchdog below unreachable and
+        // returned nothing to the client.
         idleWork.withLock { $0?.cancel(); $0 = nil }
         let responded = Mutex(false)
 
@@ -350,7 +379,7 @@ final class ConnectionHandler: Sendable {
         queue.asyncAfter(deadline: .now() + Self.connectionWatchdog, execute: timeoutWork)
 
         Task {
-            let (status, body) = await handler.handle(request, peer: identity)
+            let (status, body) = await handler.handle(request, peer: peer)
             let shouldSend = responded.withLock { done -> Bool in
                 guard !done else { return false }
                 done = true
@@ -373,7 +402,7 @@ final class ConnectionHandler: Sendable {
         })
     }
 
-    /// Cancels `idleWork` and detaches `stateUpdateHandler`, so `finish()` (reached only via
+    /// Cancels the framing deadline and detaches `stateUpdateHandler`, so `finish()` (reached only via
     /// `.cancelled`) never fires twice, and calls `onFinish` exactly once. Clearing
     /// `stateUpdateHandler` here matters beyond tidiness: it holds a `[self]` capture (the spike's
     /// recipe — required so a recursive `receive()` compiles, see the type doc), which together
@@ -398,12 +427,13 @@ final class ConnectionHandler: Sendable {
     /// (as `queue.asyncAfter` below would have been) still carries a live reference in this
     /// function's region, which the compiler rejects as not fully "sent". Building and scheduling
     /// it in one place sidesteps that — nothing about `work` survives past the closure.
-    private func resetIdleTimer() {
+    /// Armed once, when the connection becomes ready — never refreshed (final review F2).
+    private func armFramingDeadline() {
         idleWork.withLock { previous in
             previous?.cancel()
             let work = DispatchWorkItem { [connection] in connection.cancel() }
             previous = work
-            queue.asyncAfter(deadline: .now() + Self.idleTimeout, execute: work)
+            queue.asyncAfter(deadline: .now() + Self.framingDeadline, execute: work)
         }
     }
 }

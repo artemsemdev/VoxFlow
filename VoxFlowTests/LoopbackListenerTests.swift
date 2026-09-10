@@ -20,7 +20,7 @@ private struct FakePeerResolver: PeerResolving {
 }
 
 private struct FakeRequestHandler: MCPRequestHandling {
-    func handle(_ request: MCPHTTPRequest, peer: MCPClientIdentity) async -> (status: Int, body: Data?) { (200, nil) }
+    func handle(_ request: MCPHTTPRequest, peer: MCPPeer) async -> (status: Int, body: Data?) { (200, nil) }
 }
 
 /// Task 2 review, I1: `NWListener(using:on:)` does not throw on a busy port — the bind failure

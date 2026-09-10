@@ -48,7 +48,7 @@ struct MCPRenderTests {
         let approvalContent = MCPApprovalContentView(
             title: MCPApprovalCopy.title(name: "Cursor"),
             message: MCPApprovalCopy.body(tools: ["transcribe_file", "dictate"]),
-            processLine: MCPApprovalCopy.processLine(name: "Cursor", pid: 4812),
+            processLine: MCPApprovalCopy.processLine(name: "Cursor", pid: 4812, path: "/Applications/Cursor.app/Contents/MacOS/Cursor"),
             buttons: MCPApprovalButtons.offered(canPersist: true),
             onDecision: { _ in })
         try Self.render(approvalContent.frame(width: 340), name: "approval", to: directory)

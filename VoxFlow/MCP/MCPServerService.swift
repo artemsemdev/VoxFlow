@@ -14,6 +14,9 @@ protocol MCPServerControlling: AnyObject {
     var boundPort: UInt16? { get }
     func start() async throws
     func stop() async
+    /// Forgets every session-scoped approval and denial (final review F3) — called when the access
+    /// token is regenerated, so an "Allow once" client cannot slip back in without a new dialog.
+    func clearSessionDecisions() async
 }
 
 /// What `MCPViewModel` reads "Connected clients" through instead of a concrete `MCPClientStore` —
@@ -132,6 +135,13 @@ final class MCPServerService: MCPServerControlling, MCPClientStoreProviding {
         let store = MCPClientStore(database: database)
         clientStore = store
         return store
+    }
+
+    /// Only touches a runner that already exists: if none has been built yet there are no session
+    /// decisions to forget, and building one here just to clear it would open the database for
+    /// nothing.
+    func clearSessionDecisions() async {
+        runner?.clearSessionDecisions()
     }
 
     private func resolvedRunner() async -> MCPToolRunner {

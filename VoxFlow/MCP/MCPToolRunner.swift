@@ -101,7 +101,7 @@ final class MCPToolRunner: MCPRequestHandling, Sendable {
         return tools
     }
 
-    func handle(_ request: MCPHTTPRequest, peer: MCPClientIdentity) async -> (status: Int, body: Data?) {
+    func handle(_ request: MCPHTTPRequest, peer: MCPPeer) async -> (status: Int, body: Data?) {
         switch httpPolicy.verdict(for: request, token: settings.token, boundPort: boundPort) {
         case .status(let code, let error):
             return (code, error.flatMap { Self.encode(JSONRPCResponse(id: nil, error: $0)) })
@@ -123,11 +123,26 @@ final class MCPToolRunner: MCPRequestHandling, Sendable {
         }
     }
 
-    private func handleToolCall(_ toolID: MCPToolID, arguments: JSONValue, id: JSONRPCID?, peer: MCPClientIdentity) async -> (status: Int, body: Data?) {
+    /// Final review F3: regenerating the token is the user saying "disconnect everyone". Persistent
+    /// approvals are deleted from `mcp_clients`, but session-scoped grants ("Allow once") and
+    /// session denials live only here, so without this a client that had been allowed once was
+    /// silently re-admitted with no dialog — contradicting ruling 4, the ST-06r copy and the
+    /// runbook. Clearing denials too is deliberate: the next call asks again, which is the safe
+    /// direction and matches "everything about this session is reset".
+    func clearSessionDecisions() {
+        sessionAllowed.removeAll()
+        deniedThisSession.removeAll()
+    }
+
+    private func handleToolCall(_ toolID: MCPToolID, arguments: JSONValue, id: JSONRPCID?, peer: MCPPeer) async -> (status: Int, body: Data?) {
         // The transport hands an empty `name` when peer resolution fails entirely — this is the one
         // place that substitutes the display copy (Task 2's resolution note); everything downstream
         // (the registry key, the approval dialog, the `mcp_clients` row) sees "Unknown app".
-        let identity = peer.name.isEmpty ? MCPClientIdentity(name: "Unknown app", path: peer.path, pid: peer.pid) : peer
+        // Final review F1: this is the first and only place the peer is actually resolved — the
+        // request's token has already been checked by the policy above, so the ~5 ms process walk
+        // is now something only an authenticated caller can trigger.
+        let resolved = peer.identity()
+        let identity = resolved.name.isEmpty ? MCPClientIdentity(name: "Unknown app", path: resolved.path, pid: resolved.pid) : resolved
         let toolNames = MCPToolID.allCases.filter { enabledTools.contains($0) }.map(\.name)
         guard await authorize(identity, toolNames: toolNames) else {
             return (MCPError.unauthorized.httpStatus, Self.encode(JSONRPCResponse(id: id, error: MCPError.unauthorized.jsonRPCError())))

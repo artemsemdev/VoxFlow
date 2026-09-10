@@ -162,7 +162,7 @@ struct MCPToolRunnerTests {
                                                 pathPolicy: policy, clock: FakeClock())
 
         let request = toolCallRequest(name: "transcribe_file", arguments: .object(["path": .string(audioURL.path)]), token: settings.token)
-        let (status, body) = await runner.handle(request, peer: identity)
+        let (status, body) = await runner.handle(request, peer: MCPPeer(identity))
         #expect(status == 200)
         let response = try decode(body)
         #expect(text(from: response.result)?.contains("hello there") == true)
@@ -186,7 +186,7 @@ struct MCPToolRunnerTests {
 
         let request = toolCallRequest(name: "transcribe_file", arguments: .object(["path": .string(audioURL.path), "format": .string("srt")]),
                                       token: settings.token)
-        let (status, body) = await runner.handle(request, peer: identity)
+        let (status, body) = await runner.handle(request, peer: MCPPeer(identity))
         #expect(status == 200)
         let response = try decode(body)
         #expect(text(from: response.result)?.contains(" --> ") == true)
@@ -200,7 +200,7 @@ struct MCPToolRunnerTests {
         let (runner, settings) = try makeRunner(coordinator: coordinator, controller: controller, pathPolicy: policy, clock: FakeClock())
 
         let request = toolCallRequest(name: "transcribe_file", arguments: .object(["path": .string("/etc/passwd")]), token: settings.token)
-        let (status, body) = await runner.handle(request, peer: identity)
+        let (status, body) = await runner.handle(request, peer: MCPPeer(identity))
         let response = try decode(body)
         #expect(status == 200)
         #expect(response.error?.code == -32602)
@@ -222,7 +222,7 @@ struct MCPToolRunnerTests {
                                                 pathPolicy: policy, clock: FakeClock())
 
         let request = toolCallRequest(name: "transcribe_file", arguments: .object(["path": .string(audioURL.path)]), token: settings.token)
-        let (status, body) = await runner.handle(request, peer: identity)
+        let (status, body) = await runner.handle(request, peer: MCPPeer(identity))
         let response = try decode(body)
         #expect(status == 200)
         #expect(response.error?.code == -32603)
@@ -240,7 +240,7 @@ struct MCPToolRunnerTests {
         let (runner, settings) = try makeRunner(coordinator: coordinator, controller: controller, clock: clock)
 
         let request = toolCallRequest(name: "dictate", arguments: .object([:]), token: settings.token)
-        let (status, body) = await runner.handle(request, peer: identity)
+        let (status, body) = await runner.handle(request, peer: MCPPeer(identity))
         let response = try decode(body)
         #expect(status == 200)
         #expect(response.error?.code == -32002)
@@ -256,7 +256,7 @@ struct MCPToolRunnerTests {
         let (runner, settings) = try makeRunner(coordinator: coordinator, controller: controller, clock: clock)
 
         let request = toolCallRequest(name: "dictate", arguments: .object([:]), token: settings.token)
-        let (status, body) = await runner.handle(request, peer: identity)
+        let (status, body) = await runner.handle(request, peer: MCPPeer(identity))
         let response = try decode(body)
         #expect(status == 200)
         #expect(response.error?.code == -32002)
@@ -273,7 +273,7 @@ struct MCPToolRunnerTests {
         let (runner, settings) = try makeRunner(coordinator: coordinator, controller: controller, clock: clock)
 
         let request = toolCallRequest(name: "dictate", arguments: .object([:]), token: settings.token)
-        let task = Task { await runner.handle(request, peer: identity) }
+        let task = Task { await runner.handle(request, peer: MCPPeer(identity)) }
         await mic.waitUntilCapturing()
         mic.emit(rms: 0.3, seconds: 1)
         await transcriber.waitUntilReceived(1)
@@ -293,7 +293,7 @@ struct MCPToolRunnerTests {
         let (runner, settings) = try makeRunner(coordinator: coordinator, controller: controller, clock: clock)
 
         let request = toolCallRequest(name: "dictate", arguments: .object([:]), token: settings.token)
-        let task = Task { await runner.handle(request, peer: identity) }
+        let task = Task { await runner.handle(request, peer: MCPPeer(identity)) }
         await clock.waitForSleepers(3)               // cap + silence (FlowBarMachine) + this dictate call's own timeout
         await clock.advance(by: 920)                  // default maxDuration(900) + processingTimeout(20)
         let (status, body) = await task.value
@@ -329,7 +329,7 @@ struct MCPToolRunnerTests {
         let req1 = toolCallRequest(name: "dictate", arguments: .object([:]), token: settings.token, id: .number(1))
         let req2 = toolCallRequest(name: "dictate", arguments: .object([:]), token: settings.token, id: .number(2))
 
-        let task1 = Task { await runner.handle(req1, peer: identity) }
+        let task1 = Task { await runner.handle(req1, peer: MCPPeer(identity)) }
         // `dictate()`'s guard-and-set prefix (including `dictateInFlight = true` and subscribing to
         // `results()`/`states()`) runs within a handful of actor hops, all *before* the gated
         // `preflight()` deep inside the coordinator's command queue is ever reached — give it
@@ -337,7 +337,7 @@ struct MCPToolRunnerTests {
         for _ in 0..<20 { await Task.yield() }
         #expect(!coordinator.isHUDActive)   // the (stale) coordinator mirror hasn't caught up — by design
 
-        let task2 = Task { await runner.handle(req2, peer: identity) }
+        let task2 = Task { await runner.handle(req2, peer: MCPPeer(identity)) }
         let (status2, body2) = await task2.value
         let response2 = try decode(body2)
         #expect(status2 == 200)
@@ -385,7 +385,7 @@ struct MCPToolRunnerTests {
         let (runner, settings) = try makeRunner(coordinator: coordinator, controller: controller, clock: clock)
 
         let request = toolCallRequest(name: "dictate", arguments: .object([:]), token: settings.token)
-        let task = Task { await runner.handle(request, peer: identity) }
+        let task = Task { await runner.handle(request, peer: MCPPeer(identity)) }
         await mic.waitUntilCapturing()
         coordinator.escape()
         let (status, body) = await task.value
@@ -403,7 +403,7 @@ struct MCPToolRunnerTests {
         let (runner, settings) = try makeRunner(coordinator: coordinator, controller: controller, clock: clock)
 
         let request = toolCallRequest(name: "dictate", arguments: .object([:]), token: settings.token)
-        let task = Task { await runner.handle(request, peer: identity) }
+        let task = Task { await runner.handle(request, peer: MCPPeer(identity)) }
         await mic.waitUntilCapturing()
         await clock.waitForSleepers(3)   // cap + silence + this dictate call's own timeout
         await clock.advance(by: 3)        // FlowBarConfig.silenceStop default — well short of the full budget
@@ -424,7 +424,7 @@ struct MCPToolRunnerTests {
         let (runner, settings) = try makeRunner(coordinator: coordinator, controller: controller, clock: clock)
 
         let request = toolCallRequest(name: "dictate", arguments: .object([:]), token: settings.token)
-        let (status, body) = await runner.handle(request, peer: identity)
+        let (status, body) = await runner.handle(request, peer: MCPPeer(identity))
         let response = try decode(body)
         #expect(status == 200)
         #expect(response.error?.code == -32005)
@@ -439,7 +439,7 @@ struct MCPToolRunnerTests {
         let (runner, settings) = try makeRunner(coordinator: coordinator, controller: controller, clock: clock)
 
         let request = toolCallRequest(name: "dictate", arguments: .object([:]), token: settings.token)
-        let (status, body) = await runner.handle(request, peer: identity)
+        let (status, body) = await runner.handle(request, peer: MCPPeer(identity))
         let response = try decode(body)
         #expect(status == 200)
         #expect(response.error?.code == -32005)
@@ -454,7 +454,7 @@ struct MCPToolRunnerTests {
         let (runner, settings) = try makeRunner(coordinator: coordinator, controller: controller, clock: clock)
 
         let request = toolCallRequest(name: "dictate", arguments: .object([:]), token: settings.token)
-        let (status, body) = await runner.handle(request, peer: identity)
+        let (status, body) = await runner.handle(request, peer: MCPPeer(identity))
         let response = try decode(body)
         #expect(status == 200)
         #expect(response.error?.code == -32005)
@@ -469,7 +469,7 @@ struct MCPToolRunnerTests {
         let (runner, settings) = try makeRunner(coordinator: coordinator, controller: controller, clock: clock)
 
         let request = toolCallRequest(name: "dictate", arguments: .object([:]), token: settings.token)
-        let (status, body) = await runner.handle(request, peer: identity)
+        let (status, body) = await runner.handle(request, peer: MCPPeer(identity))
         let response = try decode(body)
         #expect(status == 200)
         #expect(response.error?.code == -32005)
@@ -488,7 +488,7 @@ struct MCPToolRunnerTests {
         let (runner, settings) = try makeRunner(coordinator: coordinator, controller: controller, historyService: history, clock: FakeClock())
 
         let request = toolCallRequest(name: "search_history", arguments: .object(["query": .string("")]), token: settings.token)
-        let (status, body) = await runner.handle(request, peer: identity)
+        let (status, body) = await runner.handle(request, peer: MCPPeer(identity))
         let response = try decode(body)
         #expect(status == 200)
         #expect(response.error?.code == -32004)
@@ -510,7 +510,7 @@ struct MCPToolRunnerTests {
         let (runner, settings) = try makeRunner(coordinator: coordinator, controller: controller, historyService: history, clock: FakeClock())
 
         let request = toolCallRequest(name: "search_history", arguments: .object(["query": .string(""), "limit": .int(2)]), token: settings.token)
-        let (status, body) = await runner.handle(request, peer: identity)
+        let (status, body) = await runner.handle(request, peer: MCPPeer(identity))
         let response = try decode(body)
         #expect(status == 200)
         let json = try #require(text(from: response.result))
@@ -535,7 +535,7 @@ struct MCPToolRunnerTests {
         let (runner, settings) = try makeRunner(coordinator: coordinator, controller: controller, historyService: history, clock: FakeClock())
 
         let request = toolCallRequest(name: "search_history", arguments: .object(["query": .string(""), "limit": .int(500)]), token: settings.token)
-        let (status, body) = await runner.handle(request, peer: identity)
+        let (status, body) = await runner.handle(request, peer: MCPPeer(identity))
         let response = try decode(body)
         #expect(status == 200)
         let json = try #require(text(from: response.result))
@@ -564,7 +564,7 @@ struct MCPToolRunnerTests {
         let (runner, settings) = try makeRunner(coordinator: coordinator, controller: controller, historyService: history, clock: FakeClock())
 
         let request = toolCallRequest(name: "search_history", arguments: .object(["query": .string("")]), token: settings.token)
-        let (status, body) = await runner.handle(request, peer: identity)
+        let (status, body) = await runner.handle(request, peer: MCPPeer(identity))
         let response = try decode(body)
         #expect(status == 200)
         let json = try #require(text(from: response.result))
@@ -583,7 +583,7 @@ struct MCPToolRunnerTests {
                                          approvalPresenter: presenter)
 
         let request = toolCallRequest(name: "dictate", arguments: .object([:]), token: settings.token)
-        let (status, body) = await runner.handle(request, peer: identity)
+        let (status, body) = await runner.handle(request, peer: MCPPeer(identity))
         let response = try decode(body)
         #expect(status == 404)
         #expect(response.error?.code == -32601)
@@ -602,7 +602,7 @@ struct MCPToolRunnerTests {
 
         // First call: unapproved, asks once, and allows this call through.
         let first = toolCallRequest(name: "search_history", arguments: .object(["query": .string("")]), token: settings.token, id: .number(1))
-        let (status1, _) = await runner.handle(first, peer: identity)
+        let (status1, _) = await runner.handle(first, peer: MCPPeer(identity))
         #expect(status1 == 200)
         #expect(presenter.callCount == 1)
         #expect(presenter.lastCall?.identity == identity)
@@ -613,7 +613,7 @@ struct MCPToolRunnerTests {
 
         // Second call: already approved (persisted) — the presenter is not asked again.
         let second = toolCallRequest(name: "search_history", arguments: .object(["query": .string("")]), token: settings.token, id: .number(2))
-        let (status2, _) = await runner.handle(second, peer: identity)
+        let (status2, _) = await runner.handle(second, peer: MCPPeer(identity))
         #expect(status2 == 200)
         #expect(presenter.callCount == 1)
     }
@@ -625,14 +625,14 @@ struct MCPToolRunnerTests {
         let (runner, settings) = try makeRunner(coordinator: coordinator, controller: controller, clock: FakeClock(), approvalPresenter: presenter)
 
         let first = toolCallRequest(name: "search_history", arguments: .object(["query": .string("")]), token: settings.token, id: .number(1))
-        let (status1, body1) = await runner.handle(first, peer: identity)
+        let (status1, body1) = await runner.handle(first, peer: MCPPeer(identity))
         let response1 = try decode(body1)
         #expect(status1 == 401)
         #expect(response1.error?.code == -32001)
         #expect(presenter.callCount == 1)
 
         let second = toolCallRequest(name: "search_history", arguments: .object(["query": .string("")]), token: settings.token, id: .number(2))
-        let (status2, body2) = await runner.handle(second, peer: identity)
+        let (status2, body2) = await runner.handle(second, peer: MCPPeer(identity))
         let response2 = try decode(body2)
         #expect(status2 == 401)
         #expect(response2.error?.code == -32001)
@@ -647,7 +647,7 @@ struct MCPToolRunnerTests {
 
         let unresolved = MCPClientIdentity(name: "", path: "", pid: nil)
         let request = toolCallRequest(name: "search_history", arguments: .object(["query": .string("")]), token: settings.token)
-        _ = await runner.handle(request, peer: unresolved)
+        _ = await runner.handle(request, peer: MCPPeer(unresolved))
         #expect(presenter.lastCall?.identity.name == "Unknown app")
     }
 
@@ -662,12 +662,12 @@ struct MCPToolRunnerTests {
 
         let req1 = toolCallRequest(name: "search_history", arguments: .object(["query": .string("")]), token: settings.token, id: .number(1))
         let req2 = toolCallRequest(name: "search_history", arguments: .object(["query": .string("")]), token: settings.token, id: .number(2))
-        let task1 = Task { await runner.handle(req1, peer: identity) }
+        let task1 = Task { await runner.handle(req1, peer: MCPPeer(identity)) }
         // Wait until task1 has actually reached (and registered) the presenter call before starting
         // task2 — proves task2 finds the in-flight decision already recorded, not a race on who gets
         // there first.
         while presenter.callCount == 0 { await Task.yield() }
-        let task2 = Task { await runner.handle(req2, peer: identity) }
+        let task2 = Task { await runner.handle(req2, peer: MCPPeer(identity)) }
 
         await gate.open()
         let (status1, _) = await task1.value
@@ -686,7 +686,7 @@ struct MCPToolRunnerTests {
                                                 clientStore: clientStore, approvalPresenter: presenter)
 
         let first = toolCallRequest(name: "search_history", arguments: .object(["query": .string("")]), token: settings.token, id: .number(1))
-        let (status1, _) = await runner.handle(first, peer: identity)
+        let (status1, _) = await runner.handle(first, peer: MCPPeer(identity))
         #expect(status1 == 200)
         #expect(presenter.callCount == 1)
         let rows = try clientStore.all()
@@ -695,7 +695,7 @@ struct MCPToolRunnerTests {
         try clientStore.revoke(id: rows[0].id)
 
         let second = toolCallRequest(name: "search_history", arguments: .object(["query": .string("")]), token: settings.token, id: .number(2))
-        let (status2, _) = await runner.handle(second, peer: identity)
+        let (status2, _) = await runner.handle(second, peer: MCPPeer(identity))
         #expect(status2 == 200)             // the fake presenter answers `.allow` again
         #expect(presenter.callCount == 2)   // asked again — the revoke took effect on the very next call
     }
@@ -709,12 +709,12 @@ struct MCPToolRunnerTests {
                                                 clientStore: clientStore, approvalPresenter: presenter)
 
         let first = toolCallRequest(name: "search_history", arguments: .object(["query": .string("")]), token: settings.token, id: .number(1))
-        let (status1, _) = await runner.handle(first, peer: identity)
+        let (status1, _) = await runner.handle(first, peer: MCPPeer(identity))
         #expect(status1 == 200)
         #expect(try clientStore.all().isEmpty)   // never persisted
 
         let second = toolCallRequest(name: "search_history", arguments: .object(["query": .string("")]), token: settings.token, id: .number(2))
-        let (status2, _) = await runner.handle(second, peer: identity)
+        let (status2, _) = await runner.handle(second, peer: MCPPeer(identity))
         #expect(status2 == 200)
         #expect(presenter.callCount == 1)        // not asked again this session
         #expect(try clientStore.all().isEmpty)   // still never persisted
@@ -732,7 +732,7 @@ struct MCPToolRunnerTests {
 
         let unresolved = MCPClientIdentity(name: "", path: "", pid: nil)
         let first = toolCallRequest(name: "search_history", arguments: .object(["query": .string("")]), token: settings.token, id: .number(1))
-        let (status1, _) = await runner.handle(first, peer: unresolved)
+        let (status1, _) = await runner.handle(first, peer: MCPPeer(unresolved))
         #expect(status1 == 200)
         #expect(presenter.lastCall?.canPersist == false)
         #expect(try clientStore.all().isEmpty)   // never persisted despite `.allow`
@@ -740,8 +740,30 @@ struct MCPToolRunnerTests {
         // The `.allow` degraded to a session-scoped grant, so the same (still-unresolved) identity
         // isn't asked again this session.
         let second = toolCallRequest(name: "search_history", arguments: .object(["query": .string("")]), token: settings.token, id: .number(2))
-        let (status2, _) = await runner.handle(second, peer: unresolved)
+        let (status2, _) = await runner.handle(second, peer: MCPPeer(unresolved))
         #expect(status2 == 200)
         #expect(presenter.callCount == 1)
+    }
+
+    @Test("clearSessionDecisions forgets an Allow once grant, so the next call asks again (final review F3)")
+    func clearSessionDecisionsForgetsAllowOnce() async throws {
+        let clientStore = try MCPClientStore(database: VoxFlowDatabase.inMemory())
+        let presenter = FakeApprovalPresenter(decision: .allowOnce)
+        let (coordinator, controller) = makeDictation(clock: FakeClock(), transcriber: FakeDictationTranscriber(result: .empty))
+        let (runner, settings) = try makeRunner(coordinator: coordinator, controller: controller, clock: FakeClock(),
+                                                clientStore: clientStore, approvalPresenter: presenter)
+
+        let first = toolCallRequest(name: "search_history", arguments: .object(["query": .string("")]), token: settings.token, id: .number(1))
+        _ = await runner.handle(first, peer: MCPPeer(identity))
+        let second = toolCallRequest(name: "search_history", arguments: .object(["query": .string("")]), token: settings.token, id: .number(2))
+        _ = await runner.handle(second, peer: MCPPeer(identity))
+        #expect(presenter.callCount == 1)   // the session grant held
+
+        runner.clearSessionDecisions()
+
+        let third = toolCallRequest(name: "search_history", arguments: .object(["query": .string("")]), token: settings.token, id: .number(3))
+        _ = await runner.handle(third, peer: MCPPeer(identity))
+        #expect(presenter.callCount == 2)   // asked again — the grant is gone
+        #expect(try clientStore.all().isEmpty)  // and it was never persisted
     }
 }

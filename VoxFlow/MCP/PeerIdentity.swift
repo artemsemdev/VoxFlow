@@ -1,5 +1,7 @@
 import Darwin
 import Foundation
+import Synchronization
+import VoxFlowMCP
 
 /// Resolves the OS process on the other end of a loopback connection, behind a protocol so tests
 /// (and `LoopbackListener`) can inject a fake instead of touching real system process tables.
@@ -110,5 +112,35 @@ struct LibprocPeerResolver: PeerResolving {
     private static func string(from buffer: [CChar]) -> String {
         let bytes = buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }
         return String(decoding: bytes, as: UTF8.self)
+    }
+}
+
+/// The process on the other end of a connection, resolved **on demand and at most once**.
+///
+/// Final review F1: resolution walks every process's open file descriptors — measured at about
+/// 5 ms and 14,000 syscalls per call — and the transport used to do it for every accepted
+/// connection, before the request's bearer token had been looked at. A bare `connect()` loop from
+/// any local process therefore bought unbounded pre-auth CPU work on the listener's own queue.
+/// Wrapping it here lets the transport hand over something cheap and lets `MCPToolRunner` pay the
+/// cost only where it genuinely needs a name: deciding whether an *authenticated* caller's client
+/// has been approved.
+final class MCPPeer: Sendable {
+    private let resolve: @Sendable () -> MCPClientIdentity
+    private let cached = Mutex<MCPClientIdentity?>(nil)
+
+    init(_ resolve: @escaping @Sendable () -> MCPClientIdentity) { self.resolve = resolve }
+
+    /// Convenience for tests and any caller that already knows the identity.
+    init(_ identity: MCPClientIdentity) { self.resolve = { identity } }
+
+    /// The resolution runs inside the lock, so two concurrent readers cannot both pay for the walk.
+    /// One request per connection makes the contention theoretical.
+    func identity() -> MCPClientIdentity {
+        cached.withLock { value in
+            if let value { return value }
+            let resolved = resolve()
+            value = resolved
+            return resolved
+        }
     }
 }

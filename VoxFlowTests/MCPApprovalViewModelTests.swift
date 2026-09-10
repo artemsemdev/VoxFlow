@@ -13,7 +13,7 @@ struct MCPApprovalCopyTests {
         #expect(MCPApprovalCopy.title(name: "Cursor") == "\u{201C}Cursor\u{201D} wants to use VoxFlow")
         #expect(MCPApprovalCopy.body(tools: ["transcribe_file", "dictate"]) ==
                "A local app connected to the MCP server with a valid token. It can use: transcribe_file, dictate.")
-        #expect(MCPApprovalCopy.processLine(name: "Cursor", pid: 4812) == "Process: Cursor (pid 4812) · 127.0.0.1")
+        #expect(MCPApprovalCopy.processLine(name: "Cursor", pid: 4812, path: "") == "Process: Cursor (pid 4812) · 127.0.0.1")
     }
 
     @Test("a single enabled tool still reads naturally")
@@ -22,10 +22,6 @@ struct MCPApprovalCopyTests {
                "A local app connected to the MCP server with a valid token. It can use: dictate.")
     }
 
-    @Test("a nil pid (peer resolution failed) doesn't crash — falls back to \"unknown\"")
-    func nilPID() {
-        #expect(MCPApprovalCopy.processLine(name: "Unknown app", pid: nil) == "Process: Unknown app (pid unknown) · 127.0.0.1")
-    }
 }
 
 /// Review fix (Important #1): which buttons ST-06a offers — and their exact labels — is a rule, and
@@ -79,7 +75,7 @@ struct MCPApprovalViewModelTests {
     func harness(clock: any MonotonicClock) -> (vm: MCPApprovalViewModel, panel: FakePanel, callbacks: Callbacks) {
         let panel = FakePanel()
         let callbacks = Callbacks()
-        let vm = MCPApprovalViewModel(clock: clock, makePanel: { _, _, _, canPersist, onDecision in
+        let vm = MCPApprovalViewModel(clock: clock, makePanel: { _, _, _, _, canPersist, onDecision in
             callbacks.canPersist = canPersist
             callbacks.onDecision = onDecision
             return panel
@@ -220,5 +216,18 @@ struct MCPApprovalViewModelTests {
         await clock.advance(by: MCPApprovalViewModel.timeout)
         _ = await task.value
         #expect(approvedCount == 0)
+    }
+
+    // MARK: final review F5 — the process line
+
+    @Test("the process line omits the pid entirely when resolution failed, rather than printing \"unknown\"")
+    func processLineOmitsUnknownPid() {
+        #expect(MCPApprovalCopy.processLine(name: "Unknown app", pid: nil, path: "") == "Process: Unknown app · 127.0.0.1")
+    }
+
+    @Test("the process line shows the executable path the grant is keyed on")
+    func processLineShowsPath() {
+        let line = MCPApprovalCopy.processLine(name: "Cursor", pid: 4812, path: "/Applications/Cursor.app/Contents/MacOS/Cursor")
+        #expect(line == "Process: Cursor (pid 4812) · 127.0.0.1\n/Applications/Cursor.app/Contents/MacOS/Cursor")
     }
 }

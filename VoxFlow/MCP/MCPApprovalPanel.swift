@@ -10,11 +10,11 @@ import VoxFlowMCP
 final class MCPApprovalPanel: NSPanel {
     private static let panelSize = NSSize(width: 340, height: 280)
 
-    init(name: String, pid: Int32?, tools: [String], canPersist: Bool, onDecision: @escaping (MCPClientDecision) -> Void) {
+    init(name: String, pid: Int32?, path: String, tools: [String], canPersist: Bool, onDecision: @escaping (MCPClientDecision) -> Void) {
         let hosting = NSHostingController(rootView: MCPApprovalContentView(
             title: MCPApprovalCopy.title(name: name),
             message: MCPApprovalCopy.body(tools: tools),
-            processLine: MCPApprovalCopy.processLine(name: name, pid: pid),
+            processLine: MCPApprovalCopy.processLine(name: name, pid: pid, path: path),
             buttons: MCPApprovalButtons.offered(canPersist: canPersist),
             onDecision: onDecision))
         super.init(contentRect: NSRect(origin: .zero, size: Self.panelSize),

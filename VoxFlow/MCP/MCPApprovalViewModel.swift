@@ -13,8 +13,16 @@ enum MCPApprovalCopy {
         "A local app connected to the MCP server with a valid token. It can use: \(tools.joined(separator: ", "))."
     }
 
-    static func processLine(name: String, pid: Int32?) -> String {
-        "Process: \(name) (pid \(pid.map(String.init) ?? "unknown")) · 127.0.0.1"
+    /// Canvas ST-06a: `Process: Cursor (pid 4812) · 127.0.0.1`. Final review F5: `nil` — resolution
+    /// failed — used to render as the literal "(pid unknown)", which ruling 5 says to omit rather
+    /// than display; and the executable path, which the grant is actually keyed on, was never shown
+    /// at all, so a binary called `Cursor` sitting anywhere was indistinguishable from the real one.
+    static func processLine(name: String, pid: Int32?, path: String) -> String {
+        var line = "Process: \(name)"
+        if let pid { line += " (pid \(pid))" }
+        line += " · 127.0.0.1"
+        if !path.isEmpty { line += "\n\(path)" }
+        return line
     }
 }
 
@@ -98,14 +106,14 @@ final class MCPApprovalViewModel: MCPApprovalPresenting, MCPApprovalObserving, S
     var onApproved: (() -> Void)?
 
     private let clock: any MonotonicClock
-    private let makePanel: @MainActor (_ name: String, _ pid: Int32?, _ tools: [String], _ canPersist: Bool,
+    private let makePanel: @MainActor (_ name: String, _ pid: Int32?, _ path: String, _ tools: [String], _ canPersist: Bool,
                                         _ onDecision: @escaping (MCPClientDecision) -> Void) -> any MCPApprovalPanelPresenting
 
     init(clock: any MonotonicClock = SystemMonotonicClock(),
-         makePanel: @escaping @MainActor (_ name: String, _ pid: Int32?, _ tools: [String], _ canPersist: Bool,
+         makePanel: @escaping @MainActor (_ name: String, _ pid: Int32?, _ path: String, _ tools: [String], _ canPersist: Bool,
                                            _ onDecision: @escaping (MCPClientDecision) -> Void) -> any MCPApprovalPanelPresenting
-             = { name, pid, tools, canPersist, onDecision in
-                 MCPApprovalPanel(name: name, pid: pid, tools: tools, canPersist: canPersist, onDecision: onDecision)
+             = { name, pid, path, tools, canPersist, onDecision in
+                 MCPApprovalPanel(name: name, pid: pid, path: path, tools: tools, canPersist: canPersist, onDecision: onDecision)
              }) {
         self.clock = clock
         self.makePanel = makePanel
@@ -113,7 +121,7 @@ final class MCPApprovalViewModel: MCPApprovalPresenting, MCPApprovalObserving, S
 
     func present(identity: MCPClientIdentity, tools: [String], canPersist: Bool) async -> MCPClientDecision {
         let session = PresentationSession(clock: clock, makePanel: makePanel, onApproved: { [weak self] in self?.onApproved?() })
-        return await session.run(name: identity.name, pid: identity.pid, tools: tools, canPersist: canPersist)
+        return await session.run(name: identity.name, pid: identity.pid, path: identity.path, tools: tools, canPersist: canPersist)
     }
 }
 
@@ -128,7 +136,7 @@ final class MCPApprovalViewModel: MCPApprovalPresenting, MCPApprovalObserving, S
 @MainActor
 private final class PresentationSession {
     private let clock: any MonotonicClock
-    private let makePanel: @MainActor (_ name: String, _ pid: Int32?, _ tools: [String], _ canPersist: Bool,
+    private let makePanel: @MainActor (_ name: String, _ pid: Int32?, _ path: String, _ tools: [String], _ canPersist: Bool,
                                         _ onDecision: @escaping (MCPClientDecision) -> Void) -> any MCPApprovalPanelPresenting
     private let onApproved: () -> Void
     private var resumed = false
@@ -136,7 +144,7 @@ private final class PresentationSession {
     private var timeoutTask: Task<Void, Never>?
 
     init(clock: any MonotonicClock,
-         makePanel: @escaping @MainActor (_ name: String, _ pid: Int32?, _ tools: [String], _ canPersist: Bool,
+         makePanel: @escaping @MainActor (_ name: String, _ pid: Int32?, _ path: String, _ tools: [String], _ canPersist: Bool,
                                            _ onDecision: @escaping (MCPClientDecision) -> Void) -> any MCPApprovalPanelPresenting,
          onApproved: @escaping () -> Void) {
         self.clock = clock
@@ -144,9 +152,9 @@ private final class PresentationSession {
         self.onApproved = onApproved
     }
 
-    func run(name: String, pid: Int32?, tools: [String], canPersist: Bool) async -> MCPClientDecision {
+    func run(name: String, pid: Int32?, path: String, tools: [String], canPersist: Bool) async -> MCPClientDecision {
         await withCheckedContinuation { continuation in
-            begin(name: name, pid: pid, tools: tools, canPersist: canPersist, continuation: continuation)
+            begin(name: name, pid: pid, path: path, tools: tools, canPersist: canPersist, continuation: continuation)
         }
     }
 
@@ -155,9 +163,9 @@ private final class PresentationSession {
     /// pattern, e.g. `HistorySavedSink.notify()`) rather than calling `finish` directly — the same
     /// reasoning as this whole type's existence: a call from inside an inline closure passed to
     /// `makePanel` doesn't reliably type-check as same-actor without it.
-    private func begin(name: String, pid: Int32?, tools: [String], canPersist: Bool,
+    private func begin(name: String, pid: Int32?, path: String, tools: [String], canPersist: Bool,
                         continuation: CheckedContinuation<MCPClientDecision, Never>) {
-        let panel = makePanel(name, pid, tools, canPersist) { [weak self] decision in
+        let panel = makePanel(name, pid, path, tools, canPersist) { [weak self] decision in
             Task { @MainActor in self?.finish(decision, continuation: continuation) }
         }
         self.panel = panel

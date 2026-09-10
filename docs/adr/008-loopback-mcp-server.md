@@ -115,6 +115,21 @@ whole stack over a real socket, and records the resulting design as this ADR.
   names or how long that tool's own budget should be (`dictate`'s is `FlowBarConfig.maxDuration +
   processingTimeout`, ~920 s by default; `transcribe_file` on a long recording can take minutes),
   so each tool owns its own timeout and the watchdog only exists well above every one of them.
+- **Everything expensive happens after authentication.** The final review found three separate
+  ways an unauthenticated local process could spend the server's resources, and the answers are
+  all the same shape: do less before the token is checked. The receive buffer is capped (16 KB of
+  headers, 1 MB of request, then `413`) and the header block is decoded exactly once no matter how
+  a peer chunks it; the deadline for delivering a whole request is **absolute** — armed once when
+  a connection becomes ready and never refreshed by arriving bytes, because refreshing it let
+  sixteen byte-dripping sockets hold every connection slot indefinitely; and the peer's process is
+  resolved lazily through `MCPPeer`, from inside the authenticated path only, because that
+  resolution walks every process's file descriptors (~5 ms, ~14,000 syscalls) and doing it on
+  accept turned a bare `connect()` loop into unbounded pre-auth CPU work.
+- **Regenerating the token forgets session grants too.** `revokeAll()` deletes the persistent
+  approvals, but "Allow once" grants and session denials live in the running `MCPToolRunner`, so
+  regenerating also calls `clearSessionDecisions()`. Without it a client that had been allowed
+  once was silently re-admitted with no dialog, which the ST-06r copy and the runbook both promise
+  cannot happen.
 - **`PathPolicy`: no "grant a folder" flow.** `transcribe_file`'s path is checked after resolving
   symlinks (so a symlink inside the home directory pointing outside it is judged by its target, not
   its own location) against three rules: inside the user's home directory, not under `~/Library`,

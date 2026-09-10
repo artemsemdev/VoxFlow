@@ -96,6 +96,9 @@ final class MCPViewModel {
         alert = nil
         let store = await clientStoreProvider.resolvedClientStore()
         await Task.detached(priority: .utility) { try? store.revokeAll() }.value
+        // Final review F3: persistent approvals are only half of it — a client that was allowed
+        // once for this session would otherwise keep its grant and reconnect silently.
+        await server.clearSessionDecisions()
         await refreshClients()
     }
 

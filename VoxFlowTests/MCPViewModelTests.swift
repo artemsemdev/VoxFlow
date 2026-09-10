@@ -68,6 +68,10 @@ struct MCPViewModelTests {
         #expect(h.pasteboard.strings == [h.settings.token])
         #expect(h.vm.clients.isEmpty)
         #expect(try h.store.all().isEmpty)
+        // Final review F3: persistent approvals are only half of "disconnect everyone" — a client
+        // that had been allowed once for this session would otherwise keep its grant and reconnect
+        // with no dialog, contradicting the ST-06r copy and the runbook.
+        #expect(h.server.clearSessionDecisionsCount == 1)
     }
 
     @Test("dismissAlert clears the alert without regenerating")
