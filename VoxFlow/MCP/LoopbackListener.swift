@@ -79,15 +79,18 @@ actor LoopbackListener {
     /// only for a listener that has actually reached `.ready`.
     func start() async throws {
         if listener != nil { return } // already running.
-        if let inFlightStart {
-            try await inFlightStart.value // join the attempt already underway.
-            return
+        if let joined = inFlightStart {
+            // Join the attempt already underway. A `stop()` can invalidate it while we wait, in
+            // which case it binds nothing and this call must not report success (re-review B3) —
+            // fall through and run one fresh scan of our own.
+            try await joined.value
+            if listener != nil { return }
         }
 
         let myGeneration = generation
         let task = Task { try await self.performScan(generation: myGeneration) }
         inFlightStart = task
-        defer { inFlightStart = nil }
+        defer { if generation == myGeneration { inFlightStart = nil } }
         try await task.value
     }
 
@@ -157,6 +160,11 @@ actor LoopbackListener {
     /// `listener?.cancel()` on `nil` and an empty `connections` loop are both no-ops.
     func stop() {
         generation += 1
+        // Re-review B3: the condemned attempt must also be forgotten. Leaving it here let the next
+        // `start()` join an attempt that `generation` had already invalidated, so it returned
+        // success with nothing bound. The attempt's own task sees the generation mismatch and
+        // cancels whatever it bound; nobody should be waiting on it any more.
+        inFlightStart = nil
         listener?.cancel()
         listener = nil
         boundPort = nil
@@ -322,6 +330,12 @@ final class ConnectionHandler: Sendable {
     /// second a no-op, so a slow handler that eventually does return can never send a response onto
     /// a connection this already closed.
     private func respond(to request: MCPHTTPRequest) {
+        // Re-review finding 4: the idle deadline exists to close a connection that stops *sending*
+        // before a request is framed. The request is framed now, so it must be disarmed here —
+        // otherwise it fires 30 s after the last byte and cancels the connection out from under a
+        // tool that is legitimately still working (`dictate` runs up to ~920 s), which made the
+        // 20-minute watchdog below unreachable and returned nothing to the client.
+        idleWork.withLock { $0?.cancel(); $0 = nil }
         let responded = Mutex(false)
 
         let timeoutWork = DispatchWorkItem { [connection] in

@@ -162,10 +162,21 @@ struct HTTPFraming {
     private var data = Data()
     private var searchFrom = 0
     private var header: HTTPMessage.ParsedHeader?
+    /// Where the header block ends, remembered once found. Re-review B2: without this the whole
+    /// header block was re-decoded on every body chunk whenever `parseHeader` failed.
+    private var headerEnd: Data.Index?
+    /// A header block that arrived complete but would not parse. Appending body bytes can never
+    /// make it valid, so the outcome is remembered instead of being recomputed per chunk — the same
+    /// pre-auth CPU exhaustion N2 fixed, on the malformed-header path.
+    private var headerMalformed = false
 
     /// Test-only signal (N3's "assert via a counter"): how many times the header block has
     /// actually been decoded. Must stay `1` no matter how many chunks arrive after the terminator.
     private(set) var headerParseCount = 0
+    /// Test-only signal for re-review B2: how many times decoding was *attempted*, successful or
+    /// not. Must stay `1` even for a header block that never parses, or a peer can force an
+    /// unbounded number of re-decodes by dripping a body.
+    private(set) var headerDecodeAttempts = 0
 
     init() {}
 
@@ -175,19 +186,31 @@ struct HTTPFraming {
         if !chunk.isEmpty { data.append(chunk) }
         guard data.count <= HTTPMessage.maxRequestBytes else { return .tooLarge }
 
-        if header == nil {
-            guard let headerEnd = HTTPMessage.headerTerminatorEnd(in: data, searchingFrom: searchFrom) else {
+        if headerMalformed { return .needMore }
+
+        if headerEnd == nil {
+            guard let end = HTTPMessage.headerTerminatorEnd(in: data, searchingFrom: searchFrom) else {
                 guard data.count <= HTTPMessage.maxHeaderBytes else { return .tooLarge }
                 // Resume just before the tail next time, so a terminator split across a chunk
                 // boundary is still found — never re-scan bytes already searched.
                 searchFrom = max(data.count - 3, 0)
                 return .needMore
             }
+            // Re-review B2: the cap has to be judged against the header block itself, not only
+            // against "no terminator yet" — a single oversized read that happens to contain the
+            // terminator used to slip past it entirely.
+            guard data.distance(from: data.startIndex, to: end) <= HTTPMessage.maxHeaderBytes else { return .tooLarge }
+            headerEnd = end
+        }
+
+        if header == nil, let headerEnd {
+            headerDecodeAttempts += 1
             guard let parsed = HTTPMessage.parseHeader(data, headerEnd: headerEnd) else {
                 // Malformed request line/headers even though the terminator arrived — matches
                 // `HTTPMessage.parse`'s own behavior of treating this as "not yet complete" rather
                 // than a hard failure; the idle timeout (`ConnectionHandler`'s job, not this
-                // type's) is what eventually closes a connection stuck here.
+                // type's) is what eventually closes a connection stuck here. Decided once.
+                headerMalformed = true
                 return .needMore
             }
             header = parsed

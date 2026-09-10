@@ -193,6 +193,31 @@ struct LoopbackListenerReentrancyTests {
         #expect(LoopbackListenerPortScanTests.canBind(port: freeCandidate))
     }
 
+    @Test("start() after a stop() that interrupted an in-flight start() actually binds (re-review B3)")
+    func startAfterInterruptedStartBinds() async throws {
+        // B3: stop() invalidated the in-flight attempt by generation but left it registered, so the
+        // next start() joined a condemned attempt and returned *success* with nothing bound — a
+        // silently dead server. The restart must bind for real.
+        let busyPort = try LoopbackListenerPortScanTests.freeLoopbackPort()
+        let occupyingFD = try LoopbackListenerPortScanTests.occupy(port: busyPort)
+        try #require(busyPort < UInt16.max)
+        let freeCandidate = busyPort + 1
+
+        let listener = LoopbackListener(portRange: busyPort...freeCandidate, resolver: FakePeerResolver(), handler: FakeRequestHandler())
+
+        async let started: Void? = try? listener.start()
+        for _ in 0..<10 { await Task.yield() }
+        await listener.stop()
+        _ = await started
+        #expect(await listener.boundPort == nil)
+
+        // Free the first candidate so the restart has an unambiguous port to land on, then restart.
+        close(occupyingFD)
+        try await listener.start()
+        #expect(await listener.boundPort != nil)
+        await listener.stop()
+    }
+
     @Test("a second start() after the listener is already running is a no-op")
     func secondStartAfterRunningIsNoOp() async throws {
         let port = try LoopbackListenerPortScanTests.freeLoopbackPort()

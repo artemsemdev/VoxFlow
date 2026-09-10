@@ -191,6 +191,30 @@ struct HTTPFramingTests {
         #expect(framing.headerParseCount == 1)
     }
 
+    @Test("a header block whose terminator arrived but that never parses is decoded exactly once (re-review B2)")
+    func malformedHeaderDecodedOnce() {
+        // A single-token request line: the terminator is there, so framing keeps saying `needMore`,
+        // but appending body bytes can never make it valid. Before the fix every chunk re-decoded
+        // the whole header block, which a peer could turn into unbounded CPU work pre-auth.
+        var framing = HTTPFraming()
+        #expect(framing.advance(appending: Data("GARBAGE\r\n\r\n".utf8)) == .needMore)
+        for _ in 0..<500 {
+            #expect(framing.advance(appending: Data("x".utf8)) == .needMore)
+        }
+        #expect(framing.headerDecodeAttempts == 1)
+        #expect(framing.headerParseCount == 0)
+    }
+
+    @Test("an oversized header block that arrives in one read with its terminator is still tooLarge (re-review B2)")
+    func oversizedHeaderWithTerminatorInOneRead() {
+        // The cap used to be checked only while the terminator was missing, so one big read that
+        // happened to contain it slipped past the 16 KB limit entirely.
+        let padding = String(repeating: "a", count: HTTPMessage.maxHeaderBytes + 1)
+        let request = "POST /mcp HTTP/1.1\r\nx-pad: \(padding)\r\n\r\n"
+        var framing = HTTPFraming()
+        #expect(framing.advance(appending: Data(request.utf8)) == .tooLarge)
+    }
+
     @Test("a tooLarge step never produces a request")
     func tooLargeNeverCompletes() {
         var framing = HTTPFraming()
