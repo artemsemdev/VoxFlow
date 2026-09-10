@@ -249,7 +249,23 @@ public func results() -> AsyncStream<DictationResult>
 
 ## Manual checklist (owner)
 
-Filled in by Task 5.
+- [ ] Settings › MCP Server: turn on "Enable MCP server".
+- [ ] Copy the access token.
+- [ ] Add the Cursor snippet (`docs/runbooks/connect-an-mcp-client.md` §2) to `~/.cursor/mcp.json`
+      with the copied token, and connect Cursor.
+- [ ] Approve Cursor in the ST-06a dialog with VoxFlow's main window closed — confirm the dialog
+      still appears and "Always allow" works.
+- [ ] Run `transcribe_file` from Cursor on a real audio file and confirm the returned text.
+- [ ] Run `dictate` from Cursor: speak, watch the Flow Bar show the capture, confirm the returned
+      text matches what was said and was inserted/saved like a normal dictation.
+- [ ] Turn on `search_history` in Settings › MCP Server, then run it from Cursor and confirm it
+      returns real History hits.
+- [ ] Revoke the client from Connected clients and confirm the next call from Cursor fails.
+- [ ] Regenerate the token and confirm Cursor is disconnected (its next call fails with the old
+      token) and Connected clients is empty.
+- [ ] Occupy port 7331 (`nc -l 7331`) before enabling the server, confirm the endpoint moves to
+      7332 with the "Port 7331 was busy" note, and that Cursor reconnects once its config is
+      updated to the new port.
 
 ## Self-review
 

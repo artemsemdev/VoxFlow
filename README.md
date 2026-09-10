@@ -44,9 +44,14 @@ any app, style cleanup with a local LLM and an MCP server follow in 2.x (see the
 - Home page: today's words/dictations/speaking pace/time saved, a 7-day word chart with a streak,
   your last 4 dictations, and (before your first dictation) a Setup card that tracks permissions,
   the speech model and your hotkey live. Settings › General: launch at login, show in menu bar,
-  start/end sounds, appearance (Light/Dark/System), Flow Bar position, dictation language. Settings
-  › MCP Server: endpoint and access token (with Copy/Regenerate), which tools are exposed — UI only
-  this phase, the server itself ships in 2.4.
+  start/end sounds, appearance (Light/Dark/System), Flow Bar position, dictation language.
+- Settings › MCP Server: a loopback-only MCP server (`127.0.0.1`, tokened) that Cursor or Claude
+  Desktop (via `mcp-remote`) can connect to and use as a tool — `transcribe_file`, `dictate` and
+  `search_history` (off by default). A floating approval dialog gates every new client by name and
+  process, Connected clients lists who's approved with Revoke, and a path policy keeps
+  `transcribe_file` to files inside your home directory that you'd already open yourself. See
+  [docs/runbooks/connect-an-mcp-client.md](docs/runbooks/connect-an-mcp-client.md) and
+  [ADR-008](docs/adr/008-loopback-mcp-server.md).
 - Menu bar: click the status item for today's stats, a hands-free toggle, quick actions (History,
   Settings, the language picker) and "Pause dictation for 1 hour" — fn does nothing while paused,
   and the menu bar header reads "Paused until 10:41" until you resume. A model finishing a download

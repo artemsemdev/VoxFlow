@@ -72,6 +72,19 @@ versioning.
 - Files result view: "Apply {Style} cleanup" checkbox rewrites every segment of a finished
   transcript through the rule-based pipeline (instant, no re-processing) — the preview, Copy,
   Save as… and "Also export" all reflect the cleaned text while it's checked.
+- Loopback MCP server (Settings › MCP Server): Cursor, or Claude Desktop via `mcp-remote`, can
+  connect over `127.0.0.1` with the token from Settings and use `transcribe_file`, `dictate` and
+  `search_history` (off by default) as tools. A floating approval dialog (name + pid, "Always
+  allow"/"Allow once"/"Deny") gates every new client, keyed on process name and executable path so
+  a relaunched client keeps its approval; Connected clients lists who's approved with Revoke;
+  regenerating the token disconnects and de-approves everyone. `transcribe_file` is bounded by a
+  path policy (inside the home directory, not under `~/Library`, a supported extension);
+  `search_history` skips unreadable rows the same way History does; `dictate` runs one hands-free
+  capture through the same path the hotkey uses, so the Flow Bar shows it and the result is
+  inserted and saved normally. Answers both the current MCP protocol revision and the older
+  `initialize` handshake real clients speak today. Never opens an outbound connection of its own.
+  See [ADR-008](docs/adr/008-loopback-mcp-server.md) and
+  [docs/runbooks/connect-an-mcp-client.md](docs/runbooks/connect-an-mcp-client.md).
 
 ### Fixed
 - Settings › General's appearance and Flow Bar position now apply at launch, not only once
