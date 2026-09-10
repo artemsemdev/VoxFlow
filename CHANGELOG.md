@@ -5,6 +5,10 @@ versioning.
 
 ## 2.1.0 — unreleased (release branch)
 
+Carries phases 3 through 6: dictation, the full main window and Settings, on-device style cleanup,
+and the loopback MCP server. Before tagging, the parts that need real hardware are verified by hand
+against [docs/RELEASE-CHECKLIST-2.1.0.md](docs/RELEASE-CHECKLIST-2.1.0.md).
+
 ### Added
 - Dictation logic: microphone capture, Flow Bar state machine, windowed transcription,
   encrypted history with 30-day retention (no UI yet — phase 3b).
