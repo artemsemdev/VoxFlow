@@ -2,7 +2,11 @@ import Foundation
 import VoxFlowCore
 
 /// Insertion needs a fresh, privacy-checked target, without microphone or model preflight.
-public enum ReinsertionTarget: Sendable, Equatable { case ready, excluded(String) }
+public enum ReinsertionTarget: Sendable, Equatable {
+    case ready, excluded(String)
+    /// The frontmost app changed during preparation; abandon this attempt without inserting.
+    case changed
+}
 
 /// Drives `FlowBarMachine`: owns the mic/transcriber/timer tasks and publishes states for the HUD.
 public actor DictationController {
@@ -194,6 +198,7 @@ public actor DictationController {
         guard let cachedResult, !cachedResult.text.isEmpty, id == captureID, canReinsert, !Task.isCancelled else { return nil }
         let target = await prepare()
         guard id == captureID, canReinsert, !Task.isCancelled else { return nil }
+        guard target != .changed else { return nil }
         if case .excluded(let app) = target { handle(.reinsertionBlocked(app)); return nil }
         let result = await inserter.insert(cachedResult.text, cursorOffset: cachedResult.cursorOffset)
         guard id == captureID, canReinsert, !Task.isCancelled else { return result }

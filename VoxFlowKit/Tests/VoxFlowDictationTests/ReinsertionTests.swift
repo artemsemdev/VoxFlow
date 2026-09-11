@@ -105,6 +105,14 @@ struct ReinsertionTests {
         #expect(h.inserter.cursorOffsets.last == 7)
     }
 
+    @Test("a target changed during preparation is abandoned without insertion or a misleading HUD")
+    func changedTarget() async {
+        let h = await Harness()
+        #expect(await h.controller.reinsertLast(prepare: { .changed }, lastSaved: { previous }) == nil)
+        #expect(h.inserter.insertedTexts.isEmpty)
+        #expect(await h.controller.state == .idle)
+    }
+
     @Test("excluded targets and paused/busy dictation cannot receive reinsertion")
     func gates() async {
         let h = await Harness()

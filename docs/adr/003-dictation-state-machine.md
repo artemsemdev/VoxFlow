@@ -65,6 +65,9 @@ state with I/O.
   broadcasts another dictation result. Capture preparation and reinsertion exclude one another.
   Escape invalidates pending storage/target preparation. Dispatch to `TextInserting.insert` is the
   commit point: the protocol cannot roll back an edit already handed to another application.
+  The app rechecks exclusions, secure input and frontmost-app identity after awaiting focus capture;
+  a changed app abandons the attempt. Persisted fallback is read only with history enabled, checked
+  again after the read; unreadable or empty records cannot be replayed.
 - Live audio is cut into windows by `WindowPlanner` — at least 3 s, ending in ≥ 0.4 s
   of trailing silence, or cut at 10 s regardless — and each window is transcribed by
   `WindowedTranscriber` against `SpeechEngine`, with the previous window's decoded
