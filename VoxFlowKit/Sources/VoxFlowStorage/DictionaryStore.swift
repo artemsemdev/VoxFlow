@@ -5,9 +5,13 @@ import VoxFlowCore
 /// The `dictionary` table: proper nouns and terms Speech should recognize (design Dictionary tab).
 /// Synchronous and blocking like `DictationStore` — call this off the main actor.
 public final class DictionaryStore: Sendable {
+    private let database: VoxFlowDatabase
     private let queue: DatabaseQueue
 
-    public init(database: VoxFlowDatabase) { queue = database.queue }
+    public init(database: VoxFlowDatabase) {
+        self.database = database
+        queue = database.queue
+    }
 
     /// Throws `StorageError.duplicate(existingID:)` when a row with the same folded word already
     /// exists. The `find` is a fast pre-check; the `word_folded` `UNIQUE` column is the real

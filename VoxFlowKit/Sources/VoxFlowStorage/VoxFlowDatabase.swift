@@ -1,20 +1,59 @@
 import Foundation
 import GRDB
+import Synchronization
+
+private final class RetainedDatabaseLifetime: Sendable {
+    private let retention: Mutex<(@Sendable () -> Void)?>
+
+    init(_ retention: @escaping @Sendable () -> Void) {
+        self.retention = Mutex(retention)
+    }
+
+    func keepAlive() {
+        retention.withLock { $0?() }
+    }
+
+    func release() {
+        retention.withLock { $0 = nil }
+    }
+}
 
 /// Owns the shared SQLite connection and every schema migration (design §5). One database file
 /// backs dictation history plus the dictionary, snippets, and per-app style override tables.
 public final class VoxFlowDatabase: Sendable {
     public let queue: DatabaseQueue
+    private let retainedLifetime: RetainedDatabaseLifetime?
 
     public static var defaultURL: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("VoxFlow/voxflow.sqlite")
     }
 
-    public init(url: URL) throws {
+    public convenience init(url: URL, configuration: Configuration) throws {
+        try self.init(url: url, configuration: configuration, retainedLifetime: nil)
+    }
+
+    private init(url: URL, configuration: Configuration, retainedLifetime: RetainedDatabaseLifetime?) throws {
+        self.retainedLifetime = retainedLifetime
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        queue = try DatabaseQueue(path: url.path)
+        queue = try DatabaseQueue(path: url.path, configuration: configuration)
         try Self.migrator.migrate(queue)
+    }
+
+    public convenience init(url: URL) throws {
+        try self.init(url: url, configuration: Configuration())
+    }
+
+    /// Opens a database while retaining the supplied lifetime closure until the queue closes.
+    /// This is useful for temporary file fixtures whose directory must outlive all queue users.
+    public convenience init(url: URL, retaining lifetime: @escaping @Sendable () -> Void) throws {
+        let retainedLifetime = RetainedDatabaseLifetime(lifetime)
+        var configuration = Configuration()
+        // GRDB retains the fallback through its connection configuration. If an explicit close
+        // cannot complete during wrapper teardown, this keeps the fixture alive until GRDB's final
+        // close_v2 and configuration release.
+        configuration.prepareDatabase { [retainedLifetime] _ in retainedLifetime.keepAlive() }
+        try self.init(url: url, configuration: configuration, retainedLifetime: retainedLifetime)
     }
 
     public static func inMemory() throws -> VoxFlowDatabase {
@@ -22,8 +61,18 @@ public final class VoxFlowDatabase: Sendable {
     }
 
     private init(queue: DatabaseQueue) throws {
+        retainedLifetime = nil
         self.queue = queue
         try Self.migrator.migrate(queue)
+    }
+
+    deinit {
+        guard let retainedLifetime else { return }
+        // A successful synchronous close makes it safe to release a temporary fixture immediately.
+        // On failure, the configuration-owned fallback keeps it alive through GRDB's close_v2.
+        if (try? queue.close()) != nil {
+            retainedLifetime.release()
+        }
     }
 
     private static var migrator: DatabaseMigrator {

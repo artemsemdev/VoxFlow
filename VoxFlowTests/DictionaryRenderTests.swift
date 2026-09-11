@@ -50,7 +50,7 @@ struct DictionaryRenderTests {
         let dir = TemporaryDirectory()
         let settings = DictationSettings(store: InMemoryKeyValueStore())
         let styling = StylingSettings(store: InMemoryKeyValueStore())
-        let service = HistoryService(url: dir.file("voxflow.sqlite"), settings: settings, keyProvider: { InsecureKeyProvider() },
+        let service = HistoryService(directory: dir, settings: settings, keyProvider: { InsecureKeyProvider() },
                                      clock: SystemMonotonicClock())
         let content = ContentService(history: service)
         let vm = DictionaryViewModel(content: content, contactsImporter: contacts, stylingSettings: styling, openURL: { _ in })

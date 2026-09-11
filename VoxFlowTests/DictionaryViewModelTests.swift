@@ -24,7 +24,7 @@ struct DictionaryViewModelTests {
 
         init() {
             settings = StylingSettings(store: InMemoryKeyValueStore())
-            service = HistoryService(url: dir.file("voxflow.sqlite"), settings: DictationSettings(store: InMemoryKeyValueStore()),
+            service = HistoryService(directory: dir, settings: DictationSettings(store: InMemoryKeyValueStore()),
                                      keyProvider: { FakeDictionaryKeyProvider() }, clock: SystemMonotonicClock())
             content = ContentService(history: service)
         }

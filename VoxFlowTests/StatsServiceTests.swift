@@ -86,7 +86,7 @@ struct StatsServiceTests {
         let settings = DictationSettings(store: InMemoryKeyValueStore())
         settings.retentionDays = 0
         settings.encryptHistory = false
-        return HistoryService(url: dir.file("voxflow.sqlite"), settings: settings,
+        return HistoryService(directory: dir, settings: settings,
                               keyProvider: { FakeHistoryKeyProvider() }, clock: FakeClock())
     }
 

@@ -30,7 +30,7 @@ private final class FakeInstalledApps: InstalledAppsProviding, @unchecked Sendab
 @Suite("PrivacyViewModel") @MainActor
 struct PrivacyViewModelTests {
     func makeService(dir: TemporaryDirectory, settings: DictationSettings) -> HistoryService {
-        HistoryService(url: dir.file("voxflow.sqlite"), settings: settings, keyProvider: { FakeHistoryKeyProvider() }, clock: FakeClock())
+        HistoryService(directory: dir, settings: settings, keyProvider: { FakeHistoryKeyProvider() }, clock: FakeClock())
     }
 
     // MARK: excluded apps
@@ -161,7 +161,7 @@ struct PrivacyViewModelTests {
         let settings = DictationSettings(store: InMemoryKeyValueStore())
         // `FakeHistoryKeyProvider` always reports `isNewlyCreated: true` with a fresh random key —
         // opening the *already-encrypted* database above with it is exactly `StorageError.keyLost`.
-        let brokenService = HistoryService(url: url, settings: settings, keyProvider: { FakeHistoryKeyProvider() }, clock: FakeClock())
+        let brokenService = HistoryService(directory: dir, settings: settings, keyProvider: { FakeHistoryKeyProvider() }, clock: FakeClock())
         _ = await brokenService.count()
         #expect(brokenService.status == .disabled(reason: "history key lost"))
         let model = PrivacyViewModel(settings: settings, history: brokenService, apps: FakeInstalledApps())

@@ -6,9 +6,13 @@ import VoxFlowCore
 /// "Connected clients"). Synchronous and blocking like `DictionaryStore` — call this off the main
 /// actor.
 public final class MCPClientStore: Sendable {
+    private let database: VoxFlowDatabase
     private let queue: DatabaseQueue
 
-    public init(database: VoxFlowDatabase) { queue = database.queue }
+    public init(database: VoxFlowDatabase) {
+        self.database = database
+        queue = database.queue
+    }
 
     /// Upsert keyed on `(name, path)` (never pid — ruling 5): a first sighting inserts a new row
     /// with `approved = false`, `firstSeen == lastSeen == now`; a repeat sighting updates only

@@ -28,8 +28,26 @@ private struct FakeFreshKeyProvider: HistoryKeyProviding {
 @Suite("HistoryViewModel", .timeLimit(.minutes(1)))
 @MainActor
 struct HistoryViewModelTests {
+    @Test("pending debounce and Undo timers do not keep a released view model alive", arguments: [false, true])
+    func timerLifetime(undo: Bool) async throws {
+        let h = Harness()
+        let rows = await h.seed(1)
+        var vm: HistoryViewModel? = h.vm()
+        weak let weakModel = vm
+        await vm?.load()
+        if undo { vm?.delete(try #require(rows.first)) }
+        else { vm?.query = "pending" }
+        await h.clock.waitForSleepers(1)
+        // Finish the immediate delete/search chain before isolating the timer's ownership.
+        await vm?.refresh()
+        vm = nil
+        #expect(weakModel == nil)
+        #expect(h.clock.sleeperCount == 0)
+        await h.clock.advance(by: HistoryViewModel.undoWindow)
+    }
+
     static func makeService(dir: TemporaryDirectory, settings: DictationSettings, clock: any MonotonicClock) -> HistoryService {
-        HistoryService(url: dir.file("voxflow.sqlite"), settings: settings,
+        HistoryService(directory: dir, settings: settings,
                        keyProvider: { FakeHistoryKeyProvider() }, clock: clock)
     }
 
@@ -256,7 +274,7 @@ struct HistoryViewModelTests {
 
         let settings = DictationSettings(store: InMemoryKeyValueStore())
         settings.retentionDays = 0
-        let brokenService = HistoryService(url: url, settings: settings, keyProvider: { FakeFreshKeyProvider() }, clock: FakeClock())
+        let brokenService = HistoryService(directory: dir, settings: settings, keyProvider: { FakeFreshKeyProvider() }, clock: FakeClock())
         let vm = HistoryViewModel(service: brokenService, settings: settings, navigation: Navigation(), clock: FakeClock())
 
         await vm.load()

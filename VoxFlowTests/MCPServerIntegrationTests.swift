@@ -119,7 +119,7 @@ private func makeIntegrationServer(
     let historyDir = TemporaryDirectory()
     let historySettings = DictationSettings(store: InMemoryKeyValueStore())
     historySettings.retentionDays = 0
-    let historyService = HistoryService(url: historyDir.file("voxflow.sqlite"), settings: historySettings,
+    let historyService = HistoryService(directory: historyDir, settings: historySettings,
                                         keyProvider: { IntegrationHistoryKeyProvider() }, clock: clock)
 
     let resolvedPathPolicy = pathPolicy ?? PathPolicy(homeDirectory: TemporaryDirectory().url, allowedExtensions: ["wav"])

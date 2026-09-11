@@ -53,6 +53,7 @@ final class HistoryService {
     private let settings: DictationSettings
     private let keyProvider: @Sendable () -> any HistoryKeyProviding
     private let clock: any MonotonicClock
+    private let openDatabase: @Sendable (URL) throws -> VoxFlowDatabase
     private var retention: RetentionRunner?
     /// The in-flight (or most recently finished) open/reopen — every public accessor awaits this
     /// first, so a call made right after `init`/`reopen()` sees the resulting store rather than
@@ -61,11 +62,14 @@ final class HistoryService {
 
     private static let log = Logger(subsystem: "dev.artemsem.voxflow", category: "history-service")
 
-    init(url: URL, settings: DictationSettings, keyProvider: @escaping @Sendable () -> any HistoryKeyProviding, clock: any MonotonicClock) {
+    init(url: URL, settings: DictationSettings, keyProvider: @escaping @Sendable () -> any HistoryKeyProviding,
+         clock: any MonotonicClock,
+         openDatabase: @escaping @Sendable (URL) throws -> VoxFlowDatabase = { try VoxFlowDatabase(url: $0) }) {
         self.url = url
         self.settings = settings
         self.keyProvider = keyProvider
         self.clock = clock
+        self.openDatabase = openDatabase
         // Deliberately no `reopen()` here: opening touches the Keychain (history key), and every
         // ad-hoc rebuild is a new code identity to macOS, so an open at construction would prompt on
         // every launch of the test host too (#143). The store opens on first use instead; Task 5's
@@ -76,7 +80,7 @@ final class HistoryService {
     /// `openTask`, so the Keychain is only touched once history is actually used.
     private func ensureOpened() {
         guard openTask == nil else { return }
-        openTask = Task { await self.performOpen() }
+        openTask = Task { [weak self] in await self?.performOpen() }
     }
 
     /// Rebuilds the store with/without the key provider per `settings.encryptHistory`, and restarts
@@ -94,9 +98,9 @@ final class HistoryService {
         // reads the current settings anyway, and forcing an open here would touch the Keychain
         // just because a toggle moved.
         guard let previous = openTask else { return }
-        openTask = Task {
+        openTask = Task { [weak self] in
             _ = await previous.value
-            await self.performOpen()
+            await self?.performOpen()
         }
     }
 
@@ -221,7 +225,8 @@ final class HistoryService {
             openedDatabase = database
         } else {
             do {
-                openedDatabase = try await Task.detached(priority: .userInitiated) { try VoxFlowDatabase(url: url) }.value
+                let openDatabase = self.openDatabase
+                openedDatabase = try await Task.detached(priority: .userInitiated) { try openDatabase(url) }.value
             } catch {
                 store = nil
                 database = nil

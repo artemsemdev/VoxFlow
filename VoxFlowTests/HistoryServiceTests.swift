@@ -27,7 +27,7 @@ struct HistoryServiceTests {
         // Test rows carry epoch-era dates; a live 30-day retention purge (which runs on every open,
         // on a detached task) would race the inserts — CI lost that race once. "Never" keeps it out.
         settings.retentionDays = 0
-        return HistoryService(url: dir.file("voxflow.sqlite"), settings: settings,
+        return HistoryService(directory: dir, settings: settings,
                        keyProvider: { FakeHistoryKeyProvider(key: key, isNew: isNew) }, clock: FakeClock())
     }
 
@@ -63,7 +63,7 @@ struct HistoryServiceTests {
         _ = try DictationStore(databaseURL: url, keyProvider: FakeHistoryKeyProvider(key: sharedKey)).insert(draft("secret", at: Date()))
 
         let settings = DictationSettings(store: InMemoryKeyValueStore())
-        let service = HistoryService(url: url, settings: settings,
+        let service = HistoryService(directory: dir, settings: settings,
                                      keyProvider: { FakeHistoryKeyProvider(key: SymmetricKey(size: .bits256), isNew: true) }, clock: FakeClock())
         _ = await service.count()
 
@@ -80,10 +80,8 @@ struct HistoryServiceTests {
         let dir = TemporaryDirectory()
         let blocker = dir.file("blocker")
         try Data().write(to: blocker)
-        let url = blocker.appendingPathComponent("nested").appendingPathComponent("voxflow.sqlite")
-
         let settings = DictationSettings(store: InMemoryKeyValueStore())
-        let service = HistoryService(url: url, settings: settings, keyProvider: { FakeHistoryKeyProvider() }, clock: FakeClock())
+        let service = HistoryService(directory: dir, relativePath: "blocker/nested/voxflow.sqlite", settings: settings, keyProvider: { FakeHistoryKeyProvider() }, clock: FakeClock())
         _ = await service.count()
 
         #expect(service.store == nil)
@@ -208,7 +206,7 @@ struct HistoryServiceTests {
         _ = try DictationStore(databaseURL: url, keyProvider: FakeHistoryKeyProvider(key: sharedKey)).insert(draft("secret", at: Date()))
 
         let settings = DictationSettings(store: InMemoryKeyValueStore())
-        let service = HistoryService(url: url, settings: settings,
+        let service = HistoryService(directory: dir, settings: settings,
                                      keyProvider: { FakeHistoryKeyProvider(key: SymmetricKey(size: .bits256), isNew: true) }, clock: FakeClock())
         _ = await service.count()                                     // force the open to finish
 
