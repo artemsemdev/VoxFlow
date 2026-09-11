@@ -50,7 +50,8 @@ struct HistoryViewModelTests {
             settings = DictationSettings(store: InMemoryKeyValueStore())
             settings.retentionDays = 0   // seeded rows use epoch dates; keep the live retention purge out of the way
             settings.keepHistory = keepHistory
-            service = HistoryViewModelTests.makeService(dir: dir, settings: settings, clock: clock)
+            // Retention's daily sleeper must never satisfy the view model's debounce/Undo gates.
+            service = HistoryViewModelTests.makeService(dir: dir, settings: settings, clock: FakeClock())
         }
 
         /// `restyler` is nil-able (not defaulted to a real `Restyler`) so passing nothing here keeps
@@ -125,7 +126,7 @@ struct HistoryViewModelTests {
         await vm.load()
         #expect(vm.records.count == 2)
 
-        let sleepersBefore = h.clock.sleeperCount   // the store's RetentionRunner already parks one
+        let sleepersBefore = h.clock.sleeperCount
         vm.query = "num"
         // Not yet applied — the debounce hasn't elapsed.
         #expect(vm.records.count == 2)
@@ -193,7 +194,7 @@ struct HistoryViewModelTests {
         await vm.load()
         let target = vm.records[0]
 
-        let sleepersBefore = h.clock.sleeperCount   // the store's RetentionRunner already parks one
+        let sleepersBefore = h.clock.sleeperCount
         vm.delete(target)
         await waitFor { (try? h.service.store!.count()) == 1 }
 
@@ -234,7 +235,7 @@ struct HistoryViewModelTests {
         let vm = h.vm()
         await vm.load()
 
-        let sleepersBefore = h.clock.sleeperCount   // the store's RetentionRunner already parks one
+        let sleepersBefore = h.clock.sleeperCount
         vm.query = "nothing matches this"
         await h.clock.waitForSleepers(sleepersBefore + 1)
         await h.clock.advance(by: 0.15)
