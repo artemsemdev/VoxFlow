@@ -89,6 +89,8 @@ versioning.
   [docs/runbooks/connect-an-mcp-client.md](docs/runbooks/connect-an-mcp-client.md).
 
 ### Fixed
+- Hosted tests no longer construct live app scenes or services, preventing Home and menu-bar
+  refreshes from opening the real history database and prompting for its Keychain key.
 - CI selects the arm64 Mac destination and rejects warnings from build/test logs regardless of letter case.
 - Style-model loading rejects missing, non-file and unreadable paths before starting the native
   backend, avoiding unnecessary GPU initialization and Metal compiler warnings in failure-path tests.

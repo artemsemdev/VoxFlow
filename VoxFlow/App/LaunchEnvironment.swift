@@ -1,9 +1,11 @@
 import Foundation
 
-/// Detects the XCTest host process so `AppDelegate` can skip anything that would open the mic,
-/// install global monitors or touch the Keychain when the app is launched to run tests (#143).
+/// Selects the inert test scene before any production services or views are constructed (#143).
 enum LaunchEnvironment {
     static func isRunningTests(environment: [String: String] = ProcessInfo.processInfo.environment) -> Bool {
-        environment["XCTestConfigurationFilePath"] != nil
+        environment["VOXFLOW_TEST_HOST"] == "1"
+            || environment["XCTestConfigurationFilePath"] != nil
+            || environment["XCTestBundlePath"] != nil
+            || environment["XCInjectBundleInto"] != nil
     }
 }
