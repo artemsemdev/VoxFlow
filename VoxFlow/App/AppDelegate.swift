@@ -72,6 +72,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
+        guard !LaunchEnvironment.isRunningTests() else { return }
         Task { @MainActor in
             // Navigate first so the Files page (and its running-row UI) is what the user sees when
             // the window comes forward, rather than whatever page happened to be selected before.
