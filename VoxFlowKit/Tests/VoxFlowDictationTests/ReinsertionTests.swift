@@ -1,4 +1,5 @@
 import Testing
+import Synchronization
 import VoxFlowCore
 import VoxFlowTestSupport
 @testable import VoxFlowDictation
@@ -41,6 +42,20 @@ struct ReinsertionTests {
         #expect(await h.controller.state == .inserted(appName: "Mail", words: 3, limitReached: false))
     }
 
+    @Test("a completed session re-inserts a Unicode snippet at its cached cursor offset")
+    func sessionCursorOffset() async {
+        let snippet = DictationResult(text: "Привет 👋\nArtem", rawText: "/sig", segments: [], language: nil,
+                                      duration: 2, lowConfidence: false, cursorOffset: 6)
+        let h = await Harness(result: snippet)
+        await finish(h)
+        await h.saved.waitUntilCount(1)
+        #expect(await h.controller.reinsertLast(prepare: { .ready }, lastSaved: {
+            Issue.record("session cache must not read history"); return nil
+        }) == .inserted(appName: "Mail"))
+        #expect(h.inserter.insertedTexts == [snippet.text, snippet.text])
+        #expect(h.inserter.cursorOffsets == [6, 6])
+    }
+
     @Test("a stored fallback can be reinserted on a fresh launch without microphone/model checks; clipboard fallback is retained")
     func storedResult() async {
         let h = await Harness(preflight: Preflight(excludedApp: nil, secureInput: false, microphone: .denied, model: .notInstalled(sizeBytes: 1)))
@@ -52,6 +67,13 @@ struct ReinsertionTests {
         #expect(await h.controller.state == .copied)
     }
 
+    @Test("history fallback has no cursor metadata")
+    func storedCursorOffsetIsNil() async {
+        let h = await Harness()
+        #expect(await h.controller.reinsertLast(prepare: { .ready }, lastSaved: { previous }) == .inserted(appName: "Mail"))
+        #expect(h.inserter.cursorOffsets == [nil])
+    }
+
     @Test("no result and ephemeral captures never request an insertion target")
     func emptyAndEphemeral() async {
         let h = await Harness(ephemeral: { true })
@@ -60,6 +82,27 @@ struct ReinsertionTests {
         #expect(await h.controller.reinsertLast(prepare: { Issue.record("ephemeral text"); return .ready }) == nil)
         #expect(h.inserter.insertedTexts.count == 1)
         #expect(h.saved.items.isEmpty)
+    }
+
+    @Test("an ephemeral completion and a later abort preserve prior session cursor metadata")
+    func ephemeralAndAbortPreserveSessionCursor() async {
+        let ephemeral = Mutex(false)
+        let snippet = DictationResult(text: "Best,\n\nАртём", rawText: "/sig", segments: [], language: nil,
+                                      duration: 2, lowConfidence: false, cursorOffset: 7)
+        let h = await Harness(result: snippet, ephemeral: { ephemeral.withLock { $0 } })
+        await finish(h)
+        await h.saved.waitUntilCount(1)
+        ephemeral.withLock { $0 = true }
+        await finish(h)
+        await h.controller.shortcutDown(.pushToTalk)
+        _ = await h.next()
+        await h.mic.waitUntilCapturing()
+        await h.controller.escape()
+        _ = await h.next()
+        #expect(await h.controller.reinsertLast(prepare: { .ready }, lastSaved: {
+            Issue.record("session cache must survive ephemeral and aborted captures"); return nil
+        }) == .inserted(appName: "Mail"))
+        #expect(h.inserter.cursorOffsets.last == 7)
     }
 
     @Test("excluded targets and paused/busy dictation cannot receive reinsertion")

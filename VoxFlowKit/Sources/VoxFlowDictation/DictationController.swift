@@ -188,16 +188,16 @@ public actor DictationController {
         isReinserting = true
         defer { isReinserting = false }
         let id = captureID
-        let text: String?
-        if let lastCompletedResult { text = lastCompletedResult.text }
-        else { text = await lastSaved()?.text }
-        guard let text, !text.isEmpty, id == captureID, canReinsert, !Task.isCancelled else { return nil }
+        let cachedResult: DictationResult?
+        if let lastCompletedResult { cachedResult = lastCompletedResult }
+        else { cachedResult = await lastSaved() }
+        guard let cachedResult, !cachedResult.text.isEmpty, id == captureID, canReinsert, !Task.isCancelled else { return nil }
         let target = await prepare()
         guard id == captureID, canReinsert, !Task.isCancelled else { return nil }
         if case .excluded(let app) = target { handle(.reinsertionBlocked(app)); return nil }
-        let result = await inserter.insert(text)
+        let result = await inserter.insert(cachedResult.text, cursorOffset: cachedResult.cursorOffset)
         guard id == captureID, canReinsert, !Task.isCancelled else { return result }
-        handle(.reinsertionFinished(text: text, result: result))
+        handle(.reinsertionFinished(text: cachedResult.text, result: result))
         return result
     }
     private var canReinsert: Bool { machine.state == .idle || machine.state.isDismissable }
