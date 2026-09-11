@@ -71,7 +71,7 @@ Verification, and what "green" means here:
 
 ```sh
 xcodegen generate
-xcodebuild -scheme VoxFlow -destination 'platform=macOS' build test   # 477 app tests + every package bundle
+xcodebuild -xcconfig Build.xcconfig -scheme VoxFlow -destination 'platform=macOS' build test   # 477 app tests + every package bundle
 cd VoxFlowKit && swift test                                          # 363 package tests
 python3 -m unittest discover -s scripts/tests                         # 15 CI-script tests
 ```

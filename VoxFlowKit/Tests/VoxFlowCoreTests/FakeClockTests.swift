@@ -43,7 +43,7 @@ struct FakeClockTests {
         await clock.waitForSleepers(1)
         task.cancel()
         await #expect(throws: CancellationError.self) { try await task.value }
-        #expect(await clock.sleeperCount == 0)
+        #expect(clock.sleeperCount == 0)
     }
 }
 
