@@ -149,6 +149,13 @@ public actor DictationController {
 
     public func fnDown() async { handle(.fnDown(await preflight())) }
     public func fnUp() { handle(.fnUp) }
+    public func shortcutDown(_ mode: HotkeyMode) async {
+        // Preflight captures the insertion target. Only a start may replace that target; a stop
+        // or a shortcut ignored while busy must preserve the current capture's focus snapshot.
+        let checks = machine.state == .idle || machine.state.isDismissable ? await preflight() : nil
+        handle(.shortcutDown(mode, checks))
+    }
+    public func pushToTalkReleased() { handle(.pushToTalkReleased) }
     public func escape() { handle(.escape) }
     public func anyKey() { handle(.anyKey) }
     public func copyRaw() { handle(.copyRawRequested) }
