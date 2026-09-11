@@ -29,6 +29,7 @@ final class DictationSettings {
     /// policy closure) — a single source of truth instead of a second copy of the literal.
     enum Keys {
         static let retentionDays = "privacy.retentionDays"
+        static let shortcuts = "dictation.shortcuts"
     }
 
     /// Fired from `silenceStop`'s `didSet` (after clamping) so a live dictation's controller can
@@ -37,6 +38,22 @@ final class DictationSettings {
     /// Fired from `encryptHistory`/`retentionDays`'s `didSet`s so `HistoryService` can reopen the
     /// store with the new key policy / restart retention with the new window.
     var onHistorySettingsChange: (() -> Void)?
+    var onShortcutsChange: (() -> Void)?
+    private(set) var shortcuts = DictationShortcuts()
+
+    @discardableResult
+    func setShortcut(_ binding: ShortcutBinding, for action: ShortcutAction) -> Bool {
+        guard binding.validationError(for: action) == nil else { return false }
+        guard shortcuts[action] != binding else { return true }
+        var updated = shortcuts
+        updated[action] = binding
+        guard updated.isValid else { return false }
+        guard let data = try? JSONEncoder().encode(updated), let value = String(data: data, encoding: .utf8) else { return false }
+        shortcuts = updated
+        store.set(value, forKey: Keys.shortcuts)
+        onShortcutsChange?()
+        return true
+    }
 
     var hotkeyMode: HotkeyMode { didSet { store.set(hotkeyMode.rawValue, forKey: "dictation.hotkeyMode") } }
     var silenceStop: TimeInterval {
@@ -61,6 +78,10 @@ final class DictationSettings {
 
     init(store: any KeyValueStore) {
         self.store = store
+        if let data = store.string(forKey: Keys.shortcuts)?.data(using: .utf8),
+           let saved = try? JSONDecoder().decode(DictationShortcuts.self, from: data), saved.isValid {
+            shortcuts = saved
+        }
         hotkeyMode = store.string(forKey: "dictation.hotkeyMode").flatMap(HotkeyMode.init(rawValue:)) ?? .pushToTalk
         silenceStop = FlowBarConfig(silenceStop: store.string(forKey: "dictation.silenceStop").flatMap(Double.init) ?? 3).silenceStop
         language = store.string(forKey: "dictation.language")

@@ -14,7 +14,8 @@ enum EditableRole {
 final class AccessibilityTextInserter: TextInserting {
     private let permissions: any PermissionChecking
     private let pasteboard: any Pasteboard
-    private var target: AXUIElement?
+    private var target: (any AccessibilityTextTarget)?
+    private let focusTarget: @MainActor () -> (any AccessibilityTextTarget)?
     private var appName: String?
     /// M-1: macOS does not reliably one-shot the Accessibility prompt per process, so without this
     /// `capture()` would ask again on *every* fn-down — including the ones the machine ignores
@@ -22,9 +23,11 @@ final class AccessibilityTextInserter: TextInserting {
     /// `prompt: false`.
     private var hasPrompted = false
 
-    init(permissions: any PermissionChecking, pasteboard: any Pasteboard) {
+    init(permissions: any PermissionChecking, pasteboard: any Pasteboard,
+         focusTarget: @escaping @MainActor () -> (any AccessibilityTextTarget)? = { AXTextTarget.focused() }) {
         self.permissions = permissions
         self.pasteboard = pasteboard
+        self.focusTarget = focusTarget
     }
 
     /// I-5: takes the `FrontmostApp` `PreflightBuilder` already read and checked against the
@@ -41,32 +44,28 @@ final class AccessibilityTextInserter: TextInserting {
         let trusted = permissions.accessibilityTrusted(prompt: prompt)
         if prompt { hasPrompted = true }
         guard trusted else { return }
-        var focused: CFTypeRef?
-        let system = AXUIElementCreateSystemWide()
-        guard AXUIElementCopyAttributeValue(system, kAXFocusedUIElementAttribute as CFString, &focused) == .success,
-              let element = focused, CFGetTypeID(element) == AXUIElementGetTypeID() else { return }
-        target = unsafeDowncast(element, to: AXUIElement.self)
+        target = focusTarget()
     }
 
-    nonisolated func insert(_ text: String) async -> InsertionResult {
-        await MainActor.run { self.performInsert(text) }
+    nonisolated func insert(_ text: String, cursorOffset: Int?) async -> InsertionResult {
+        await MainActor.run { self.performInsert(text, cursorOffset: cursorOffset) }
     }
 
-    private func performInsert(_ text: String) -> InsertionResult {
+    private func performInsert(_ text: String, cursorOffset: Int?) -> InsertionResult {
         defer { target = nil }
-        if let target, permissions.accessibilityTrusted(prompt: false), Self.isEditable(target) {
-            let status = AXUIElementSetAttributeValue(target, kAXSelectedTextAttribute as CFString, text as CFString)
-            if status == .success { return .inserted(appName: appName) }
+        if let target, permissions.accessibilityTrusted(prompt: false), target.isEditable {
+            // Read the replacement's start before writing: most targets move selection to its end.
+            let selection = cursorOffset == nil ? nil : target.selectedRange
+            if target.replaceSelectedText(text) {
+                if let offset = cursorOffset, offset >= 0, offset <= text.count,
+                   let start = selection?.location, start >= 0, start != NSNotFound {
+                    let (position, overflow) = start.addingReportingOverflow(text.prefix(offset).utf16.count)
+                    if !overflow { _ = target.setSelectedRange(NSRange(location: position, length: 0)) }
+                }
+                return .inserted(appName: appName)
+            }
         }
         pasteboard.setString(text)
         return .copiedToClipboard
-    }
-
-    private static func isEditable(_ element: AXUIElement) -> Bool {
-        var role: CFTypeRef?
-        AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role)
-        var settable = DarwinBoolean(false)
-        AXUIElementIsAttributeSettable(element, kAXSelectedTextAttribute as CFString, &settable)
-        return EditableRole.isEditable(role: role as? String, selectedTextSettable: settable.boolValue)
     }
 }

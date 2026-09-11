@@ -1,6 +1,9 @@
 import Foundation
 import VoxFlowCore
 
+/// Insertion needs a fresh, privacy-checked target, without microphone or model preflight.
+public enum ReinsertionTarget: Sendable, Equatable { case ready, excluded(String) }
+
 /// Drives `FlowBarMachine`: owns the mic/transcriber/timer tasks and publishes states for the HUD.
 public actor DictationController {
     public typealias SaveHandler = @Sendable (DictationResult, String?) async -> Void
@@ -39,6 +42,10 @@ public actor DictationController {
     /// Multi-subscriber fan-out for `results()`, same shape as `subscribers` above.
     private var resultSubscribers: [UUID: AsyncStream<DictationResult>.Continuation] = [:]
     public private(set) var lastResult: DictationResult?
+    /// Session-only cache, independent of the history toggle and of a later aborted capture.
+    private var lastCompletedResult: DictationResult?
+    private var isReinserting = false
+    private var isPreparingCapture = false
     private var lastAppName: String?
     /// A config set mid-dictation (`updateConfig` while not `.idle`) waits here rather than
     /// mutating the running machine's timers out from under it — applied the moment the machine
@@ -147,11 +154,53 @@ public actor DictationController {
     }
     private func removeResultSubscriber(_ id: UUID) { resultSubscribers[id] = nil }
 
-    public func fnDown() async { handle(.fnDown(await preflight())) }
+    public func fnDown() async { await activate(mode: nil) }
     public func fnUp() { handle(.fnUp) }
-    public func escape() { handle(.escape) }
+    public func shortcutDown(_ mode: HotkeyMode) async { await activate(mode: mode) }
+    private func activate(mode: HotkeyMode?) async {
+        guard !isReinserting, !isPreparingCapture else { return }
+        // Preflight captures the insertion target. Only a start may replace that target; a stop
+        // or an ignored dedicated shortcut must preserve the current capture's focus snapshot.
+        var checks: Preflight?
+        if mode == nil || canReinsert {
+            isPreparingCapture = true
+            let id = captureID
+            checks = await preflight()
+            isPreparingCapture = false
+            guard id == captureID, !Task.isCancelled else { return }
+        }
+        if let mode { handle(.shortcutDown(mode, checks)) }
+        else if let checks { handle(.fnDown(checks)) }
+    }
+    public func pushToTalkReleased() { handle(.pushToTalkReleased) }
+    public func escape() {
+        if isReinserting || isPreparingCapture { captureID &+= 1 }
+        handle(.escape)
+    }
     public func anyKey() { handle(.anyKey) }
     public func copyRaw() { handle(.copyRawRequested) }
+    /// Escape can invalidate storage/target preparation. Dispatching `insert` is the commit point:
+    /// the insertion protocol cannot roll back an edit already handed to the target application.
+    @discardableResult
+    public func reinsertLast(prepare: @Sendable () async -> ReinsertionTarget,
+                             lastSaved: @Sendable () async -> DictationResult? = { nil }) async -> InsertionResult? {
+        guard canReinsert, !isReinserting, !isPreparingCapture else { return nil }
+        isReinserting = true
+        defer { isReinserting = false }
+        let id = captureID
+        let cachedResult: DictationResult?
+        if let lastCompletedResult { cachedResult = lastCompletedResult }
+        else { cachedResult = await lastSaved() }
+        guard let cachedResult, !cachedResult.text.isEmpty, id == captureID, canReinsert, !Task.isCancelled else { return nil }
+        let target = await prepare()
+        guard id == captureID, canReinsert, !Task.isCancelled else { return nil }
+        if case .excluded(let app) = target { handle(.reinsertionBlocked(app)); return nil }
+        let result = await inserter.insert(cachedResult.text, cursorOffset: cachedResult.cursorOffset)
+        guard id == captureID, canReinsert, !Task.isCancelled else { return result }
+        handle(.reinsertionFinished(text: cachedResult.text, result: result))
+        return result
+    }
+    private var canReinsert: Bool { machine.state == .idle || machine.state.isDismissable }
     /// FB-09: pause dictation from the menu bar or the Flow Bar pill.
     public func pause(for seconds: TimeInterval) { handle(.pause(seconds: seconds)) }
     public func resume() { handle(.resume) }
@@ -194,8 +243,9 @@ public actor DictationController {
         case .cancelTimer(let id): timers[id]?.task.cancel(); timers[id] = nil
         case .insert(let text):
             let id = captureID
+            let cursorOffset = lastResult?.cursorOffset
             Task {
-                let result = await self.inserter.insert(text)
+                let result = await self.inserter.insert(text, cursorOffset: cursorOffset)
                 self.recordInsertion(result, capture: id)
             }
         case .copyToClipboard(let text): copyToClipboard(text)
@@ -205,6 +255,7 @@ public actor DictationController {
             // (Try It, a History scratchpad) skips the save entirely — silently, not logged: this is
             // the expected, common path for those captures, not an error condition.
             if let result = lastResult, !captureIsEphemeral {
+                lastCompletedResult = result
                 let appName = lastAppName
                 // See `results()`'s doc comment: broadcast here, alongside `onSave`, not from a
                 // second call site — this is the one place a finished, non-ephemeral capture's

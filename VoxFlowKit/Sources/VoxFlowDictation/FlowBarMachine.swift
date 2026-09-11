@@ -29,6 +29,9 @@ public enum FlowBarTimer: Sendable, Hashable { case hold, doubleTap, silence, ca
 
 public enum FlowBarEvent: Sendable, Equatable {
     case fnDown(Preflight), fnUp, escape, anyKey
+    /// A separately assigned shortcut has no ambiguous hold/double-tap gesture to resolve.
+    /// Missing preflight permits stopping only; it can never start a capture.
+    case shortcutDown(HotkeyMode, Preflight?), pushToTalkReleased
     case level(rms: Float)
     case timer(FlowBarTimer)
     case modelLoaded, modelLoadFailed(String)
@@ -39,6 +42,7 @@ public enum FlowBarEvent: Sendable, Equatable {
     case microphoneFailed(MicrophoneError)
     case insertionFinished(InsertionResult)
     case copyRawRequested
+    case reinsertionFinished(text: String, result: InsertionResult), reinsertionBlocked(String)
     /// FB-09: "Pause dictation for 1 hour" from the menu bar or the Flow Bar pill.
     case pause(seconds: TimeInterval)
     case resume
@@ -60,6 +64,8 @@ public struct Pending: Sendable, Equatable {
     public var downAt: TimeInterval
     public var fnIsDown: Bool
     public var resolvedMode: HotkeyMode?
+    /// A dedicated hands-free key can request stop before the model finishes loading.
+    public var stopRequested = false
     public init(downAt: TimeInterval, fnIsDown: Bool, resolvedMode: HotkeyMode?) {
         self.downAt = downAt
         self.fnIsDown = fnIsDown
@@ -145,6 +151,35 @@ public struct FlowBarMachine: Sendable, Equatable {
 
     public mutating func handle(_ event: FlowBarEvent, now: TimeInterval) -> [FlowBarEffect] {
         switch (state, event) {
+        case (let s, .reinsertionFinished(let text, let result)) where s == .idle || s.isDismissable:
+            switch result {
+            case .inserted(let app):
+                state = .inserted(appName: app, words: Self.wordCount(text), limitReached: false)
+                return [.cancelTimer(.dismiss), .startTimer(.dismiss, seconds: config.dismissInserted)]
+            case .copiedToClipboard:
+                state = .copied
+                return [.cancelTimer(.dismiss), .startTimer(.dismiss, seconds: config.dismissCopied)]
+            }
+        case (let s, .reinsertionBlocked(let app)) where s == .idle || s.isDismissable:
+            state = .excluded(app: app)
+            return [.cancelTimer(.dismiss), .startTimer(.dismiss, seconds: config.dismissError)]
+        case (.idle, .shortcutDown(let mode, let p?)):
+            return begin(p, now: now, cancelDismiss: false, mode: mode)
+        case (let s, .shortcutDown(let mode, let p?)) where s.isDismissable:
+            return begin(p, now: now, cancelDismiss: true, mode: mode)
+        case (.listening(let l), .shortcutDown(.handsFree, _)) where l.mode == .handsFree:
+            return startProcessing(now: now, limitReached: false, cancelling: [.cap, .silence])
+        case (.listening(let l), .pushToTalkReleased) where l.mode == .pushToTalk:
+            return startProcessing(now: now, limitReached: false, cancelling: [.cap, .silence])
+        case (.loadingModel(var p), .pushToTalkReleased) where p.resolvedMode == .pushToTalk:
+            p.fnIsDown = false
+            state = .loadingModel(p)
+            return []
+        case (.loadingModel(var p), .shortcutDown(.handsFree, _)) where p.resolvedMode == .handsFree:
+            p.stopRequested = true
+            state = .loadingModel(p)
+            return []
+
         // ── fn-down: from idle or any dismissable state ──
         case (.idle, .fnDown(let p)):
             return begin(p, now: now, cancelDismiss: false)
@@ -172,11 +207,11 @@ public struct FlowBarMachine: Sendable, Equatable {
             return []
 
         // ── armed / loading: deciding between hold and tap ──
-        case (.armed(var p), .timer(.hold)):
+        case (.armed(var p), .timer(.hold)) where p.resolvedMode == nil:
             p.resolvedMode = .pushToTalk
             state = .listening(Listening(mode: .pushToTalk, startedAt: p.downAt, language: nil))
             return [.startTimer(.cap, seconds: config.maxDuration)]
-        case (.loadingModel(var p), .timer(.hold)):
+        case (.loadingModel(var p), .timer(.hold)) where p.resolvedMode == nil:
             p.resolvedMode = .pushToTalk
             state = .loadingModel(p)
             return []
@@ -210,6 +245,9 @@ public struct FlowBarMachine: Sendable, Equatable {
             state = .idle
             return [.abortCapture]
         case (.loadingModel(let p), .modelLoaded):
+            if p.stopRequested {
+                return [.cancelTimer(.modelLoad)] + startProcessing(now: now, limitReached: false, cancelling: [])
+            }
             switch p.resolvedMode {
             case .pushToTalk where p.fnIsDown:
                 state = .listening(Listening(mode: .pushToTalk, startedAt: p.downAt, language: nil))
@@ -312,7 +350,7 @@ public struct FlowBarMachine: Sendable, Equatable {
         }
     }
 
-    private mutating func begin(_ p: Preflight, now: TimeInterval, cancelDismiss: Bool) -> [FlowBarEffect] {
+    private mutating func begin(_ p: Preflight, now: TimeInterval, cancelDismiss: Bool, mode: HotkeyMode? = nil) -> [FlowBarEffect] {
         let prefix: [FlowBarEffect] = cancelDismiss ? [.cancelTimer(.dismiss)] : []
         partialText = ""
         lastTranscript = ""
@@ -321,13 +359,19 @@ public struct FlowBarMachine: Sendable, Equatable {
         else if p.microphone != .granted { state = .micUnavailable(p.microphone) }
         else if case .notInstalled(let bytes) = p.model { state = .modelNotInstalled(sizeBytes: bytes) }
         else {
-            let pending = Pending(downAt: now, fnIsDown: true, resolvedMode: nil)
+            let pending = Pending(downAt: now, fnIsDown: true, resolvedMode: mode)
             if p.model == .loaded {
+                if let mode {
+                    state = .listening(Listening(mode: mode, startedAt: now, language: nil))
+                    return prefix + [.startCapture, .startTimer(.cap, seconds: config.maxDuration)]
+                        + (mode == .handsFree ? [.startTimer(.silence, seconds: config.silenceStop)] : [])
+                }
                 state = .armed(pending)
                 return prefix + [.startCapture, .startTimer(.hold, seconds: config.holdThreshold)]
             }
             state = .loadingModel(pending)
-            return prefix + [.startCapture, .loadModel, .startTimer(.modelLoad, seconds: config.modelLoadTimeout), .startTimer(.hold, seconds: config.holdThreshold)]
+            return prefix + [.startCapture, .loadModel, .startTimer(.modelLoad, seconds: config.modelLoadTimeout)]
+                + (mode == nil ? [.startTimer(.hold, seconds: config.holdThreshold)] : [])
         }
         return prefix + [.startTimer(.dismiss, seconds: config.dismissError)]
     }

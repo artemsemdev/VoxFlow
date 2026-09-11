@@ -18,7 +18,7 @@ public struct DictationResult: Sendable, Equatable {
     /// The resolved `TextStyle.rawValue` (phase 4a), set by `StyledTranscriber`; `nil` on a base
     /// transcriber's own result (before styling runs) or in a test fixture that never sets it.
     public var style: String?
-    /// Where the snippet `cursor` placeholder landed in `text`, if a snippet expansion placed one.
+    /// Swift Character offset of the snippet `cursor` placeholder within the final `text`.
     public var cursorOffset: Int?
     /// How many filler occurrences were removed producing `text` from `rawText`.
     public var fillersRemoved: Int

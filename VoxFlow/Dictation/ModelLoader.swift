@@ -28,6 +28,7 @@ actor ModelLoader {
         guard let model = await store.defaultModel(role: .speech) else { throw FileTranscriptionError.noModelInstalled }
         guard loadedModelID != model.id else { return model }
         do { try await engine.load(modelAt: store.directory.appendingPathComponent(model.fileName)) }
+        catch is CancellationError { throw CancellationError() }
         catch { throw FileTranscriptionError.engineFailed("model load failed: \(error)") }
         loadedModelID = model.id
         return model

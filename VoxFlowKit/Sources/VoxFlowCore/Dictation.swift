@@ -41,5 +41,10 @@ public enum InsertionResult: Sendable, Equatable {
 
 /// Puts dictated text where the user was typing. Never throws: the clipboard is the fallback.
 public protocol TextInserting: Sendable {
-    func insert(_ text: String) async -> InsertionResult
+    /// `cursorOffset` counts Swift Characters from the start of the inserted text.
+    func insert(_ text: String, cursorOffset: Int?) async -> InsertionResult
+}
+
+public extension TextInserting {
+    func insert(_ text: String) async -> InsertionResult { await insert(text, cursorOffset: nil) }
 }

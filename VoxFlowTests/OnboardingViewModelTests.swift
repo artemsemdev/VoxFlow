@@ -298,6 +298,7 @@ struct OnboardingViewModelTests {
         // `.armed(_)`/`.listening(_)` (explicit wildcard payload), not `if case .armed = $0` — same
         // toolchain quirk `DictationCoordinatorTests` works around.
         await waitFor { if case .armed(_) = dc.state { true } else { false } }
+        await h.clock.waitForSleepers(1) // Armed is published before the hold timer registers.
         await h.clock.advance(by: 0.3)   // past the 0.25 s hold threshold: armed → listening
         await waitFor { if case .listening(_) = dc.state { true } else { false } }
         dc.fn(.up)
@@ -319,6 +320,7 @@ struct OnboardingViewModelTests {
 
         dc.fn(.down)
         await waitFor { if case .armed(_) = dc.state { true } else { false } }
+        await h.clock.waitForSleepers(1) // Armed is published before the hold timer registers.
         await h.clock.advance(by: 0.3)
         await waitFor { if case .listening(_) = dc.state { true } else { false } }
         dc.fn(.up)
@@ -341,6 +343,7 @@ struct OnboardingViewModelTests {
 
         dc.fn(.down)
         await waitFor { if case .armed(_) = dc.state { true } else { false } }
+        await h.clock.waitForSleepers(1) // Armed is published before the hold timer registers.
         await h.clock.advance(by: 0.3)
         await waitFor { if case .listening(_) = dc.state { true } else { false } }
         dc.fn(.up)
@@ -362,6 +365,7 @@ struct OnboardingViewModelTests {
 
         dc.fn(.down)
         await waitFor { if case .armed(_) = dc.state { true } else { false } }
+        await h.clock.waitForSleepers(1) // Armed is published before the hold timer registers.
         await h.clock.advance(by: 0.3)
         await waitFor { if case .listening(_) = dc.state { true } else { false } }
         dc.fn(.up)

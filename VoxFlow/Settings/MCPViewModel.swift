@@ -52,6 +52,7 @@ final class MCPViewModel {
     private let server: any MCPServerControlling
     private let clientStoreProvider: any MCPClientStoreProviding
     private let now: @Sendable () -> Date
+    private var enableGeneration = 0
 
     var alert: Alert?
     private(set) var enabled: Bool
@@ -113,22 +114,27 @@ final class MCPViewModel {
     /// `startFailure` carries the exact copy, same "toggle snaps back on failure" pattern
     /// `GeneralViewModel.setLaunchAtLogin` uses for `SMAppService`.
     func setEnabled(_ newValue: Bool) async {
+        enableGeneration += 1
+        let current = enableGeneration
         startFailure = nil
         if newValue {
             do {
                 try await server.start()
+                guard current == enableGeneration else { return }
                 settings.enabled = true
                 enabled = true
             } catch is CancellationError {
                 // A stop invalidated this attempt; a newer operation owns the visible state.
                 return
             } catch {
+                guard current == enableGeneration else { return }
                 settings.enabled = false
                 enabled = false
                 startFailure = Self.startFailureMessage
             }
         } else {
             await server.stop()
+            guard current == enableGeneration else { return }
             settings.enabled = false
             enabled = false
         }

@@ -63,16 +63,18 @@ struct DictationControllerTests {
         let clock = FakeClock()
         let saved = Recorder<(DictationResult, String?)>()
         let clipboard = Recorder<String>()
+        let preflightCalls = Recorder<Int>()
         let transcriber: FakeDictationTranscriber
         let controller: DictationController
         var states: AsyncStream<FlowBarState>.Iterator
 
         init(result: DictationResult = DictationResult(text: "hello there world", rawText: "hello there world", segments: [], language: nil, duration: 2, lowConfidence: false),
              preflight: Preflight = Preflight(excludedApp: nil, secureInput: false, microphone: .granted, model: .loaded),
-             ephemeral: @escaping @Sendable () -> Bool = { false }) async {
+             ephemeral: @escaping @Sendable () -> Bool = { false },
+             beforePreflight: @escaping @Sendable () async -> Void = {}) async {
             transcriber = FakeDictationTranscriber(result: result)
             controller = DictationController(config: FlowBarConfig(), microphone: mic, transcriber: transcriber, inserter: inserter, clock: clock,
-                                             preflight: { preflight }, loadModel: {}, options: { TranscriptionOptions() },
+                                             preflight: { [preflightCalls] in preflightCalls.append(1); await beforePreflight(); return preflight }, loadModel: {}, options: { TranscriptionOptions() },
                                              onSave: { [saved] r, app in saved.append((r, app)) },
                                              copyToClipboard: { [clipboard] t in clipboard.append(t) },
                                              ephemeral: ephemeral)
@@ -104,6 +106,57 @@ struct DictationControllerTests {
         await h.clock.waitForSleepers(1)                 // dismiss
         await h.clock.advance(by: 1.5)
         #expect(await h.next() == .idle)
+    }
+
+    @Test("the snippet caret request reaches the inserter with its matching final text", arguments: [nil, 6] as [Int?])
+    func snippetCaret(offset: Int?) async {
+        let text = "Best,\n\nArtem"
+        let h = await Harness(result: DictationResult(text: text, rawText: "slash sig", segments: [],
+                                                      language: nil, duration: 2, lowConfidence: false, cursorOffset: offset))
+        await h.controller.fnDown()
+        _ = await h.next()
+        await h.mic.waitUntilCapturing()
+        await h.clock.waitForSleepers(1)
+        await h.clock.advance(by: 0.25)
+        _ = await h.next()
+        await h.controller.fnUp()
+        _ = await h.next()
+        _ = await h.next()
+        #expect(h.inserter.insertedTexts == [text])
+        #expect(h.inserter.cursorOffsets == [offset])
+    }
+
+    @Test("dedicated shortcuts run the normal capture, insertion and history effects", arguments: [HotkeyMode.pushToTalk, .handsFree])
+    func dedicatedShortcut(mode: HotkeyMode) async {
+        let h = await Harness()
+        await h.controller.shortcutDown(mode)
+        let initial = await h.controller.state
+        #expect(initial == .listening(Listening(mode: mode, startedAt: 0, language: nil)))
+        guard case .listening = initial else { return }
+        _ = await h.next()
+        await h.mic.waitUntilCapturing()
+        if mode == .handsFree {
+            await h.controller.pushToTalkReleased()
+            #expect(await h.controller.state == initial)
+            await h.controller.shortcutDown(.handsFree)
+        } else {
+            await h.controller.pushToTalkReleased()
+        }
+        guard case .processing = await h.next() else { Issue.record("expected processing"); return }
+        #expect(await h.next() == .inserted(appName: "Mail", words: 3, limitReached: false))
+        #expect(h.inserter.insertedTexts == ["hello there world"])
+        await h.saved.waitUntilCount(1)
+        #expect(h.saved.items.count == 1)
+        #expect(h.preflightCalls.items.count == 1) // Stopping must not recapture another field's focus.
+    }
+
+    @Test("dedicated shortcuts cannot bypass the controller's preflight gate")
+    func dedicatedShortcutDenied() async {
+        let h = await Harness(preflight: Preflight(excludedApp: nil, secureInput: true, microphone: .granted, model: .loaded))
+        await h.controller.shortcutDown(.handsFree)
+        #expect(await h.controller.state == .excluded(app: "a secure field"))
+        #expect(h.mic.startCount == 0)
+        #expect(h.inserter.insertedTexts.isEmpty)
     }
 
     @Test("a lone tap aborts capture without transcribing")

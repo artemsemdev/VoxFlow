@@ -32,6 +32,8 @@ any app, style cleanup with a local LLM and an MCP server follow in 2.x (see the
   processing and the result. Recognized text is inserted into the focused field via Accessibility,
   or copied to the clipboard when there isn't a text field; finished dictations save to encrypted
   history unless the Privacy toggle turns that off.
+- File transcription yields the shared speech engine between ten-second windows; pending
+  dictation takes priority over the next file window. One model remains loaded for both paths.
 - Needs Microphone and Accessibility permission, and Contacts (optional — only prompted if you turn
   on "Learn names from Contacts" on the Dictionary page). First launch walks a five-step onboarding
   window (welcome, permissions, hotkey mode, model, try it) with buttons to grant each permission
@@ -62,7 +64,8 @@ any app, style cleanup with a local LLM and an MCP server follow in 2.x (see the
 - Dictionary page: add names, terms, products and places with an optional phonetic hint; recognised
   words feed the speech engine directly, and "Learn names from Contacts" imports names locally.
 - Snippets page: define a trigger (e.g. `/sig`) and a body with `cursor`/`date`/`clipboard`/`app`
-  placeholders; say or type the trigger in any app to expand it.
+  placeholders; say or type the trigger in any app to expand it. `cursor` (also `{cursor}`) places
+  the caret within the inserted text when the target supports Accessibility selection.
 - Styles page: pick a rewrite tone (Formal, Casual, Very casual, Verbatim) and per-app overrides;
   rule-based styling (fillers removed, punctuation and capitalization added) runs on every
   dictation before it's inserted — see [ADR-005](docs/adr/005-rule-based-styling-pipeline.md).

@@ -63,6 +63,10 @@ whole stack over a real socket, and records the resulting design as this ADR.
   Startup callers share one attempt. Stopping cancels its pending candidate immediately and
   invalidates every joined caller; an old caller cannot initiate a new scan or accept a delayed
   connection after stop. A new explicit start can bind independently of the old attempt's completion.
+  The service also fences lazy startup before transport creation and after every transport await.
+  Client-store initialization is shared for the service lifetime, and every transport uses the same
+  runner for routing, bound-port updates and session resets. Stop detaches the old transport before
+  awaiting it; obsolete completions cannot change a replacement or newer Settings operation.
   Socket-free lifecycle regressions use controlled candidates; real port/HTTP coverage is opt-in
   via `TEST_RUNNER_VOXFLOW_MCP_INTEGRATION=1` (see CONTRIBUTING.md).
 - **`libproc` peer identity, sandbox-dependent.** `LibprocPeerResolver` walks every process's open
