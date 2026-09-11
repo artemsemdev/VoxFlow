@@ -190,7 +190,10 @@ jobs:
           echo "::notice::Test filter: ${FILTER:-<none>}"
 
       - name: Build package
-        run: swift build --package-path "$PACKAGE_PATH"
+        run: |
+          set -o pipefail
+          swift build --package-path "$PACKAGE_PATH" 2>&1 | tee package-build.log
+          python3 scripts/check_build_logs.py package-build.log
 
       - name: Test affected modules
         env:
@@ -200,7 +203,8 @@ jobs:
           if [ -z "$FILTER" ]; then
             echo "No test target is affected by the changed files."
           elif [ "$FILTER" = "ALL" ]; then
-            swift test --package-path "$PACKAGE_PATH"
+            swift test --package-path "$PACKAGE_PATH" 2>&1 | tee package-test.log
+            python3 scripts/check_build_logs.py package-test.log
           else
             swift test --package-path "$PACKAGE_PATH" --filter "$FILTER" 2>&1 | tee package-test.log
             # A filter that selects nothing exits 0; treat that as a broken filter, not a pass.
@@ -208,6 +212,7 @@ jobs:
               echo "::error::The filter '$FILTER' selected no tests; target names or the filter format changed."
               exit 1
             fi
+            python3 scripts/check_build_logs.py package-test.log
           fi
 
   full:
@@ -251,15 +256,20 @@ jobs:
       - name: Build
         run: |
           set -o pipefail
-          xcodebuild -xcconfig Build.xcconfig -scheme VoxFlow -destination 'platform=macOS' build | tee build.log
+          xcodebuild -xcconfig Build.xcconfig -scheme VoxFlow -destination 'platform=macOS,arch=arm64' build 2>&1 | tee build.log
+          python3 scripts/check_build_logs.py build.log
 
       - name: Test
         run: |
           set -o pipefail
-          xcodebuild -xcconfig Build.xcconfig -scheme VoxFlow -destination 'platform=macOS' test -resultBundlePath TestResults.xcresult | tee test.log
+          xcodebuild -xcconfig Build.xcconfig -scheme VoxFlow -destination 'platform=macOS,arch=arm64' test -resultBundlePath TestResults.xcresult 2>&1 | tee test.log
+          python3 scripts/check_build_logs.py test.log
 
       - name: Package tests without Xcode project
-        run: swift test
+        run: |
+          set -o pipefail
+          swift test 2>&1 | tee package-test.log
+          python3 ../scripts/check_build_logs.py package-test.log
         working-directory: VoxFlowKit
 
       - name: Upload logs and results
@@ -270,6 +280,7 @@ jobs:
           path: |
             build.log
             test.log
+            VoxFlowKit/package-test.log
             TestResults.xcresult
           if-no-files-found: ignore
 
