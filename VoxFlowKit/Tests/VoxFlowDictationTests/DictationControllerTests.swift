@@ -180,7 +180,7 @@ struct DictationControllerTests {
     @Test("hands-free: double tap, silence stops, clipboard fallback → copied")
     func handsFreeClipboard() async throws {
         let h = await Harness()
-        h.inserter.setResult(.copiedToClipboard)
+        h.inserter.setResult(.copiedToClipboard(reason: .noTextField))
         await h.controller.fnDown(); _ = await h.next()
         await h.controller.fnUp(); _ = await h.next()
         await h.controller.fnDown()
@@ -188,7 +188,7 @@ struct DictationControllerTests {
         await h.clock.waitForSleepers(2)                 // cap + silence
         await h.clock.advance(by: 3)
         guard case .processing = await h.next() else { Issue.record("expected processing"); return }
-        #expect(await h.next() == .copied)
+        #expect(await h.next() == .copied(.noTextField))
         await h.saved.waitUntilCount(1)                    // saveHistory runs on its own task
         #expect(h.saved.items.count == 1)
     }

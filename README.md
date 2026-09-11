@@ -38,6 +38,8 @@ any app, style cleanup with a local LLM and an MCP server follow in 2.x (see the
   on "Learn names from Contacts" on the Dictionary page). First launch walks a five-step onboarding
   window (welcome, permissions, hotkey mode, model, try it) with buttons to grant each permission
   and a scratchpad to try dictation before the main window opens; SETUP.md explains how to reset it.
+- When Accessibility is denied, the Flow Bar keeps the transcript on the clipboard and offers
+  “Can't type here · Open Settings” to open the Accessibility pane.
 - VoxFlow's own window is frontmost at launch, so click into the text field you want to dictate
   into (e.g. TextEdit) before the first fn press, or the dictation lands on the clipboard instead.
 - History page: search past dictations and filter by app or date, expand a row for the full

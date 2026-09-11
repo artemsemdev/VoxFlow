@@ -371,7 +371,7 @@ struct MCPToolRunnerTests {
         // States that still might produce (or already produced) a result are not failures.
         #expect(MCPToolError.dictationFailureReason(for: .idle) == nil)
         #expect(MCPToolError.dictationFailureReason(for: .inserted(appName: "Mail", words: 3, limitReached: false)) == nil)
-        #expect(MCPToolError.dictationFailureReason(for: .copied) == nil)
+        #expect(MCPToolError.dictationFailureReason(for: .copied(.noTextField)) == nil)
     }
 
     @Test("dictate fails fast with -32005 when the capture is discarded (Escape)")

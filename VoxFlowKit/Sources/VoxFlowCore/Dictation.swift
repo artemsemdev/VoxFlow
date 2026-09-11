@@ -32,11 +32,15 @@ public protocol MicrophoneCapturing: Sendable {
     func start() -> AsyncThrowingStream<MicrophoneEvent, Error>
 }
 
+public enum CopyReason: Sendable, Equatable {
+    case noTextField, accessibilityDenied, insertionFailed
+}
+
 public enum InsertionResult: Sendable, Equatable {
     /// Text went into the focused field of `appName` (FB-04).
     case inserted(appName: String?)
-    /// No editable field, or Accessibility unavailable: text is on the clipboard (FB-04b).
-    case copiedToClipboard
+    /// Text is on the clipboard; the reason selects the appropriate result/recovery HUD.
+    case copiedToClipboard(reason: CopyReason)
 }
 
 /// Puts dictated text where the user was typing. Never throws: the clipboard is the fallback.

@@ -8,6 +8,19 @@ struct FlowBarMachineTests {
     let ok = Preflight(excludedApp: nil, secureInput: false, microphone: .granted, model: .loaded)
     let config = FlowBarConfig()
 
+    @Test("clipboard reason survives dictation and reinsertion", arguments: [CopyReason.noTextField, .accessibilityDenied, .insertionFailed])
+    func copyReason(reason: CopyReason) {
+        let timeout: TimeInterval = reason == .accessibilityDenied ? 4 : 2.5
+        var dictation = FlowBarMachine.processing(at: 0)
+        #expect(dictation.handle(.insertionFinished(.copiedToClipboard(reason: reason)), now: 1)
+                == [.saveHistory, .startTimer(.dismiss, seconds: timeout)])
+        #expect(dictation.state == .copied(reason))
+        var reinsertion = FlowBarMachine()
+        #expect(reinsertion.handle(.reinsertionFinished(text: "last", result: .copiedToClipboard(reason: reason)), now: 1)
+                == [.cancelTimer(.dismiss), .startTimer(.dismiss, seconds: timeout)])
+        #expect(reinsertion.state == .copied(reason))
+    }
+
     @Test("fn-down starts capture and the hold timer; holding 250 ms → push-to-talk listening")
     func pushToTalk() {
         var m = FlowBarMachine()
@@ -81,8 +94,8 @@ struct FlowBarMachineTests {
 
         var c = FlowBarMachine.processing(at: 0)
         _ = c.handle(.transcriptReady(text: "one two", lowConfidence: false), now: 1)
-        #expect(c.handle(.insertionFinished(.copiedToClipboard), now: 1) == [.saveHistory, .startTimer(.dismiss, seconds: 2.5)])
-        #expect(c.state == .copied)
+        #expect(c.handle(.insertionFinished(.copiedToClipboard(reason: .noTextField)), now: 1) == [.saveHistory, .startTimer(.dismiss, seconds: 2.5)])
+        #expect(c.state == .copied(.noTextField))
     }
 
     @Test("empty or < 2 low-confidence words → didn't catch (4 s); a retry fn-down works from there")
@@ -246,7 +259,7 @@ struct FlowBarMachineTests {
         #expect(fromIdle.state == .paused(until: 3600))
 
         var fromDismissable = FlowBarMachine()
-        fromDismissable.state = .copied
+        fromDismissable.state = .copied(.noTextField)
         #expect(fromDismissable.handle(.pause(seconds: 60), now: 10) == [.cancelTimer(.dismiss), .startTimer(.pauseEnd, seconds: 60)])
         #expect(fromDismissable.state == .paused(until: 70))
     }

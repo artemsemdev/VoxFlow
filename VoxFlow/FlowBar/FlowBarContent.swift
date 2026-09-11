@@ -87,8 +87,12 @@ struct FlowBarContent: Hashable {
             return FlowBarContent(leading: .check, title: title, subtitle: subtitle, showsWaveform: false,
                                    timer: nil, timerIsAmber: false, trailing: nil)
 
-        case .copied:
-            return FlowBarContent(leading: .check, title: "Copied — no text field here", subtitle: nil,
+        case .copied(.accessibilityDenied):
+            return FlowBarContent(leading: .dot(.error), title: "Can't type here", subtitle: nil,
+                                   showsWaveform: false, timer: nil, timerIsAmber: false, trailing: .button(.openSettings))
+        case .copied(let reason):
+            let title = reason == .noTextField ? "Copied — no text field here" : "Copied — couldn't type here"
+            return FlowBarContent(leading: .check, title: title, subtitle: nil,
                                    showsWaveform: false, timer: nil, timerIsAmber: false, trailing: .keycap("⌘V"))
 
         case .didntCatch(let rawAvailable):

@@ -105,7 +105,7 @@ public enum FlowBarState: Sendable, Equatable {
     case listening(Listening)
     case processing(Processing)
     case inserted(appName: String?, words: Int, limitReached: Bool)
-    case copied
+    case copied(CopyReason)
     case didntCatch(rawAvailable: Bool)
     case discarded
     case micUnavailable(MicrophoneAccess)
@@ -156,9 +156,9 @@ public struct FlowBarMachine: Sendable, Equatable {
             case .inserted(let app):
                 state = .inserted(appName: app, words: Self.wordCount(text), limitReached: false)
                 return [.cancelTimer(.dismiss), .startTimer(.dismiss, seconds: config.dismissInserted)]
-            case .copiedToClipboard:
-                state = .copied
-                return [.cancelTimer(.dismiss), .startTimer(.dismiss, seconds: config.dismissCopied)]
+            case .copiedToClipboard(let reason):
+                state = .copied(reason)
+                return [.cancelTimer(.dismiss), .startTimer(.dismiss, seconds: reason == .accessibilityDenied ? config.dismissError : config.dismissCopied)]
             }
         case (let s, .reinsertionBlocked(let app)) where s == .idle || s.isDismissable:
             state = .excluded(app: app)
@@ -330,9 +330,9 @@ public struct FlowBarMachine: Sendable, Equatable {
             case .inserted(let app):
                 state = .inserted(appName: app, words: Self.wordCount(lastTranscript), limitReached: p.limitReached)
                 return [.saveHistory, .startTimer(.dismiss, seconds: config.dismissInserted)]
-            case .copiedToClipboard:
-                state = .copied
-                return [.saveHistory, .startTimer(.dismiss, seconds: config.dismissCopied)]
+            case .copiedToClipboard(let reason):
+                state = .copied(reason)
+                return [.saveHistory, .startTimer(.dismiss, seconds: reason == .accessibilityDenied ? config.dismissError : config.dismissCopied)]
             }
         case (.processing, .transcriptionFailed):
             state = .error("Couldn't transcribe")
