@@ -18,6 +18,7 @@ final class ResultViewModel {
     var format: OutputFormat { didSet { rerender() } }
     var timestamps: Bool { didSet { rerender() } }
     var searchText = ""
+    var segmentLength: SegmentLength = .sentences { didSet { cleanedCache = nil; rerender() } }
     /// "Apply {Style} cleanup" (design 2f, plan ruling 6) — off by default (the auto-export already
     /// wrote the raw transcript). Rule-based only: a file transcript can run to thousands of
     /// segments, and 2f promises "instant, no re-processing" — the LLM never runs here.
@@ -35,7 +36,8 @@ final class ResultViewModel {
     /// a `lazy` stored property (the synthesized accessors need to mutate self from a non-mutating
     /// getter), so this is `@ObservationIgnored` and the caching happens by hand in the computed
     /// property below.
-    @ObservationIgnored private var cleanedCache: TranscriptDocument?
+    @ObservationIgnored private var cleanedCache: (length: SegmentLength, document: TranscriptDocument)?
+    @ObservationIgnored private var segmentedCache: [SegmentLength: TranscriptDocument] = [:]
 
     init(document: TranscriptDocument, format: OutputFormat, timestamps: Bool, autoDetectedLanguage: Bool, modelDisplayName: String,
          savedURL: URL?, exporter: @escaping () -> TranscriptExporter, cleanupStyle: TextStyle, cleanupOptions: StylingOptions,
@@ -59,14 +61,15 @@ final class ResultViewModel {
     /// because Casual is the default style; a different global default reads its own name here.
     var cleanupLabel: String { "Apply \(cleanupStyle.displayName) cleanup" }
 
-    /// `document` with every segment's text rewritten by `RuleStyler` (fillers/auto-punctuate per
+    /// The selected segmentation with every segment's text rewritten by `RuleStyler` (fillers/auto-punctuate per
     /// the global toggles, then the tone rules) — computed once and cached on first access, not on
     /// every `applyCleanup` toggle back to `true` (start/end/confidence are unchanged, so cleanup
-    /// never needs to re-run once `document` itself is fixed).
+    /// re-runs only when the selected segment length changes).
     var cleanedDocument: TranscriptDocument {
-        if let cleanedCache { return cleanedCache }
+        // Read the cache key even on a hit so SwiftUI observes the selected length for row refresh.
+        if let cleanedCache, cleanedCache.length == segmentLength { return cleanedCache.document }
         let styler = RuleStyler()
-        let cleanedSegments = document.transcript.segments.map { segment -> TranscriptSegment in
+        let cleanedSegments = segmentedDocument.transcript.segments.map { segment -> TranscriptSegment in
             let cleanedText = styler.styleSync(segment.text, options: cleanupOptions).text
             // `TranscriptSegment.init?` only fails when `end < start`, which cleanup never changes
             // (only `text` is rewritten) — the `?? segment` is unreachable in practice but keeps
@@ -77,13 +80,19 @@ final class ResultViewModel {
                                          transcript: Transcript(segments: cleanedSegments, language: document.transcript.language),
                                          modelID: document.modelID, audioDuration: document.audioDuration,
                                          processingTime: document.processingTime, createdAt: document.createdAt)
-        cleanedCache = cleaned
+        cleanedCache = (segmentLength, cleaned)
         return cleaned
     }
 
-    /// What the view renders/exports/searches: the cleaned document while `applyCleanup` is on,
-    /// the raw `document` otherwise.
-    var activeDocument: TranscriptDocument { applyCleanup ? cleanedDocument : document }
+    private var segmentedDocument: TranscriptDocument {
+        if let cached = segmentedCache[segmentLength] { return cached }
+        let segmented = TranscriptSegmenter.resegment(document, length: segmentLength)
+        segmentedCache[segmentLength] = segmented
+        return segmented
+    }
+
+    /// Preview, search and every export share the selected segmentation and optional cleanup.
+    var activeDocument: TranscriptDocument { applyCleanup ? cleanedDocument : segmentedDocument }
 
     /// (1-based transcript position, segment) pairs matching `searchText`, read from `activeDocument`
     /// so a checked "Apply {Style} cleanup" is what search matches against — `activeDocument.transcript.segments`

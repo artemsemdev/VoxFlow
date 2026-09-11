@@ -54,9 +54,7 @@ struct TranscriptResultView: View {
     }
 
     private var searchBar: some View {
-        // "Segment length" (design 2f, segmentation controls) isn't built here — it's a follow-up,
-        // out of scope for #112.
-        HStack(spacing: 16) {
+        HStack(spacing: 8) {
             HStack(spacing: 7) {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                 TextField("Find in transcript", text: $resultModel.searchText)
@@ -65,9 +63,11 @@ struct TranscriptResultView: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-            Spacer(minLength: 12)
+            Text("Segment length").font(.caption).foregroundStyle(.secondary)
+            SegmentLengthPicker(selection: $resultModel.segmentLength)
             Toggle(resultModel.cleanupLabel, isOn: $resultModel.applyCleanup)
                 .toggleStyle(.checkbox)
+                .font(.caption)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
@@ -113,6 +113,49 @@ struct TranscriptResultView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
+    }
+}
+
+/// The compact white popup and blue chevrons from canvas 2f, with native menu selection.
+struct SegmentLengthPicker: View {
+    @Binding var selection: SegmentLength
+    @State private var showingOptions = false
+
+    var body: some View {
+        Button { showingOptions = true } label: {
+            HStack(spacing: 6) {
+                Text(selection.displayName).font(.system(size: 12))
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 9, weight: .semibold)).foregroundStyle(.white)
+                    .frame(width: 16, height: 16)
+                    .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 4))
+            }
+            .padding(.leading, 10).padding(.trailing, 6).frame(height: 24)
+            .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.secondary.opacity(0.25)))
+        }
+        .buttonStyle(.plain).fixedSize()
+        .accessibilityLabel("Segment length").accessibilityValue(selection.displayName)
+        .popover(isPresented: $showingOptions, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(SegmentLength.allCases, id: \.self) { length in
+                    Button {
+                        selection = length
+                        showingOptions = false
+                    } label: {
+                        HStack {
+                            Image(systemName: "checkmark").opacity(selection == length ? 1 : 0)
+                            Text(length.displayName)
+                            Spacer()
+                        }
+                        .padding(.horizontal, 8).padding(.vertical, 5).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(selection == length ? [.isSelected] : [])
+                }
+            }
+            .padding(6).frame(width: 150)
+        }
     }
 }
 
