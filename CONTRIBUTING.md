@@ -30,11 +30,11 @@ Contributions must preserve that.
 ```bash
 brew install xcodegen
 xcodegen generate
-xcodebuild -xcconfig Build.xcconfig -scheme VoxFlow -destination 'platform=macOS' build test   # what CI runs
+xcodebuild -xcconfig Build.xcconfig -scheme VoxFlow -destination 'platform=macOS,arch=arm64' build test   # what CI runs
 cd VoxFlowKit && swift test                                             # package only, fast
 ```
 
-- Warnings are errors; strict concurrency is `complete`. Do not add `@unchecked Sendable`,
+- Warnings are errors; strict concurrency is `complete`. CI checks stdout and stderr logs case-insensitively with `scripts/check_build_logs.py`, including Xcode driver and native-backend warnings. Select `arch=arm64` explicitly to avoid Xcode choosing between native and Rosetta destinations. Do not add `@unchecked Sendable`,
   `nonisolated(unsafe)` or `MainActor.assumeIsolated` without a comment that proves the invariant,
   and prefer `Mutex` / actors.
 - Tests first (TDD): a failing test, then the smallest change that makes it pass. Unit tests use the

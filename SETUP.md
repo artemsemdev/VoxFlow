@@ -12,7 +12,7 @@
 git clone https://github.com/artemsemdev/VoxFlow.git
 cd VoxFlow
 xcodegen generate
-xcodebuild -xcconfig Build.xcconfig -scheme VoxFlow -destination 'platform=macOS' build test
+xcodebuild -xcconfig Build.xcconfig -scheme VoxFlow -destination 'platform=macOS,arch=arm64' build test
 ```
 
 The first build downloads the pinned whisper.cpp XCFramework (~51 MB) into the SwiftPM cache.
@@ -157,7 +157,7 @@ certificate instead (#143):
 ## Tests
 
 - Package logic, fast: `cd VoxFlowKit && swift test`
-- Everything, as CI runs it: `xcodebuild -xcconfig Build.xcconfig -scheme VoxFlow -destination 'platform=macOS' build test`
+- Everything, as CI runs it: `xcodebuild -xcconfig Build.xcconfig -scheme VoxFlow -destination 'platform=macOS,arch=arm64' build test`
 - Integration tests that need a real model run only when one is installed and skip otherwise.
 
 ## Notes

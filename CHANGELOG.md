@@ -87,6 +87,7 @@ versioning.
   [docs/runbooks/connect-an-mcp-client.md](docs/runbooks/connect-an-mcp-client.md).
 
 ### Fixed
+- CI selects the arm64 Mac destination and rejects warnings from build/test logs regardless of letter case.
 - Style-model loading rejects missing, non-file and unreadable paths before starting the native
   backend, avoiding unnecessary GPU initialization and Metal compiler warnings in failure-path tests.
 - Settings › General's appearance and Flow Bar position now apply at launch, not only once
