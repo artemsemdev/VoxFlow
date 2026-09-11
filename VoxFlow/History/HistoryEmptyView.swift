@@ -51,7 +51,7 @@ struct HistoryEmptyView: View {
 
     private func noResults(query: String) -> some View {
         VStack(spacing: 12) {
-            Text("No dictations match “\(query)”").font(.headline)
+            Text(HistoryViewModel.noResultsTitle(query: query)).font(.headline)
             Text("Search covers inserted text and the raw transcript. Try fewer words, or widen the date filter.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
@@ -60,10 +60,8 @@ struct HistoryEmptyView: View {
             HStack(spacing: 8) {
                 Button("Clear search") { model.clearSearch() }
                     .buttonStyle(.bordered)
-                // Phase 4 date filters — "widen to all time" isn't wired up yet.
-                Button("Search all time") {}
+                Button("Search all time") { model.searchAllTime() }
                     .buttonStyle(.bordered)
-                    .disabled(true)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

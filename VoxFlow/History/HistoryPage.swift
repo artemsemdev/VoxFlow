@@ -95,8 +95,7 @@ struct HistoryPageBody: View {
             .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Color.secondary.opacity(0.25)))
 
-            // Phase 4 filters — rendered so the layout matches the design, disabled until then.
-            HistorySearchChips()
+            HistorySearchChips(viewModel: viewModel)
             Spacer(minLength: 0)
         }
         .padding(20)
@@ -107,35 +106,95 @@ struct HistoryPageBody: View {
     }
 }
 
-/// The two disabled phase-4 filter chips ("All apps ⇅" / "This week ⇅"). Factored out (not just
-/// inlined in `HistoryPageBody`) so `HistoryRenderTests`' preview chrome shares this exact view
-/// instead of a hand-copied one (M3) — real `Button`s render fine under `ImageRenderer`; only a live
-/// `TextField`/`ScrollView` do not (see that file).
+/// MW-02 filter chips; the view model owns the choices and filtering rules.
 struct HistorySearchChips: View {
+    let viewModel: HistoryViewModel
+    @State private var appsPresented = false
+    @State private var datesPresented = false
+
     var body: some View {
         HStack(spacing: 8) {
-            chip("All apps")
-            chip("This week")
+            chip(viewModel.selectedApp ?? "All apps") { appsPresented = true }
+                .accessibilityLabel("Filter by app")
+                .accessibilityValue(viewModel.selectedApp ?? "All apps")
+                .popover(isPresented: $appsPresented, arrowEdge: .bottom) {
+                    ScrollView {
+                        HistoryFilterOptions(choices: viewModel.availableApps, selected: viewModel.selectedApp,
+                                             allLabel: "All apps") {
+                            viewModel.selectedApp = $0
+                            appsPresented = false
+                        }
+                    }
+                    .frame(width: 200, height: min(CGFloat(viewModel.availableApps.count + 1) * 28 + 20, 280))
+                }
+            chip(viewModel.dateRange.rawValue) { datesPresented = true }
+                .accessibilityLabel("Filter by date")
+                .accessibilityValue(viewModel.dateRange.rawValue)
+                .popover(isPresented: $datesPresented, arrowEdge: .bottom) {
+                    HistoryFilterOptions(choices: HistoryViewModel.DateRange.allCases.map(\.rawValue),
+                                         selected: viewModel.dateRange.rawValue) { value in
+                        if let value, let range = HistoryViewModel.DateRange(rawValue: value) {
+                            viewModel.dateRange = range
+                        }
+                        datesPresented = false
+                    }
+                }
         }
     }
 
-    /// A real (disabled) `Button`, not a plain `HStack` with `.disabled(true)` tacked on — the
-    /// modifier is a no-op on a non-control view, so an `HStack` would render identically whether or
-    /// not it's "disabled" (M7). Matches how "Re-style" and "Search all time" are done.
-    private func chip(_ title: String) -> some View {
-        Button {} label: {
-            HStack(spacing: 4) {
-                Text(title)
-                Image(systemName: "chevron.up.chevron.down").font(.caption2)
+    private func chip(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Text(title).lineLimit(1)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 16, height: 16)
+                    .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 4))
+                    .accessibilityHidden(true)
             }
+            .padding(.horizontal, 10)
+            .frame(height: 26)
+            .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 7))
+            .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Color.primary.opacity(0.12)))
         }
         .buttonStyle(.plain)
         .font(.callout)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(Color.secondary.opacity(0.1), in: Capsule())
-        .foregroundStyle(.secondary)
-        .disabled(true)
+    }
+}
+
+/// Shared with render tests so the open menu uses the same rows as the live popover.
+struct HistoryFilterOptions: View {
+    let choices: [String]
+    let selected: String?
+    var allLabel: String?
+    let select: (String?) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            if let allLabel {
+                option(allLabel, value: nil)
+                Divider()
+            }
+            ForEach(choices, id: \.self) { option($0, value: $0) }
+        }
+        .padding(6)
+        .frame(width: 200)
+    }
+
+    private func option(_ title: String, value: String?) -> some View {
+        Button { select(value) } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "checkmark").opacity(selected == value ? 1 : 0).frame(width: 16)
+                Text(title)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 6)
+            .frame(minHeight: 26)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected == value ? .isSelected : [])
     }
 }
 
