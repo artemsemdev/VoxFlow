@@ -22,15 +22,28 @@ struct HistoryFilterTests {
     private func model(_ h: HistoryViewModelTests.Harness) -> HistoryViewModel {
         let now = date(11)
         return HistoryViewModel(service: h.service, settings: h.settings, navigation: h.navigation,
-                                clock: h.clock, pasteboard: FakePasteboard(), calendar: calendar, now: { now })
+                                clock: h.clock, pasteboard: FakePasteboard(), calendar: calendar, now: { now },
+                                initialDateRange: .thisWeek)
     }
 
-    @Test("the default This week filter excludes old history without claiming the store is empty")
+    @Test("the unconfigured model preserves access to all history before filter controls are enabled")
+    func defaultKeepsAllHistory() async {
+        let h = HistoryViewModelTests.Harness()
+        await h.seed(1)
+        let vm = HistoryViewModel(service: h.service, settings: h.settings, navigation: h.navigation,
+                                  clock: h.clock, pasteboard: FakePasteboard())
+        await vm.load()
+        #expect(vm.dateRange == .allTime)
+        #expect(vm.records.count == 1)
+        #expect(vm.emptyState == nil)
+    }
+
+    @Test("an initial This week filter excludes old history without claiming the store is empty")
     func defaultDateFilter() async {
         let h = HistoryViewModelTests.Harness()
         await h.seed(1) // A retained 1970 record, far outside the current calendar week.
         let vm = HistoryViewModel(service: h.service, settings: h.settings, navigation: h.navigation,
-                                  clock: h.clock, pasteboard: FakePasteboard())
+                                  clock: h.clock, pasteboard: FakePasteboard(), initialDateRange: .thisWeek)
         await vm.load()
         #expect(vm.records.isEmpty)
         #expect(vm.emptyState == .noResults(""))

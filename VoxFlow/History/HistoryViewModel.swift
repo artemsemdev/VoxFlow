@@ -49,7 +49,7 @@ final class HistoryViewModel {
     private var searchGeneration = 0
     private var deletionTask: Task<Void, Never>?
     var selectedApp: String? { didSet { applyFilters() } }
-    var dateRange: DateRange = .thisWeek { didSet { applyFilters() } }
+    var dateRange: DateRange { didSet { applyFilters() } }
     var availableApps: [String] {
         Array(Set(allRecords.map(Self.appLabel))).sorted { $0.localizedStandardCompare($1) == .orderedAscending }
     }
@@ -95,6 +95,7 @@ final class HistoryViewModel {
                                        settings: StylingSettingsBox(StylingSettingsSnapshot(
                                            defaultStyle: .casual, removeFillers: true, autoPunctuate: true, snippetSayPrefix: false))),
          calendar: Calendar = .current, now: @escaping () -> Date = Date.init,
+         initialDateRange: DateRange = .allTime,
          deleteRecord: ((Int64) async -> Void)? = nil,
          searchRecords: ((String) async -> [DictationRecord])? = nil) {
         self.service = service
@@ -105,6 +106,7 @@ final class HistoryViewModel {
         self.restyler = restyler
         self.calendar = calendar
         self.now = now
+        self.dateRange = initialDateRange
         self.deleteRecord = deleteRecord ?? { await service.delete(id: $0) }
         self.searchRecords = searchRecords ?? { await service.search($0) }
     }
