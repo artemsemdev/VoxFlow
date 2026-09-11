@@ -14,6 +14,7 @@ on:
       - 'VoxFlowTests/**'
       - 'project.yml'
       - 'Build.xcconfig'
+      - 'scripts/check_build_logs.py'
       - '.github/workflows/codeql.yml'
   schedule:
     - cron: '0 6 * * 1'
@@ -77,10 +78,13 @@ jobs:
       - name: Build
         if: steps.probe.outputs.has_swift == 'true'
         run: |
+          set -euo pipefail
           xcodegen generate
-          xcodebuild -xcconfig Build.xcconfig -scheme VoxFlow -destination 'platform=macOS' build
-          # The app links only VoxFlowCore; build the whole package so CodeQL traces all nine modules.
-          swift build --package-path VoxFlowKit
+          xcodebuild -xcconfig Build.xcconfig -scheme VoxFlow -destination 'platform=macOS,arch=arm64' build 2>&1 | tee codeql-build.log
+          python3 scripts/check_build_logs.py codeql-build.log
+          # Build the whole package so CodeQL traces modules outside the app's dependency graph too.
+          swift build --package-path VoxFlowKit 2>&1 | tee codeql-package.log
+          python3 scripts/check_build_logs.py codeql-package.log
 
       - name: Perform CodeQL Analysis
         if: steps.probe.outputs.has_swift == 'true'

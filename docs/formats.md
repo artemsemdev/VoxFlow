@@ -2,6 +2,14 @@
 
 All transcript output formats guarantee determinism: given the same audio and model, you get the same file bytes every time. Line endings are Unix (`\n`), with a single trailing newline. JSON objects have keys sorted alphabetically. Dates use ISO 8601 format in UTC. Segment text is always trimmed of leading/trailing whitespace. The timestamps toggle applies only to TXT and Markdown — SRT and VTT always carry per-cue timing (it's inherent to the format) and JSON always includes each segment's `start`/`end`, regardless of the toggle.
 
+The Files result view can re-segment its document without running recognition again. **Sentences**
+uses sentence boundaries within each source cue; **Short** and **Long** also wrap at word boundaries,
+targeting 42 and 84 Characters. An overlong word or URL stays intact. Source cues are never merged
+across their original gaps. New internal timestamps are estimates, interpolated by Character position
+inside the source cue, rather than new speech alignment. Confidence is inherited from that source
+cue. Preview, search, Copy, Save as and other-format exports use the selected segmentation, followed
+by optional cleanup; changing it never overwrites the source transcript or its earlier auto-export.
+
 ## Text (TXT)
 
 Plain text transcript, one segment per line.

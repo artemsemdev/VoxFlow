@@ -194,8 +194,9 @@ public actor DictationController {
         case .cancelTimer(let id): timers[id]?.task.cancel(); timers[id] = nil
         case .insert(let text):
             let id = captureID
+            let cursorOffset = lastResult?.cursorOffset
             Task {
-                let result = await self.inserter.insert(text)
+                let result = await self.inserter.insert(text, cursorOffset: cursorOffset)
                 self.recordInsertion(result, capture: id)
             }
         case .copyToClipboard(let text): copyToClipboard(text)

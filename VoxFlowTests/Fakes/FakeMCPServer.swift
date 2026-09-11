@@ -14,6 +14,7 @@ final class FakeMCPServer: MCPServerControlling, MCPClientStoreProviding {
     /// `MCPServerError.noFreePort` specifically, matching what the real `LoopbackListener` throws.
     var startError: (any Error)?
     var portToReturn: UInt16 = 7331
+    var onStart: (() async throws -> Void)?
 
     private let store: MCPClientStore
 
@@ -23,6 +24,7 @@ final class FakeMCPServer: MCPServerControlling, MCPClientStoreProviding {
 
     func start() async throws {
         startCount += 1
+        try await onStart?()
         if let startError { throw startError }
         boundPort = portToReturn
     }

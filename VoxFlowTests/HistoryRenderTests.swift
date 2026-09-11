@@ -8,7 +8,7 @@ import VoxFlowTestSupport
 @testable import VoxFlow
 
 /// Design-fidelity renders (Task 3 Step 3) — gated behind `VOXFLOW_RENDER` so normal test runs never
-/// touch disk. Run with `VOXFLOW_RENDER=1 xcodebuild … -only-testing:VoxFlowTests/HistoryRenderTests`,
+/// touch disk. Run with `TEST_RUNNER_VOXFLOW_RENDER=1 xcodebuild … -only-testing:VoxFlowTests/HistoryRenderTests`,
 /// then compare the PNGs in `.superpowers/design/renders/` against `canvas.pdf` pages 9 (2e/2d) and 4
 /// (MW-02n/T-01).
 @Suite(.enabled(if: ProcessInfo.processInfo.environment["VOXFLOW_RENDER"] != nil))
@@ -27,7 +27,7 @@ struct HistoryRenderTests {
                        duration: duration, createdAt: Date().addingTimeInterval(-minutesAgo * 60))
     }
 
-    private func makeBundle(keepHistory: Bool = true) -> Bundle {
+    private func makeBundle(keepHistory: Bool = true, saveFails: Bool = false) -> Bundle {
         let dir = TemporaryDirectory()
         let clock = FakeClock()
         let settings = DictationSettings(store: InMemoryKeyValueStore())
@@ -37,7 +37,9 @@ struct HistoryRenderTests {
         let navigation = Navigation()
         let service = HistoryService(url: dir.file("voxflow.sqlite"), settings: settings,
                                      keyProvider: { InsecureHistoryKeyProvider() }, clock: clock)
-        let vm = HistoryViewModel(service: service, settings: settings, navigation: navigation, clock: clock)
+        let updateText: ((Int64, String) async -> DictationRecord?)? = saveFails ? { _, _ in nil } : nil
+        let vm = HistoryViewModel(service: service, settings: settings, navigation: navigation, clock: clock,
+                                  initialDateRange: .thisWeek, updateText: updateText)
         return Bundle(vm: vm, service: service, settings: settings, clock: clock)
     }
 
@@ -81,6 +83,15 @@ struct HistoryRenderTests {
         RenderCase(name: "6-toast-undo") { bundle in
             await bundle.vm.load()
             if let first = bundle.vm.records.first { bundle.vm.delete(first) }
+        },
+        RenderCase(name: "7-filtered-app") { bundle in
+            await bundle.vm.load()
+            bundle.vm.selectedApp = "Mail"
+            bundle.vm.dateRange = .today
+        },
+        RenderCase(name: "8-filters-no-results") { bundle in
+            await bundle.vm.load()
+            bundle.vm.selectedApp = "Removed app"
         },
     ]
 
@@ -128,6 +139,152 @@ struct HistoryRenderTests {
         try Self.writePNG(image, to: directory.appendingPathComponent("History-restyle-menu.png"))
     }
 
+    @Test("expanded detail has the white surface and column separator drawn in canvas 2e")
+    func cardStructure() throws {
+        let record = DictationRecord(id: 1, text: "Inserted words", rawText: "Spoken words",
+            appName: "Mail", style: "formal", language: "en", duration: 1, words: 2, createdAt: Date())
+        let renderer = ImageRenderer(content: HistoryDetailView(record: record, model: makeBundle().vm)
+            .frame(width: 860, height: 230).background(Color.white).environment(\.colorScheme, .light))
+        renderer.scale = 2
+        let image = try #require(renderer.nsImage)
+        let directory = Self.rendersDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try Self.writePNG(image, to: directory.appendingPathComponent("History-card-structure.png"))
+        let tiff = try #require(image.tiffRepresentation)
+        let bitmap = try #require(NSBitmapImageRep(data: tiff))
+        let scale = CGFloat(bitmap.pixelsWide) / 860
+        func red(at x: Int) throws -> CGFloat {
+            try #require(bitmap.colorAt(x: Int(CGFloat(x) * scale), y: Int(110 * scale))?
+                .usingColorSpace(.deviceRGB)).redComponent
+        }
+        // Samples avoid text: plain white within the left column, then the 6% black separator
+        // through the middle gutter. A narrow band tolerates the separator's pixel alignment.
+        #expect(try red(at: 200) > 0.99)
+        let divider = try #require(try (428...431).map { try red(at: $0) }.min())
+        #expect(divider > 0.90 && divider < 0.96)
+    }
+
+    @Test("renders app and date filter choices using the live popover content")
+    func renderFilters() async throws {
+        let directory = Self.rendersDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        for (name, options) in [
+            ("apps", HistoryFilterOptions(choices: ["Mail", "Notes", "Slack", "Xcode"], selected: "Mail", allLabel: "All apps") { _ in }),
+            ("dates", HistoryFilterOptions(choices: HistoryViewModel.DateRange.allCases.map(\.rawValue), selected: "This week") { _ in }),
+        ] {
+            let renderer = ImageRenderer(content: options.background(Color(nsColor: .windowBackgroundColor)))
+            renderer.scale = 2
+            let image = try #require(renderer.nsImage)
+            try Self.writePNG(image, to: directory.appendingPathComponent("History-filter-\(name).png"))
+        }
+    }
+
+    @Test("expanded card header wraps the transcript instead of truncating it")
+    func expandedHeaderWraps() throws {
+        let vm = makeBundle().vm
+        vm.toggleExpanded(id: 1)
+        let record = DictationRecord(id: 1,
+            text: String(repeating: "Please send the revised numbers before Thursday afternoon. ", count: 4),
+            rawText: "Please send the numbers", appName: "Mail", style: "formal", language: "en",
+            duration: 30, words: 36, createdAt: Date())
+        let renderer = ImageRenderer(content: HistoryRowView(record: record, model: vm)
+            .frame(width: 860).background(Color.white).environment(\.colorScheme, .light))
+        renderer.scale = 2
+        let image = try #require(renderer.nsImage)
+        // Four sentences need multiple lines in the space beside the tile and actions.
+        #expect(image.size.height > 80)
+        let directory = Self.rendersDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try Self.writePNG(image, to: directory.appendingPathComponent("History-long-header.png"))
+    }
+
+    /// Native popover chrome needs an interactive computer capture. Run this fixture with both
+    /// TEST_RUNNER_VOXFLOW_RENDER=1 and TEST_RUNNER_VOXFLOW_CAPTURE_POPOVERS=1, then open the app
+    /// chip and choose Mail, and open the date chip and choose Today. Static render success alone
+    /// does not establish this native interaction check. Foreground activation is owned by the
+    /// interactive driver: NSApplication.activate() is only a request and cannot make automated
+    /// mouse posting reliable in a background test host.
+    @Test("manually inspects native filter popovers and captures the selected production page",
+          .enabled(if: ProcessInfo.processInfo.environment["VOXFLOW_CAPTURE_POPOVERS"] == "1"),
+          .timeLimit(.minutes(5)))
+    func renderNativeFilters() async throws {
+        let directory = Self.rendersDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let bundle = makeBundle()
+        await seed(bundle)
+        await bundle.vm.load()
+        let host = NSHostingView(rootView: HistoryPageBody(viewModel: bundle.vm, ephemeralScope: EphemeralScope())
+            .frame(width: 900, height: 600).background(Color.white).environment(\.colorScheme, .light))
+        let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 900, height: 600),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.appearance = NSAppearance(named: .aqua)
+        window.contentView = host
+        defer { window.close() }
+        window.makeKeyAndOrderFront(nil)
+        host.layoutSubtreeIfNeeded()
+        try Self.captureNative(host, name: "native-list", directory: directory)
+        for name in ["native-app-popover", "native-date-popover"] {
+            let shown = NativePopoverObserver()
+            defer { shown.finish() }
+            print("Native fixture ready to open: \(name)")
+            await shown.wait()
+            let popover = try #require(shown.popover)
+            defer { popover.close() }
+            // AppKit's material background is compositor-only; use computer capture for the
+            // open popover. Native page PNGs record the list before and after selection.
+            print("Native popover ready for capture: \(name)")
+            let closed = NativePopoverObserver(event: NSPopover.didCloseNotification)
+            defer { closed.finish() }
+            await closed.wait()
+        }
+        try #require(bundle.vm.selectedApp == "Mail")
+        try #require(bundle.vm.dateRange == .today)
+        host.layoutSubtreeIfNeeded()
+        try Self.captureNative(host, name: "native-selected", directory: directory)
+    }
+
+    private static func captureNative(_ view: NSView, name: String, directory: URL) throws {
+        let bitmap = try #require(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+        view.cacheDisplay(in: view.bounds, to: bitmap)
+        try #require(bitmap.representation(using: .png, properties: [:]))
+            .write(to: directory.appendingPathComponent("History-\(name).png"))
+    }
+
+    @Test("renders the native card, inline editor and failed-save draft in both appearances",
+          arguments: ["expanded-card", "inline-edit", "edit-error"], [false, true])
+    func renderNativeCard(state: String, dark: Bool) async throws {
+        let bundle = makeBundle(saveFails: state == "edit-error")
+        await seed(bundle)
+        await bundle.vm.load()
+        let record = try #require(bundle.vm.records.first)
+        bundle.vm.toggleExpanded(id: record.id)
+        if state != "expanded-card" {
+            bundle.vm.beginEditing(record)
+            bundle.vm.editedText = "Hi Priya, attaching the corrected NDA. Let me know if legal needs anything else."
+            if state == "edit-error" { await bundle.vm.saveEdit() }
+        }
+        // Host the production view in AppKit so the native text editor is captured too.
+        // An opaque background keeps secondary labels visible in the exported PNG.
+        let content = HistoryCardView(record: record, model: bundle.vm)
+            .frame(width: 860, height: 300)
+            .background(dark ? Color(white: 0.1) : .white)
+            .environment(\.colorScheme, dark ? .dark : .light)
+        let view = NSHostingView(rootView: content)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 860, height: 300),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+        view.appearance = window.appearance
+        window.contentView = view
+        defer { window.close() }
+        view.frame = window.contentView!.bounds
+        view.layoutSubtreeIfNeeded()
+        let directory = Self.rendersDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try Self.captureNative(view, name: state + (dark ? "-dark" : ""), directory: directory)
+    }
+
     private static func rendersDirectory() -> URL {
         URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()   // VoxFlowTests/
@@ -173,7 +330,7 @@ private struct HistoryRenderPreview: View {
                 .padding(.vertical, 6)
                 .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Color.secondary.opacity(0.25)))
-                HistorySearchChips()
+                HistorySearchChips(viewModel: viewModel)
                 Spacer(minLength: 0)
             }
             .padding(20)
@@ -215,5 +372,29 @@ private struct HistoryRenderPreview: View {
 private struct InsecureHistoryKeyProvider: HistoryKeyProviding {
     func historyKey() throws -> HistoryKey {
         HistoryKey(key: .init(size: .bits256), isNewlyCreated: true)
+    }
+}
+
+/// Notification-driven: no arbitrary delay for the native popover animation.
+@MainActor
+private final class NativePopoverObserver {
+    var popover: NSPopover?
+    private var token: (any NSObjectProtocol)?
+    private let shown = AsyncStream<Void>.makeStream()
+    init(event: Notification.Name = NSPopover.didShowNotification) {
+        token = NotificationCenter.default.addObserver(forName: event,
+                                                        object: nil, queue: .main) { [weak self] notification in
+            let popover = notification.object as? NSPopover
+            // Foundation delivers this observer on OperationQueue.main, the main actor's executor.
+            MainActor.assumeIsolated {
+                self?.popover = popover
+                self?.shown.continuation.yield()
+            }
+        }
+    }
+    func wait() async { for await _ in shown.stream { return } }
+    func finish() {
+        if let token { NotificationCenter.default.removeObserver(token) }
+        shown.continuation.finish()
     }
 }

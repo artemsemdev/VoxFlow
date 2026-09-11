@@ -31,6 +31,15 @@ protocol MCPClientStoreProviding: AnyObject {
     func resolvedClientStore() async -> MCPClientStore
 }
 
+/// Service lifecycle tests substitute a transport without opening a socket.
+protocol MCPServerTransport: Sendable {
+    var boundPort: UInt16? { get async }
+    func start() async throws
+    func stop() async
+}
+
+extension LoopbackListener: MCPServerTransport {}
+
 /// Owns the loopback MCP server's two moving parts — `LoopbackListener` (transport) and
 /// `MCPToolRunner` (protocol routing + the three tools + ST-06a approval) — behind the single
 /// `start()`/`stop()`/`boundPort` seam `MCPViewModel` and `AppDelegate` drive.
@@ -62,14 +71,14 @@ final class MCPServerService: MCPServerControlling, MCPClientStoreProviding {
     private let clock: any MonotonicClock
     private let approvalPresenter: any MCPApprovalPresenting
     private let serverVersion: String
-    private let resolver: any PeerResolving
-    private let portRange: ClosedRange<UInt16>
-    /// Injectable only for the integration test's framing-deadline case; production uses the default.
-    private let framingDeadline: TimeInterval
+    private let loadDatabase: () async -> VoxFlowDatabase?
+    private let makeTransport: (MCPToolRunner) -> any MCPServerTransport
 
-    private var clientStore: MCPClientStore?
+    private var clientStoreTask: Task<MCPClientStore, Never>?
     private var runner: MCPToolRunner?
-    private var listener: LoopbackListener?
+    private var listener: (any MCPServerTransport)?
+    private var inFlightStart: Task<Void, Error>?
+    private var generation = 0
 
     private(set) var boundPort: UInt16?
 
@@ -77,7 +86,9 @@ final class MCPServerService: MCPServerControlling, MCPClientStoreProviding {
          historyService: HistoryService, fileTranscribing: any FileTranscribing, pathPolicy: PathPolicy,
          clock: any MonotonicClock, approvalPresenter: any MCPApprovalPresenting, serverVersion: String,
          resolver: any PeerResolving = LibprocPeerResolver(), portRange: ClosedRange<UInt16> = 7331...7340,
-         framingDeadline: TimeInterval = ConnectionHandler.defaultFramingDeadline) {
+         framingDeadline: TimeInterval = ConnectionHandler.defaultFramingDeadline,
+         loadDatabase: (() async -> VoxFlowDatabase?)? = nil,
+         makeTransport: ((MCPToolRunner) -> any MCPServerTransport)? = nil) {
         self.settings = settings
         self.coordinator = coordinator
         self.controller = controller
@@ -87,9 +98,13 @@ final class MCPServerService: MCPServerControlling, MCPClientStoreProviding {
         self.clock = clock
         self.approvalPresenter = approvalPresenter
         self.serverVersion = serverVersion
-        self.resolver = resolver
-        self.portRange = portRange
-        self.framingDeadline = framingDeadline
+        self.loadDatabase = loadDatabase ?? {
+            await historyService.ready()
+            return historyService.database
+        }
+        self.makeTransport = makeTransport ?? {
+            LoopbackListener(portRange: portRange, resolver: resolver, handler: $0, framingDeadline: framingDeadline)
+        }
     }
 
     /// Resolves (building on first call) the runner, then starts the listener. Publishes the bound
@@ -98,21 +113,57 @@ final class MCPServerService: MCPServerControlling, MCPClientStoreProviding {
     /// the listener's own doc). Throws `MCPServerError.noFreePort` when every port 7331–7340 is
     /// busy; `boundPort` stays `nil` in that case.
     func start() async throws {
+        if boundPort != nil { return }
+        let current = generation
+        let ownsStart = inFlightStart == nil
+        let task: Task<Void, Error>
+        if let pending = inFlightStart {
+            task = pending
+        } else {
+            task = Task { try await self.startListener(generation: current) }
+            inFlightStart = task
+        }
+        // A late joiner must not clear a newer retry after this attempt's creator has returned.
+        defer { if ownsStart, generation == current { inFlightStart = nil } }
+        do { try await task.value }
+        catch {
+            guard generation == current else { throw CancellationError() }
+            throw error
+        }
+        guard generation == current else { throw CancellationError() }
+    }
+
+    private func startListener(generation current: Int) async throws {
         let runner = await resolvedRunner()
-        let listener = self.listener ?? LoopbackListener(portRange: portRange, resolver: resolver, handler: runner,
-                                                        framingDeadline: framingDeadline)
+        guard generation == current, !Task.isCancelled else { throw CancellationError() }
+        let listener = self.listener ?? makeTransport(runner)
         self.listener = listener
-        try await listener.start()
-        let port = await listener.boundPort
-        boundPort = port
-        if let port { runner.boundPort = port }
+        do {
+            try await listener.start()
+            guard generation == current else { throw CancellationError() }
+            let port = await listener.boundPort
+            guard generation == current else { throw CancellationError() }
+            boundPort = port
+            if let port { runner.boundPort = port }
+        } catch {
+            // This captured transport may finish after stop detached it. Clean up only that
+            // instance, never the replacement belonging to a newer start.
+            await listener.stop()
+            throw error
+        }
     }
 
     func stop() async {
-        guard let listener else { return }
-        await listener.stop()
+        generation += 1
+        inFlightStart?.cancel()
+        inFlightStart = nil
+        // Detach before suspension: a fresh start owns a different transport, and an older stop
+        // cannot clear its port or stop its connections when its actor hop eventually completes.
+        let listener = self.listener
+        self.listener = nil
         boundPort = nil
         runner?.boundPort = 0
+        await listener?.stop()
     }
 
     /// The single `MCPClientStore` both the runner (approving/recording sightings) and
@@ -129,17 +180,17 @@ final class MCPServerService: MCPServerControlling, MCPClientStoreProviding {
     /// itself couldn't even be created) keeps the server usable — approvals just won't survive a
     /// relaunch that launch.
     func resolvedClientStore() async -> MCPClientStore {
-        if let clientStore { return clientStore }
-        await historyService.ready()
-        guard let database = historyService.database ?? (try? VoxFlowDatabase.inMemory()) else {
-            // `VoxFlowDatabase.inMemory()`'s only failure mode is GRDB itself being unable to open
-            // an in-process SQLite connection — effectively never, on a real Mac. Nothing sound is
-            // left to hand back at that point; this never actually fires in practice.
-            fatalError("MCPServerService: could not open even an in-memory database for MCPClientStore")
+        if let task = clientStoreTask { return await task.value }
+        // Initialization belongs to the service lifetime, independently of start/stop. Settings
+        // reads and every startup join this task; cancelling one start must not cancel their store.
+        let task = Task { [loadDatabase] in
+            guard let database = await loadDatabase() ?? (try? VoxFlowDatabase.inMemory()) else {
+                fatalError("MCPServerService: could not open even an in-memory database for MCPClientStore")
+            }
+            return MCPClientStore(database: database)
         }
-        let store = MCPClientStore(database: database)
-        clientStore = store
-        return store
+        clientStoreTask = task
+        return await task.value
     }
 
     /// Only touches a runner that already exists: if none has been built yet there are no session
@@ -152,6 +203,7 @@ final class MCPServerService: MCPServerControlling, MCPClientStoreProviding {
     private func resolvedRunner() async -> MCPToolRunner {
         if let runner { return runner }
         let clientStore = await resolvedClientStore()
+        if let runner { return runner } // Another caller may have completed initialization while suspended.
         let runner = MCPToolRunner(settings: settings, coordinator: coordinator, controller: controller,
                                    historyService: historyService, fileTranscribing: fileTranscribing, pathPolicy: pathPolicy,
                                    clock: clock, clientStore: clientStore, approvalPresenter: approvalPresenter, serverVersion: serverVersion)

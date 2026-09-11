@@ -84,6 +84,21 @@ struct SnippetExpanderTests {
         #expect(result.used == ["/sig"])
     }
 
+    @Test("the braced signature marker is removed completely", arguments: ["{cursor}", "{CURSOR}", "cursor"])
+    func signatureCaret(marker: String) {
+        let rule = SnippetRule(trigger: "/sig", body: "Best,\n\(marker)\nArtem")
+        let result = expander(snippets: [rule]).expand("👩🏽‍💻 /sig")
+        #expect(result.text == "👩🏽‍💻 Best,\n\nArtem")
+        #expect(result.cursorOffset == 8)
+    }
+
+    @Test("braced markers also work inside words and next to another marker", arguments: ["Hello{cursor}world", "Hello{cursor}{cursor}world"])
+    func adjacentCaretMarkers(body: String) {
+        let result = expander(snippets: [SnippetRule(trigger: "/sig", body: body)]).expand("/sig")
+        #expect(result.text == "Helloworld")
+        #expect(result.cursorOffset == 5)
+    }
+
     @Test("cursor placeholder is removed and its offset in the final text is reported")
     func cursorOffset() {
         let rule = SnippetRule(trigger: "/greet", body: "Hi cursor, thanks")

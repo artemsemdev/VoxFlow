@@ -106,6 +106,24 @@ struct DictationControllerTests {
         #expect(await h.next() == .idle)
     }
 
+    @Test("the snippet caret request reaches the inserter with its matching final text", arguments: [nil, 6] as [Int?])
+    func snippetCaret(offset: Int?) async {
+        let text = "Best,\n\nArtem"
+        let h = await Harness(result: DictationResult(text: text, rawText: "slash sig", segments: [],
+                                                      language: nil, duration: 2, lowConfidence: false, cursorOffset: offset))
+        await h.controller.fnDown()
+        _ = await h.next()
+        await h.mic.waitUntilCapturing()
+        await h.clock.waitForSleepers(1)
+        await h.clock.advance(by: 0.25)
+        _ = await h.next()
+        await h.controller.fnUp()
+        _ = await h.next()
+        _ = await h.next()
+        #expect(h.inserter.insertedTexts == [text])
+        #expect(h.inserter.cursorOffsets == [offset])
+    }
+
     @Test("a lone tap aborts capture without transcribing")
     func loneTap() async throws {
         let h = await Harness()
