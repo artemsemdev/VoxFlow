@@ -48,7 +48,7 @@ struct HomeRenderTests {
         settings.encryptHistory = false
         settings.hotkeyMode = hotkeyMode
         let navigation = Navigation()
-        let history = HistoryService(url: dir.file("voxflow.sqlite"), settings: settings,
+        let history = HistoryService(directory: dir, settings: settings,
                                      keyProvider: { FakeHistoryKeyProvider() }, clock: FakeClock())
         let stats = StatsService(history: history, now: { Self.now }, fullUserName: { "Anh Nguyen" })
         let permissions = FakePermissions(microphone: microphone, requestResult: microphone, accessibility: accessibility)

@@ -5,9 +5,13 @@ import VoxFlowCore
 /// The `app_style_overrides` table: a per-app rewrite tone that overrides the global default
 /// (design Styles tab). Synchronous and blocking like `DictationStore`.
 public final class StyleOverrideStore: Sendable {
+    private let database: VoxFlowDatabase
     private let queue: DatabaseQueue
 
-    public init(database: VoxFlowDatabase) { queue = database.queue }
+    public init(database: VoxFlowDatabase) {
+        self.database = database
+        queue = database.queue
+    }
 
     /// Upsert: replaces the app name and style if `bundleID` already has an override.
     public func set(bundleID: String, appName: String, style: TextStyle) throws {

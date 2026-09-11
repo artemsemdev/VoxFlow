@@ -48,7 +48,7 @@ struct MenuBarRenderTests {
         settings.retentionDays = 0
         settings.encryptHistory = false
         let dir = TemporaryDirectory()
-        let history = HistoryService(url: dir.file("voxflow.sqlite"), settings: settings,
+        let history = HistoryService(directory: dir, settings: settings,
                                      keyProvider: { FakeHistoryKeyProvider() }, clock: FakeClock())
         await history.ready()
         let store = try #require(history.store)

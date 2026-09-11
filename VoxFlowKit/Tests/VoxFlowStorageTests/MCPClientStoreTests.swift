@@ -104,6 +104,9 @@ struct MCPClientStoreTests {
         // A pre-phase-6 database: only v1/v2 have ever run, recorded in GRDB's migrations table
         // exactly as a real installed app would leave it.
         let rawQueue = try DatabaseQueue(path: url.path)
+        defer {
+            do { try rawQueue.close() } catch { Issue.record("raw migration queue close failed: \(error)") }
+        }
         var v2Only = DatabaseMigrator()
         v2Only.registerMigration("v1") { db in
             try db.execute(sql: """
@@ -134,6 +137,9 @@ struct MCPClientStoreTests {
         try v2Only.migrate(rawQueue)
 
         let database = try VoxFlowDatabase(url: url)
+        defer {
+            do { try database.queue.close() } catch { Issue.record("database queue close failed: \(error)") }
+        }
         let tableNames: [String] = try database.queue.read { db in
             try String.fetchAll(db, sql: "SELECT name FROM sqlite_master WHERE type = 'table'")
         }

@@ -20,7 +20,7 @@ struct ContentServiceTests {
         let settings = DictationSettings(store: InMemoryKeyValueStore())
         settings.retentionDays = 0
         settings.encryptHistory = false
-        let history = HistoryService(url: dir.file("voxflow.sqlite"), settings: settings,
+        let history = HistoryService(directory: dir, settings: settings,
                                      keyProvider: { DummyKeyProvider() }, clock: FakeClock())
         return ContentService(history: history)
     }
@@ -161,7 +161,7 @@ struct ContentServiceTests {
         let dir = TemporaryDirectory()
         let settings = DictationSettings(store: InMemoryKeyValueStore())
         settings.encryptHistory = false
-        let history = HistoryService(url: dir.file("voxflow.sqlite"), settings: settings,
+        let history = HistoryService(directory: dir, settings: settings,
                                      keyProvider: { DummyKeyProvider() }, clock: FakeClock())
         await history.ready()
         let database = try #require(history.database)
@@ -187,10 +187,8 @@ struct ContentServiceTests {
         let dir = TemporaryDirectory()
         let blocker = dir.file("blocker")
         try Data().write(to: blocker)
-        let url = blocker.appendingPathComponent("nested").appendingPathComponent("voxflow.sqlite")
-
         let settings = DictationSettings(store: InMemoryKeyValueStore())
-        let history = HistoryService(url: url, settings: settings, keyProvider: { DummyKeyProvider() }, clock: FakeClock())
+        let history = HistoryService(directory: dir, relativePath: "blocker/nested/voxflow.sqlite", settings: settings, keyProvider: { DummyKeyProvider() }, clock: FakeClock())
         let content = ContentService(history: history)
 
         await content.ready()
@@ -215,7 +213,7 @@ struct ContentServiceTests {
         let seedStore = try DictationStore(databaseURL: url, keyProvider: SharedKeyProvider(key: sharedKey, isNew: false))
         try seedStore.insert(DictationDraft(text: "secret", rawText: "secret", appName: nil, style: nil, language: nil, duration: 1, createdAt: Date()))
         let settings = DictationSettings(store: InMemoryKeyValueStore())
-        let history = HistoryService(url: url, settings: settings,
+        let history = HistoryService(directory: dir, settings: settings,
                                      keyProvider: { SharedKeyProvider(key: SymmetricKey(size: .bits256), isNew: true) }, clock: FakeClock())
         let content = ContentService(history: history)
 

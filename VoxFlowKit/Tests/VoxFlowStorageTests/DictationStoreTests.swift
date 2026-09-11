@@ -1,6 +1,7 @@
 import CryptoKit
 import Foundation
 import Testing
+import VoxFlowTestSupport
 @testable import VoxFlowStorage
 
 struct FakeKeyProvider: HistoryKeyProviding {
@@ -15,6 +16,9 @@ struct FakeKeyProvider: HistoryKeyProviding {
 
 @Suite("DictationStore")
 struct DictationStoreTests {
+    private func fileStore(in directory: TemporaryDirectory, keyProvider: (any HistoryKeyProviding)?) throws -> DictationStore {
+        try DictationStore(database: VoxFlowDatabase(url: directory.file("voxflow.sqlite"), retaining: { withExtendedLifetime(directory) {} }), keyProvider: keyProvider)
+    }
     func draft(_ text: String, at date: Date, app: String? = "Mail") -> DictationDraft {
         DictationDraft(text: text, rawText: text + " raw", appName: app, style: nil, language: "en", duration: 2.5, createdAt: date)
     }
@@ -66,26 +70,20 @@ struct DictationStoreTests {
 
     @Test("a file-backed store persists across instances")
     func persistence() throws {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: dir) }
-        let url = dir.appendingPathComponent("voxflow.sqlite")
-        _ = try DictationStore(databaseURL: url, keyProvider: nil).insert(draft("kept", at: Date()))
-        #expect(try DictationStore(databaseURL: url, keyProvider: nil).fetch(limit: 1).first?.text == "kept")
+        let dir = TemporaryDirectory()
+        _ = try fileStore(in: dir, keyProvider: nil).insert(draft("kept", at: Date()))
+        #expect(try fileStore(in: dir, keyProvider: nil).fetch(limit: 1).first?.text == "kept")
     }
 
     @Test("fetch never fails on an unreadable row: reopening without the key flags encrypted rows, plaintext still reads")
     func unreadableRowsDoNotBreakFetch() throws {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: dir) }
-        let url = dir.appendingPathComponent("voxflow.sqlite")
+        let dir = TemporaryDirectory()
 
-        let keyed = try DictationStore(databaseURL: url, keyProvider: FakeKeyProvider())
+        let keyed = try fileStore(in: dir, keyProvider: FakeKeyProvider())
         _ = try keyed.insert(draft("first secret", at: Date(timeIntervalSince1970: 1)))
         _ = try keyed.insert(draft("second secret", at: Date(timeIntervalSince1970: 2)))
 
-        let reopened = try DictationStore(databaseURL: url, keyProvider: nil)
+        let reopened = try fileStore(in: dir, keyProvider: nil)
         let all = try reopened.fetch(limit: 10)
         #expect(all.count == 2)
         #expect(all.allSatisfy { $0.isUnreadable })
@@ -115,15 +113,12 @@ struct DictationStoreTests {
 
     @Test("stats still counts an unreadable (encrypted, key unavailable) row: words/duration are plain columns")
     func statsCountsUnreadableRows() throws {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: dir) }
-        let url = dir.appendingPathComponent("voxflow.sqlite")
+        let dir = TemporaryDirectory()
 
-        let keyed = try DictationStore(databaseURL: url, keyProvider: FakeKeyProvider())
+        let keyed = try fileStore(in: dir, keyProvider: FakeKeyProvider())
         _ = try keyed.insert(draft("first secret", at: Date(timeIntervalSince1970: 10)))
 
-        let reopened = try DictationStore(databaseURL: url, keyProvider: nil)
+        let reopened = try fileStore(in: dir, keyProvider: nil)
         let all = try reopened.fetch(limit: 10)
         #expect(all.first?.isUnreadable == true)
         #expect(try reopened.stats(since: Date(timeIntervalSince1970: 0)) == DictationStats(count: 1, words: 2, duration: 2.5))
@@ -199,19 +194,16 @@ struct DictationStoreTests {
 
     @Test("a key provider reporting a freshly-created key over an already-encrypted database throws keyLost; the existing key still works")
     func lostKeyIsDetected() throws {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: dir) }
-        let url = dir.appendingPathComponent("voxflow.sqlite")
+        let dir = TemporaryDirectory()
         let sharedKey = SymmetricKey(size: .bits256)
 
-        _ = try DictationStore(databaseURL: url, keyProvider: FakeKeyProvider(key: sharedKey)).insert(draft("secret", at: Date()))
+        _ = try fileStore(in: dir, keyProvider: FakeKeyProvider(key: sharedKey)).insert(draft("secret", at: Date()))
 
         #expect(throws: StorageError.keyLost) {
-            _ = try DictationStore(databaseURL: url, keyProvider: FakeKeyProvider(key: SymmetricKey(size: .bits256), isNew: true))
+            _ = try fileStore(in: dir, keyProvider: FakeKeyProvider(key: SymmetricKey(size: .bits256), isNew: true))
         }
 
-        let reopened = try DictationStore(databaseURL: url, keyProvider: FakeKeyProvider(key: sharedKey, isNew: false))
+        let reopened = try fileStore(in: dir, keyProvider: FakeKeyProvider(key: sharedKey, isNew: false))
         #expect(try reopened.count() == 1)
         #expect(try reopened.fetch(limit: 1).first?.text == "secret")
     }
@@ -253,17 +245,14 @@ struct DictationStoreTests {
 
     @Test("updateStyled on one row does not touch an unreadable (key-lost) row")
     func updateStyledLeavesUnreadableRowsUntouched() throws {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: dir) }
-        let url = dir.appendingPathComponent("voxflow.sqlite")
+        let dir = TemporaryDirectory()
 
-        let keyed = try DictationStore(databaseURL: url, keyProvider: FakeKeyProvider())
+        let keyed = try fileStore(in: dir, keyProvider: FakeKeyProvider())
         let encryptedRow = try keyed.insert(draft("secret one", at: Date(timeIntervalSince1970: 1)))
 
         // Reopen without a cipher: `encryptedRow` is now unreadable, but plaintext inserts on this
         // same (unencrypted) connection stay readable.
-        let reopened = try DictationStore(databaseURL: url, keyProvider: nil)
+        let reopened = try fileStore(in: dir, keyProvider: nil)
         let plainRow = try reopened.insert(draft("plain two", at: Date(timeIntervalSince1970: 2)))
 
         let updated = try reopened.updateStyled(id: plainRow.id, text: "Plain two, updated.", style: "casual")
@@ -281,18 +270,15 @@ struct DictationStoreTests {
 
     @Test("updateStyled across a mixed encoding: a plaintext row updated through an encrypted store re-encodes rawText too and stays fully readable")
     func updateStyledReencodesRawTextAcrossMixedEncoding() throws {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: dir) }
-        let url = dir.appendingPathComponent("voxflow.sqlite")
+        let dir = TemporaryDirectory()
 
         // Inserted while "Encrypt history at rest" was off (encrypted = 0, plaintext columns).
-        let plaintextStore = try DictationStore(databaseURL: url, keyProvider: nil)
+        let plaintextStore = try fileStore(in: dir, keyProvider: nil)
         let original = try plaintextStore.insert(draft("plaintext raw words", at: Date(timeIntervalSince1970: 9)))
 
         // Re-styled after the toggle flipped on (same file, a store with a cipher now) — exactly what
         // `HistoryService.reopen()` does on a Privacy-toggle change.
-        let encryptedStore = try DictationStore(databaseURL: url, keyProvider: FakeKeyProvider())
+        let encryptedStore = try fileStore(in: dir, keyProvider: FakeKeyProvider())
         let updated = try encryptedStore.updateStyled(id: original.id, text: "Restyled text.", style: "formal")
 
         #expect(updated?.text == "Restyled text.")
@@ -309,19 +295,16 @@ struct DictationStoreTests {
 
     @Test("updateStyled on a row the current store can't decode returns nil and leaves it byte-for-byte untouched")
     func updateStyledOnUndecodableRowReturnsNilAndLeavesItUntouched() throws {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: dir) }
-        let url = dir.appendingPathComponent("voxflow.sqlite")
+        let dir = TemporaryDirectory()
         let sharedKey = SymmetricKey(size: .bits256)
 
-        let keyed = try DictationStore(databaseURL: url, keyProvider: FakeKeyProvider(key: sharedKey))
+        let keyed = try fileStore(in: dir, keyProvider: FakeKeyProvider(key: sharedKey))
         let original = try keyed.insert(draft("secret raw text", at: Date(timeIntervalSince1970: 5)))
         let beforeTextBytes = try keyed.textColumnForTesting(id: original.id)
 
         // Same file, no cipher on this instance (e.g. "Encrypt history at rest" just got switched
         // off) — the row is `encrypted = 1` but this store has no key to open it.
-        let plaintextStore = try DictationStore(databaseURL: url, keyProvider: nil)
+        let plaintextStore = try fileStore(in: dir, keyProvider: nil)
         let result = try plaintextStore.updateStyled(id: original.id, text: "attempted new text", style: "casual")
 
         #expect(result == nil)
@@ -329,7 +312,7 @@ struct DictationStoreTests {
         #expect(afterTextBytes == beforeTextBytes)   // byte-for-byte: not even the flag/columns moved
 
         // Reopening with the original key proves nothing changed at all, not just the `text` column.
-        let reopenedWithKey = try DictationStore(databaseURL: url, keyProvider: FakeKeyProvider(key: sharedKey))
+        let reopenedWithKey = try fileStore(in: dir, keyProvider: FakeKeyProvider(key: sharedKey))
         let refetched = try reopenedWithKey.fetch(limit: 1).first
         #expect(refetched?.text == original.text)
         #expect(refetched?.rawText == original.rawText)

@@ -310,17 +310,17 @@ final class HistoryViewModel {
     private func scheduleSearch(debounce: Bool = true) {
         searchGeneration += 1
         searchTask.withLock { $0?.cancel() }
-        let task = Task { [weak self] in
-            guard let self else { return }
+        let shouldDebounce = debounce && !query.isEmpty
+        let task = Task { [weak self, clock] in
             // An empty query (typed all the way back to nothing, or "Clear search") skips the debounce
             // entirely — waiting 150 ms here would show the wrong empty state in between: `records`
             // still holds the (typically empty) filtered results while `emptyState` already reads
             // `query.isEmpty`, so the view would flash "No dictations yet" before the real list returns.
-            if debounce, !self.query.isEmpty {
-                do { try await self.clock.sleep(for: Self.debounceInterval) } catch { return }
+            if shouldDebounce {
+                do { try await clock.sleep(for: Self.debounceInterval) } catch { return }
                 guard !Task.isCancelled else { return }
             }
-            await self.search()
+            await self?.search()
         }
         searchTask.withLock { $0 = task }
     }
@@ -366,10 +366,9 @@ final class HistoryViewModel {
 
     private func armUndoTimer() {
         undoTask.withLock { $0?.cancel() }
-        let task = Task { [weak self] in
-            guard let self else { return }
-            do { try await self.clock.sleep(for: Self.undoWindow) } catch { return }
-            self.pendingDeletion = nil
+        let task = Task { [weak self, clock] in
+            do { try await clock.sleep(for: Self.undoWindow) } catch { return }
+            self?.pendingDeletion = nil
         }
         undoTask.withLock { $0 = task }
     }

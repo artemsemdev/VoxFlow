@@ -22,14 +22,16 @@ public actor RetentionRunner {
 
     public func start() {
         guard task == nil else { return }
-        task = Task { [weak self] in
+        task = Task { [weak self, clock] in
             while !Task.isCancelled {
-                guard let self else { return }
-                await self.purge()
-                do { try await self.clock.sleep(for: Self.interval) } catch { return }
+                guard await self?.purge() != nil else { return }
+                // The owner may release the runner during its daily sleep.
+                do { try await clock.sleep(for: Self.interval) } catch { return }
             }
         }
     }
+
+    deinit { task?.cancel() }
 
     /// Stops the run loop and resumes every pending `waitForPass` waiter (even one whose count will
     /// now never be reached) so a `stop()` racing a `waitForPass` returns instead of hanging forever;
