@@ -70,10 +70,11 @@ struct DictationControllerTests {
 
         init(result: DictationResult = DictationResult(text: "hello there world", rawText: "hello there world", segments: [], language: nil, duration: 2, lowConfidence: false),
              preflight: Preflight = Preflight(excludedApp: nil, secureInput: false, microphone: .granted, model: .loaded),
-             ephemeral: @escaping @Sendable () -> Bool = { false }) async {
+             ephemeral: @escaping @Sendable () -> Bool = { false },
+             beforePreflight: @escaping @Sendable () async -> Void = {}) async {
             transcriber = FakeDictationTranscriber(result: result)
             controller = DictationController(config: FlowBarConfig(), microphone: mic, transcriber: transcriber, inserter: inserter, clock: clock,
-                                             preflight: { [preflightCalls] in preflightCalls.append(1); return preflight }, loadModel: {}, options: { TranscriptionOptions() },
+                                             preflight: { [preflightCalls] in preflightCalls.append(1); await beforePreflight(); return preflight }, loadModel: {}, options: { TranscriptionOptions() },
                                              onSave: { [saved] r, app in saved.append((r, app)) },
                                              copyToClipboard: { [clipboard] t in clipboard.append(t) },
                                              ephemeral: ephemeral)
