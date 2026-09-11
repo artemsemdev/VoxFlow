@@ -27,7 +27,7 @@ struct HistoryRenderTests {
                        duration: duration, createdAt: Date().addingTimeInterval(-minutesAgo * 60))
     }
 
-    private func makeBundle(keepHistory: Bool = true) -> Bundle {
+    private func makeBundle(keepHistory: Bool = true, saveFails: Bool = false) -> Bundle {
         let dir = TemporaryDirectory()
         let clock = FakeClock()
         let settings = DictationSettings(store: InMemoryKeyValueStore())
@@ -37,8 +37,9 @@ struct HistoryRenderTests {
         let navigation = Navigation()
         let service = HistoryService(url: dir.file("voxflow.sqlite"), settings: settings,
                                      keyProvider: { InsecureHistoryKeyProvider() }, clock: clock)
+        let updateText: ((Int64, String) async -> DictationRecord?)? = saveFails ? { _, _ in nil } : nil
         let vm = HistoryViewModel(service: service, settings: settings, navigation: navigation, clock: clock,
-                                  initialDateRange: .thisWeek)
+                                  initialDateRange: .thisWeek, updateText: updateText)
         return Bundle(vm: vm, service: service, settings: settings, clock: clock)
     }
 
@@ -229,6 +230,34 @@ struct HistoryRenderTests {
         view.cacheDisplay(in: view.bounds, to: bitmap)
         try #require(bitmap.representation(using: .png, properties: [:]))
             .write(to: directory.appendingPathComponent("History-\(name).png"))
+    }
+
+    @Test("renders the native inline editor and failed-save draft", arguments: [false, true])
+    func renderEditor(saveFails: Bool) async throws {
+        let bundle = makeBundle(saveFails: saveFails)
+        await seed(bundle)
+        await bundle.vm.load()
+        let record = try #require(bundle.vm.records.first)
+        bundle.vm.beginEditing(record)
+        bundle.vm.editedText = "Hi Priya, attaching the corrected NDA. Let me know if legal needs anything else."
+        if saveFails { await bundle.vm.saveEdit() }
+        // Host the production view in AppKit so the native text editor is captured too.
+        // An opaque background keeps secondary labels visible in the exported PNG.
+        let content = HistoryDetailView(record: record, model: bundle.vm)
+            .frame(width: 860, height: 230).background(Color.white).environment(\.colorScheme, .light)
+        let view = NSHostingView(rootView: content)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 860, height: 230),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.appearance = NSAppearance(named: .aqua)
+        view.appearance = window.appearance
+        window.contentView = view
+        defer { window.close() }
+        view.frame = window.contentView!.bounds
+        view.layoutSubtreeIfNeeded()
+        let directory = Self.rendersDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try Self.captureNative(view, name: saveFails ? "edit-error" : "inline-edit", directory: directory)
     }
 
     private static func rendersDirectory() -> URL {
