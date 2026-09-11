@@ -27,7 +27,7 @@ struct SettingsPage: View {
             Group {
                 switch navigation.settingsTab {
                 case .general: GeneralSettingsView(general: SettingsServices.shared.generalViewModel)
-                case .hotkeys: HotkeysSettingsView(settings: services.dictationSettings)
+                case .hotkeys: HotkeysSettingsView(settings: services.dictationSettings, recorder: services.shortcutRecorder)
                 case .models: ModelsSettingsView(model: model)
                 case .audio: AudioSettingsView(audio: audio)
                 case .privacy: PrivacySettingsView(privacy: privacy)

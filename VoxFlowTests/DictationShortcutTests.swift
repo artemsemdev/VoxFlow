@@ -14,6 +14,7 @@ struct DictationShortcutTests {
         #expect(settings.shortcuts[.cancel].keycaps == ["esc"])
         #expect(settings.shortcuts[.reinsert].keycaps == ["⌥", "⌘", "V"])
         #expect(ShortcutAction.allCases.allSatisfy { settings.shortcuts[$0].validationError(for: $0) == nil })
+        #expect(settings.shortcuts.usesFunctionKey)
     }
 
     @Test("custom bindings normalize irrelevant flags, persist and notify once")
@@ -43,6 +44,10 @@ struct DictationShortcutTests {
     func specialKeycaps() {
         for (code, name): (UInt16, String) in [(49, "Space"), (48, "Tab"), (36, "Return"), (51, "Delete"), (53, "esc")] {
             #expect(ShortcutBinding(keyCode: code, modifiers: .option, label: "ignored").keycaps == ["⌥", name])
+        }
+        for (code, name): (UInt16, String) in [(123, "←"), (124, "→"), (125, "↓"), (126, "↑"),
+                                             (115, "Home"), (119, "End"), (116, "Page Up"), (121, "Page Down"), (117, "⌦"), (122, "F1"), (111, "F12")] {
+            #expect(ShortcutBinding(keyCode: code, modifiers: .control, label: "private glyph").keycaps == ["⌃", name])
         }
     }
 

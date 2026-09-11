@@ -84,6 +84,7 @@ struct OnboardingRenderTests {
         let name: String
         let step: OnboardingStep
         var accessibility = true
+        var fnAction = FnSystemAction.doNothing
         let configure: @MainActor (Bundle) async -> Void
     }
 
@@ -105,7 +106,8 @@ struct OnboardingRenderTests {
             for _ in 0..<1_000 where !bundle.vm.showsAccessibilityDenied { await Task.yield() }
             if !bundle.vm.showsAccessibilityDenied { Issue.record("2a-accessibility-denied: never reached the denied variant") }
         },
-        RenderCase(name: "3-hotkey", step: .hotkey) { _ in },
+        RenderCase(name: "3-hotkey", step: .hotkey, fnAction: .changeInputSource) { _ in },
+        RenderCase(name: "3a-hotkey-fn-unknown", step: .hotkey, fnAction: .unknown) { _ in },
         RenderCase(name: "4-model", step: .model) { bundle in
             for _ in 0..<200 where bundle.vm.modelRow == nil { await Task.yield() }
         },
@@ -142,7 +144,9 @@ struct OnboardingRenderTests {
             // (`.windowStyle(.hiddenTitleBar)`), which an `ImageRenderer` snapshot of bare content
             // never shows — draw a stand-in set here only, so the PNG still has something to compare
             // against the mock's top-left corner.
-            let renderer = ImageRenderer(content: RenderChrome(content: OnboardingContentView(viewModel: bundle.vm)))
+            let fnState = FnSystemActionWarningState(action: testCase.fnAction, currentAction: { testCase.fnAction })
+            let content = OnboardingContentView(viewModel: bundle.vm, fnWarningState: fnState, openKeyboard: {})
+            let renderer = ImageRenderer(content: RenderChrome(content: content))
             renderer.scale = 2
             // Prime the view once, discarding the image, so each step view's own `.onAppear` wiring
             // (in particular `TryItStepView`'s `beginTryIt()` + focus) has actually run before

@@ -32,10 +32,23 @@ struct ShortcutBinding: Codable, Equatable, Sendable {
         case 49: "Space"
         case 51: "Delete"
         case 53: "esc"
-        default: label.uppercased()
+        case 123: "←"
+        case 124: "→"
+        case 125: "↓"
+        case 126: "↑"
+        case 115: "Home"
+        case 119: "End"
+        case 116: "Page Up"
+        case 121: "Page Down"
+        case 117: "⌦"
+        default: Self.functionKeys[keyCode ?? .max] ?? label.uppercased()
         }
         self.doubleTap = doubleTap
     }
+
+    private static let functionKeys: [UInt16: String] = Dictionary(uniqueKeysWithValues:
+        [122, 120, 99, 118, 96, 97, 98, 100, 101, 109, 103, 111, 105, 107, 113, 106, 64, 79, 80, 90]
+            .enumerated().map { (UInt16($0.element), "F\($0.offset + 1)") })
 
     var flags: NSEvent.ModifierFlags { NSEvent.ModifierFlags(rawValue: modifiers) }
     var keycaps: [String] {
@@ -71,6 +84,7 @@ struct ShortcutBinding: Codable, Equatable, Sendable {
 }
 
 struct DictationShortcuts: Codable, Equatable, Sendable {
+    var usesFunctionKey: Bool { ShortcutAction.allCases.contains { self[$0].flags.contains(.function) } }
     private var bindings: [String: ShortcutBinding] = [:]
     subscript(action: ShortcutAction) -> ShortcutBinding {
         get { bindings[action.rawValue] ?? action.defaultBinding }

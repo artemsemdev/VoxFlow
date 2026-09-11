@@ -26,9 +26,22 @@ struct FlowBarRenderTests {
         var canvasWidth: CGFloat = 420
         /// `FlowBarContent.make(now:)` — only `.paused` reads this (its "N min left" countdown).
         var now: TimeInterval = 0
+        var shortcuts = DictationShortcuts()
+    }
+
+    private static var customShortcuts: DictationShortcuts {
+        var shortcuts = DictationShortcuts()
+        shortcuts[.pushToTalk] = ShortcutBinding(keyCode: 40, modifiers: [.control, .option], label: "K")
+        shortcuts[.handsFree] = ShortcutBinding(keyCode: 49, modifiers: .option, label: " ")
+        return shortcuts
     }
 
     private static let cases: [RenderCase] = [
+        RenderCase(name: "custom-idle-ptt", state: .idle, elapsed: 0, mode: .pushToTalk, shortcuts: customShortcuts),
+        RenderCase(name: "custom-idle-handsfree", state: .idle, elapsed: 0, mode: .handsFree, shortcuts: customShortcuts),
+        RenderCase(name: "custom-listening-handsfree", state: .listening(Listening(mode: .handsFree, startedAt: 0, language: nil)),
+                   elapsed: 10, mode: .pushToTalk, shortcuts: customShortcuts),
+        RenderCase(name: "custom-retry", state: .didntCatch(rawAvailable: false), elapsed: 0, mode: .pushToTalk, shortcuts: customShortcuts),
         RenderCase(name: "idle-ptt", state: .idle, elapsed: 0, mode: .pushToTalk),
         RenderCase(name: "idle-handsfree", state: .idle, elapsed: 0, mode: .handsFree),
         RenderCase(name: "listening-en", state: .listening(Listening(mode: .pushToTalk, startedAt: 0,
@@ -68,7 +81,8 @@ struct FlowBarRenderTests {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 
         for (index, testCase) in Self.cases.enumerated() {
-            let content = FlowBarContent.make(state: testCase.state, elapsed: testCase.elapsed, mode: testCase.mode, now: testCase.now)
+            let content = FlowBarContent.make(state: testCase.state, elapsed: testCase.elapsed, mode: testCase.mode, now: testCase.now,
+                                              shortcuts: testCase.shortcuts)
             let renderer = ImageRenderer(content: RenderCanvas(content: content, levels: Self.levels, width: testCase.canvasWidth))
             renderer.scale = 2
             guard let image = renderer.nsImage else {

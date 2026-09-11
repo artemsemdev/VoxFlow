@@ -18,6 +18,7 @@ struct FlowBarContent: Hashable {
     var timer: String?
     var timerIsAmber: Bool
     var trailing: Trailing?
+    var retryKey = "fn"
 
     /// Whether `subtitle` rides beside the trailing keycap (FB-02b "fn stop") instead of the title
     /// zone — true exactly when there is no title to attach it to (listening, hands-free). A pure
@@ -41,11 +42,16 @@ struct FlowBarContent: Hashable {
     }
 
     static func make(state: FlowBarState, elapsed: TimeInterval, mode: HotkeyMode,
-                      config: FlowBarConfig = FlowBarConfig(), now: TimeInterval = 0) -> FlowBarContent {
+                      config: FlowBarConfig = FlowBarConfig(), now: TimeInterval = 0,
+                      shortcuts: DictationShortcuts = DictationShortcuts()) -> FlowBarContent {
+        let start = shortcuts[mode == .pushToTalk ? .pushToTalk : .handsFree]
+        let startKeys = start.keycaps.joined(separator: " ")
         switch state {
         case .idle:
-            return FlowBarContent(leading: .dot(.idle), title: state.hint(mode: mode) ?? "", subtitle: nil,
-                                   showsWaveform: false, timer: nil, timerIsAmber: false, trailing: .keycap("fn"))
+            let gesture = mode == .pushToTalk ? "Hold" : start.doubleTap ? "Double-tap" : "Press"
+            let keyName = start.doubleTap ? "fn" : startKeys
+            return FlowBarContent(leading: .dot(.idle), title: "\(gesture) \(keyName) to dictate", subtitle: nil,
+                                   showsWaveform: false, timer: nil, timerIsAmber: false, trailing: .keycap(startKeys))
 
         case .loadingModel:
             return FlowBarContent(leading: .spinner, title: "Loading model…", subtitle: "keep talking",
@@ -61,8 +67,11 @@ struct FlowBarContent: Hashable {
             // rather than a bare literal so a customised `maxDuration` moves the warning with it.
             let amber = elapsed >= config.maxDuration - 30
             if listening.mode == .handsFree {
+                let stop = shortcuts[.handsFree]
+                // Fn double-tap starts hands-free; a single fn press stops an active session.
+                let stopKeys = stop.doubleTap ? "fn" : stop.keycaps.joined(separator: " ")
                 return FlowBarContent(leading: .dot(.recording), title: "", subtitle: "stop", showsWaveform: true,
-                                       timer: timerText(elapsed), timerIsAmber: amber, trailing: .keycap("fn"))
+                                       timer: timerText(elapsed), timerIsAmber: amber, trailing: .keycap(stopKeys))
             }
             return FlowBarContent(leading: .dot(.recording), title: "", subtitle: nil, showsWaveform: true,
                                    timer: timerText(elapsed), timerIsAmber: amber,
@@ -85,7 +94,7 @@ struct FlowBarContent: Hashable {
         case .didntCatch(let rawAvailable):
             return FlowBarContent(leading: .dot(.warning), title: "Didn't catch that", subtitle: nil,
                                    showsWaveform: false, timer: nil, timerIsAmber: false,
-                                   trailing: .button(rawAvailable ? .copyRaw : .tryAgain))
+                                   trailing: .button(rawAvailable ? .copyRaw : .tryAgain), retryKey: startKeys)
 
         case .discarded:
             return FlowBarContent(leading: .cross, title: "Discarded", subtitle: nil, showsWaveform: false,

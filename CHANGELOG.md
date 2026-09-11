@@ -6,6 +6,12 @@ versioning.
 ## Unreleased
 
 ### Added
+- Record Push-to-talk, Hands-free, Cancel and Re-insert last shortcuts in Settings, with saved
+  bindings, system/VoxFlow conflict checks, and live keyboard monitoring suspended while recording.
+- Re-insert the last dictation into a fresh privacy-checked target without adding duplicate history;
+  the session result remains available with history disabled. Escape cancels pending preparation.
+- Configured shortcuts appear in HUD hints. fn guidance opens Keyboard settings to choose
+  “Do Nothing”, without changing system preferences through private APIs.
 - Snippet `cursor` / `{cursor}` placeholders position the caret after insertion, including Unicode
   text. Targets without settable selection keep the inserted text and their normal caret behavior.
 - History cards match the canvas surfaces, compact actions and divided transcript columns.

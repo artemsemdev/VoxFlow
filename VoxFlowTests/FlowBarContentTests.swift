@@ -5,11 +5,29 @@ import VoxFlowDictation
 
 @Suite("FlowBarContent")
 struct FlowBarContentTests {
+    @Test("idle, stop and retry hints follow each configured action")
+    func configuredShortcuts() {
+        var shortcuts = DictationShortcuts()
+        shortcuts[.pushToTalk] = ShortcutBinding(keyCode: 40, modifiers: [.control, .option], label: "K")
+        shortcuts[.handsFree] = ShortcutBinding(keyCode: 49, modifiers: .option, label: " ")
+        #expect(!shortcuts.usesFunctionKey)
+        let idle = FlowBarContent.make(state: .idle, elapsed: 0, mode: .pushToTalk, shortcuts: shortcuts)
+        #expect(idle.title == "Hold ⌃ ⌥ K to dictate" && idle.trailing == .keycap("⌃ ⌥ K"))
+        #expect(FlowBarContent.make(state: .idle, elapsed: 0, mode: .handsFree, shortcuts: shortcuts).title == "Press ⌥ Space to dictate")
+        let stopping = FlowBarContent.make(state: .listening(Listening(mode: .handsFree, startedAt: 0, language: nil)),
+                                            elapsed: 0, mode: .pushToTalk, shortcuts: shortcuts)
+        #expect(stopping.trailing == .keycap("⌥ Space"))
+        let retry = FlowBarContent.make(state: .didntCatch(rawAvailable: false), elapsed: 0, mode: .pushToTalk, shortcuts: shortcuts)
+        #expect(retry.retryKey == "⌃ ⌥ K")
+        shortcuts[.handsFree] = ShortcutAction.handsFree.defaultBinding
+        let doubleTap = FlowBarContent.make(state: .idle, elapsed: 0, mode: .handsFree, shortcuts: shortcuts)
+        #expect(doubleTap.title == "Double-tap fn to dictate" && doubleTap.trailing == .keycap("fn fn"))
+    }
     @Test("copy per state matches the canvas")
     func copy() {
         let idle = FlowBarContent.make(state: .idle, elapsed: 0, mode: .pushToTalk)
         #expect(idle.leading == .dot(.idle) && idle.title == "Hold fn to dictate" && idle.trailing == .keycap("fn") && !idle.showsWaveform)
-        #expect(FlowBarContent.make(state: .idle, elapsed: 0, mode: .handsFree).title == "Press fn to dictate")
+        #expect(FlowBarContent.make(state: .idle, elapsed: 0, mode: .handsFree).title == "Double-tap fn to dictate")
 
         let listening = FlowBarContent.make(state: .listening(Listening(mode: .pushToTalk, startedAt: 0, language: LanguageDetection(code: "en", confidence: 0.4))), elapsed: 4, mode: .pushToTalk)
         #expect(listening.leading == .dot(.recording) && listening.showsWaveform && listening.timer == "0:04" && listening.trailing == .languageChip("EN?"))
