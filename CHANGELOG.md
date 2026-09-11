@@ -8,6 +8,10 @@ versioning.
 ### Added
 - Snippet `cursor` / `{cursor}` placeholders position the caret after insertion, including Unicode
   text. Targets without settable selection keep the inserted text and their normal caret behavior.
+- History app and calendar-date filters, plus "Search all time" without clearing the query or app.
+- Files results: Sentences / Short / Long segmentation controls preview, search, cleanup and all
+  exports without re-transcribing. Original transcript data remains available when switching back.
+- Inline History editing with Save/Cancel, preserving the raw transcript and encryption.
 - Dictation logic: microphone capture, Flow Bar state machine, windowed transcription,
   encrypted history with 30-day retention (no UI yet — phase 3b).
 - Dictation wired end-to-end: hold (or double-tap) fn anywhere to dictate. The floating Flow Bar
@@ -89,6 +93,13 @@ versioning.
   [docs/runbooks/connect-an-mcp-client.md](docs/runbooks/connect-an-mcp-client.md).
 
 ### Fixed
+- Stopping the MCP listener cancels pending binding; old waiting callers cannot restart it or
+  interfere with a later explicit start. Default unit tests no longer probe or bind loopback sockets.
+- Hosted tests no longer construct live app scenes or services, preventing Home and menu-bar
+  refreshes from opening the real history database and prompting for its Keychain key.
+- CI selects the arm64 Mac destination and rejects warnings from build/test logs regardless of letter case.
+- Style-model loading rejects missing, non-file and unreadable paths before starting the native
+  backend, avoiding unnecessary GPU initialization and Metal compiler warnings in failure-path tests.
 - Settings › General's appearance and Flow Bar position now apply at launch, not only once
   Settings has been opened at least once.
 - The Flow Bar HUD and the menu bar's "Paused until 10:41" now read the same clock instead of two

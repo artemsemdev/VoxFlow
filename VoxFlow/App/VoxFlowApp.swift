@@ -1,6 +1,24 @@
 import SwiftUI
 
 @main
+enum VoxFlowEntryPoint {
+    @MainActor static func main() {
+        if LaunchEnvironment.isRunningTests() {
+            VoxFlowTestHost.main()
+        } else {
+            VoxFlowApp.main()
+        }
+    }
+}
+
+/// A separate App prevents production scenes, bindings, commands and delegate setup from running
+/// in hosted tests. Home/menu-bar refreshes must never reach the owner's history or Keychain.
+private struct VoxFlowTestHost: App {
+    var body: some Scene {
+        Window("VoxFlow Tests", id: "test-host") { EmptyView() }
+    }
+}
+
 struct VoxFlowApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @Environment(\.openWindow) private var openWindow

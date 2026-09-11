@@ -9,9 +9,17 @@ public actor LlamaEngine: StyleEngine {
     private let parameters: LlamaParameters
     private var context: ContextBox?
     private static let backendInit: Void = { llama_backend_init() }()
+    private let beforeBackendPreparation: @Sendable () throws -> Void
 
     public init(parameters: LlamaParameters = LlamaParameters(availableCores: ProcessInfo.processInfo.activeProcessorCount)) {
         self.parameters = parameters
+        beforeBackendPreparation = {}
+    }
+
+    /// A failing preparation hook lets preflight tests prove they never enter the native backend.
+    init(beforeBackendPreparation: @escaping @Sendable () throws -> Void) {
+        parameters = LlamaParameters(availableCores: ProcessInfo.processInfo.activeProcessorCount)
+        self.beforeBackendPreparation = beforeBackendPreparation
     }
 
     /// Owns the `llama_model` pointer. Whoever drops the last reference (the actor, or an in-flight
@@ -56,7 +64,13 @@ public actor LlamaEngine: StyleEngine {
         let path = url.path
         let parameters = parameters
         let queue = queue
+        let beforeBackendPreparation = beforeBackendPreparation
         let box: ContextBox = try await onQueue {
+            // Reject invalid inputs before native initialization compiles Metal kernels.
+            guard url.isFileURL,
+                  let file = try? url.resolvingSymlinksInPath().resourceValues(forKeys: [.isRegularFileKey, .isReadableKey]),
+                  file.isRegularFile == true, file.isReadable == true else { throw LLMError.modelLoadFailed(path) }
+            try beforeBackendPreparation()
             _ = Self.backendInit
             var modelParams = llama_model_default_params()
             modelParams.n_gpu_layers = parameters.gpuLayers

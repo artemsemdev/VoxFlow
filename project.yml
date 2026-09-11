@@ -115,6 +115,8 @@ schemes:
       config: Debug
     test:
       config: Debug
+      environmentVariables:
+        VOXFLOW_TEST_HOST: "1"
       gatherCoverageData: true
       targets:
         - VoxFlowTests

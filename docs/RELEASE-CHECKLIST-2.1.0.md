@@ -11,7 +11,7 @@ be fixed without touching the others.**
 ## Before you start
 
 - [ ] `git checkout release/2.1.0 && git pull`
-- [ ] `xcodegen generate && xcodebuild -scheme VoxFlow -destination 'platform=macOS' build`
+- [ ] `xcodegen generate && xcodebuild -xcconfig Build.xcconfig -scheme VoxFlow -destination 'platform=macOS,arch=arm64' build`
 - [ ] Confirm the build is signed with your own certificate, not ad-hoc:
       `codesign -dvv <path to VoxFlow.app>` prints `Authority=VoxFlow Dev`.
       (If it does not, see SETUP.md → "Local code signing". Without it macOS re-asks for

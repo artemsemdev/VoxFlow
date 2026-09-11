@@ -10,6 +10,12 @@ protocol MCPRequestHandling: Sendable {
     func handle(_ request: MCPHTTPRequest, peer: MCPPeer) async -> (status: Int, body: Data?)
 }
 
+/// Injectable listener operations; lifecycle tests never construct an NWListener or open a socket.
+struct MCPListenerCandidate: Sendable {
+    let waitUntilReady: @Sendable () async -> Bool
+    let cancel: @Sendable () -> Void
+}
+
 /// Transport-level failures — distinct from `MCPError` (the JSON-RPC/HTTP-policy error table),
 /// which never sees a listener that couldn't bind at all.
 enum MCPServerError: Error, Equatable, Sendable {
@@ -33,11 +39,8 @@ private let mcpTransportQueue = DispatchQueue(label: "dev.artemsem.voxflow.mcp",
 /// shows the listener bound on all interfaces even though only loopback peers can complete a
 /// connection to it.
 ///
-/// An `actor`, per the brief's signature: `NWListener` needs no `Sendable` conformance to live in
-/// `listener` here, because actor-isolated stored properties are only ever touched from this
-/// actor's serial executor — Sendable only matters for values that cross an isolation boundary
-/// (the `newConnectionHandler` closure below, which is `@Sendable` and captures `self`, not
-/// `listener` itself).
+/// The actor owns the published and pending candidates and every accepted connection. An
+/// invalidated startup attempt cannot publish a listener or accept a delayed connection.
 actor LoopbackListener {
     /// Task 2 review, I2: beyond this many live connections, a new one is cancelled immediately,
     /// before any byte is read.
@@ -47,7 +50,10 @@ actor LoopbackListener {
     private let resolver: any PeerResolving
     private let handler: any MCPRequestHandling
     private let framingDeadline: TimeInterval
-    private var listener: NWListener?
+    private var listener: MCPListenerCandidate?
+    private var pendingCandidate: MCPListenerCandidate?
+    private let makeCandidate: @Sendable (UInt16, @escaping @Sendable (NWConnection) -> Void) throws -> MCPListenerCandidate
+    private let onStartJoined: @Sendable () -> Void
     private var connections: [UUID: ConnectionHandler] = [:]
 
     /// Task 2 re-review round 2, N1: `start()` suspends (it awaits each candidate's `.ready`/
@@ -72,11 +78,15 @@ actor LoopbackListener {
     /// (final review F2 shipped uncovered; two of the three prior regressions on this file were in
     /// this timer's arming and disarming). Production always uses the default.
     init(portRange: ClosedRange<UInt16> = 7331...7340, resolver: any PeerResolving, handler: any MCPRequestHandling,
-         framingDeadline: TimeInterval = ConnectionHandler.defaultFramingDeadline) {
+         framingDeadline: TimeInterval = ConnectionHandler.defaultFramingDeadline,
+         makeCandidate: @escaping @Sendable (UInt16, @escaping @Sendable (NWConnection) -> Void) throws -> MCPListenerCandidate = LoopbackListener.makeNetworkCandidate,
+         onStartJoined: @escaping @Sendable () -> Void = {}) {
         self.portRange = portRange
         self.resolver = resolver
         self.handler = handler
         self.framingDeadline = framingDeadline
+        self.makeCandidate = makeCandidate
+        self.onStartJoined = onStartJoined
     }
 
     /// Idempotent and reentrancy-safe (see the property doc above): a no-op if already bound;
@@ -89,43 +99,37 @@ actor LoopbackListener {
     /// only for a listener that has actually reached `.ready`.
     func start() async throws {
         if listener != nil { return } // already running.
+        let myGeneration = generation
         if let joined = inFlightStart {
-            // Join the attempt already underway. A `stop()` can invalidate it while we wait, in
-            // which case it binds nothing and this call must not report success (re-review B3) —
-            // fall through and run one fresh scan of our own.
+            onStartJoined() // Signals entry before suspension for deterministic lifecycle tests.
             try await joined.value
-            if listener != nil { return }
+            guard generation == myGeneration, listener != nil else { throw CancellationError() }
+            return // An old caller must never create a new attempt after stop().
         }
 
-        let myGeneration = generation
         let task = Task { try await self.performScan(generation: myGeneration) }
         inFlightStart = task
         defer { if generation == myGeneration { inFlightStart = nil } }
         try await task.value
+        guard generation == myGeneration, listener != nil else { throw CancellationError() }
     }
 
     /// The actual port scan, run by exactly one `Task` per attempt (see `start()`). `myGeneration`
     /// is captured at the moment the attempt began; if `stop()` runs while this is suspended inside
     /// `waitUntilReady`, it bumps `generation`, and the mismatch here tells this attempt to cancel
-    /// whatever it just bound and discard it silently rather than re-publish a listener the caller
-    /// already asked to shut down.
+    /// whatever it just bound and fail every joined caller with cancellation rather than re-publish
+    /// a listener the caller already asked to shut down.
     private func performScan(generation myGeneration: Int) async throws {
         for candidate in portRange {
-            guard let port = NWEndpoint.Port(rawValue: candidate) else { continue }
-            let parameters = NWParameters.tcp
-            parameters.requiredInterfaceType = .loopback
-            guard let newListener = try? NWListener(using: parameters, on: port) else { continue }
-
-            newListener.newConnectionHandler = { [weak self] connection in
-                guard let self else { return }
-                Task { await self.accept(connection) }
-            }
-
-            let ready = await Self.waitUntilReady(newListener)
-            guard generation == myGeneration else {
-                newListener.cancel() // superseded by a stop() while we were awaiting readiness.
-                return
-            }
+            guard generation == myGeneration, !Task.isCancelled else { throw CancellationError() }
+            guard let newListener = try? makeCandidate(candidate, { [weak self] connection in
+                guard let self else { connection.cancel(); return }
+                Task { await self.accept(connection, generation: myGeneration) }
+            }) else { continue }
+            pendingCandidate = newListener
+            let ready = await newListener.waitUntilReady()
+            guard generation == myGeneration else { throw CancellationError() }
+            pendingCandidate = nil
             guard ready else {
                 newListener.cancel()
                 continue
@@ -134,15 +138,33 @@ actor LoopbackListener {
             boundPort = candidate
             return
         }
-        guard generation == myGeneration else { return } // stop() already cleaned up; stay quiet.
+        guard generation == myGeneration else { throw CancellationError() }
         throw MCPServerError.noFreePort
     }
 
+    private nonisolated static func makeNetworkCandidate(
+        port: UInt16, onConnection: @escaping @Sendable (NWConnection) -> Void
+    ) throws -> MCPListenerCandidate {
+        guard let port = NWEndpoint.Port(rawValue: port) else { throw MCPServerError.noFreePort }
+        let parameters = NWParameters.tcp
+        parameters.requiredInterfaceType = .loopback
+        let candidate = try NWListener(using: parameters, on: port)
+        candidate.newConnectionHandler = onConnection
+        return MCPListenerCandidate(waitUntilReady: { await Self.waitUntilReady(candidate) },
+                                    cancel: { candidate.cancel() })
+    }
+
     /// Starts `candidate` and suspends until it reports `.ready` (returns `true`) or `.failed`
-    /// (returns `true` → `false`; measured on this SDK as `POSIXErrorCode.EADDRINUSE` for a busy
-    /// port). Resumes at most once, guarded by a `Mutex`, since `stateUpdateHandler` can fire more
+    /// (returns `false`; measured on this SDK as `POSIXErrorCode.EADDRINUSE` for a busy port). Resumes at most once, guarded by a `Mutex`, since `stateUpdateHandler` can fire more
     /// than the two states we care about.
     private static func waitUntilReady(_ candidate: NWListener) async -> Bool {
+        await withTaskCancellationHandler {
+            guard !Task.isCancelled else { return false }
+            return await startAndAwaitState(candidate)
+        } onCancel: { candidate.cancel() }
+    }
+
+    private static func startAndAwaitState(_ candidate: NWListener) async -> Bool {
         await withCheckedContinuation { continuation in
             let resumed = Mutex(false)
             /// Final review F6: `.ready`/`.failed` are not the only outcomes. A listener parked in
@@ -168,7 +190,7 @@ actor LoopbackListener {
                     guard !alreadyResumed else { return nil }
                     switch state {
                     case .ready: alreadyResumed = true; return true
-                    case .failed: alreadyResumed = true; return false
+                    case .failed, .cancelled: alreadyResumed = true; return false
                     default: return nil
                     }
                 }
@@ -188,11 +210,12 @@ actor LoopbackListener {
     /// `listener?.cancel()` on `nil` and an empty `connections` loop are both no-ops.
     func stop() {
         generation += 1
-        // Re-review B3: the condemned attempt must also be forgotten. Leaving it here let the next
-        // `start()` join an attempt that `generation` had already invalidated, so it returned
-        // success with nothing bound. The attempt's own task sees the generation mismatch and
-        // cancels whatever it bound; nobody should be waiting on it any more.
+        // Forget the old attempt before a new start can enter; cancel the pending candidate now,
+        // without waiting for readiness or its timeout. Old completion cannot clear newer state.
+        inFlightStart?.cancel()
         inFlightStart = nil
+        pendingCandidate?.cancel()
+        pendingCandidate = nil
         listener?.cancel()
         listener = nil
         boundPort = nil
@@ -200,7 +223,8 @@ actor LoopbackListener {
         connections.removeAll()
     }
 
-    private func accept(_ connection: NWConnection) {
+    private func accept(_ connection: NWConnection, generation acceptedGeneration: Int) {
+        guard generation == acceptedGeneration else { connection.cancel(); return }
         // `connection.endpoint` is the remote peer for a connection handed to a listener's
         // `newConnectionHandler` — NWConnection has no separate `remoteEndpoint`; that name
         // belongs to `NWConnectionGroup.Message`/`NWPath`, not this type.
