@@ -220,6 +220,7 @@ final class AppServices {
     }
 
     static func live() -> AppServices {
+        precondition(!LaunchEnvironment.isRunningTests(), "Test hosts must not construct live app services")
         let settingsStore = UserDefaultsKeyValueStore()
         let modelStore = ModelStore(directory: ModelStore.defaultDirectory, downloader: RangeResumingDownloader(),
                                     freeSpace: VolumeFreeSpace(), settings: settingsStore)

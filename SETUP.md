@@ -12,7 +12,7 @@
 git clone https://github.com/artemsemdev/VoxFlow.git
 cd VoxFlow
 xcodegen generate
-xcodebuild -xcconfig Build.xcconfig -scheme VoxFlow -destination 'platform=macOS' build test
+xcodebuild -xcconfig Build.xcconfig -scheme VoxFlow -destination 'platform=macOS,arch=arm64' build test
 ```
 
 The first build downloads the pinned whisper.cpp XCFramework (~51 MB) into the SwiftPM cache.
@@ -77,9 +77,11 @@ Microphone and Accessibility grants and the history-encryption key (ADR-004) are
 code signing identity, not to these defaults — deleting the keys above does not revoke permissions
 or Keychain access, and a Keychain reset or ad-hoc re-signing can make history unreadable
 (`HistoryService.Status.disabled(reason:)`, shown on the History page and under the header in
-Settings → Privacy) independently of onboarding. `HistoryService` also
-opens the store lazily, on first use rather than at construction, specifically so that launching
-the app as the XCTest host never prompts for Keychain access — see #143.
+Settings → Privacy) independently of onboarding. The scheme's Test action sets `VOXFLOW_TEST_HOST=1`:
+the app then creates only an empty test window, without live services, Home tasks, menu-bar content
+or onboarding. A guard rejects accidental live-service construction under tests. Run and Profile
+do not set this flag; normal app launches still open history. `HistoryService` also opens lazily.
+Tests use temporary databases and fake key providers — see #143.
 
 ### Style model
 
@@ -157,7 +159,7 @@ certificate instead (#143):
 ## Tests
 
 - Package logic, fast: `cd VoxFlowKit && swift test`
-- Everything, as CI runs it: `xcodebuild -xcconfig Build.xcconfig -scheme VoxFlow -destination 'platform=macOS' build test`
+- Everything, as CI runs it: `xcodebuild -xcconfig Build.xcconfig -scheme VoxFlow -destination 'platform=macOS,arch=arm64' build test`
 - Integration tests that need a real model run only when one is installed and skip otherwise.
 
 ## Notes
