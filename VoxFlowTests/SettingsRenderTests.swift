@@ -67,7 +67,7 @@ struct SettingsRenderTests {
                                   secureEnclaveAvailable: Bool = true) -> PrivacyViewModel {
         let settings = DictationSettings(store: InMemoryKeyValueStore())
         settings.excludedBundleIDs = excluded
-        let service = HistoryService(url: dir.file("voxflow.sqlite"), settings: settings, keyProvider: { FakeHistoryKeyProvider() }, clock: FakeClock())
+        let service = HistoryService(directory: dir, settings: settings, keyProvider: { FakeHistoryKeyProvider() }, clock: FakeClock())
         let apps = FakeInstalledApps(names: ["com.1password.1password": "1Password", "com.apple.keychainaccess": "Keychain Access"])
         return PrivacyViewModel(settings: settings, history: service, apps: apps, secureEnclaveAvailable: { secureEnclaveAvailable })
     }

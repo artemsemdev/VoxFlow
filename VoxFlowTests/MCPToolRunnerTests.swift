@@ -92,22 +92,19 @@ struct MCPToolRunnerTests {
         let dir = TemporaryDirectory()
         let settings = DictationSettings(store: InMemoryKeyValueStore())
         settings.retentionDays = 0
-        return HistoryService(url: dir.file("voxflow.sqlite"), settings: settings, keyProvider: { FakeMCPHistoryKeyProvider() }, clock: FakeClock())
+        return HistoryService(directory: dir, settings: settings, keyProvider: { FakeMCPHistoryKeyProvider() }, clock: FakeClock())
     }
 
     /// Same trick `HistoryServiceTests.databaseNilWhenFileUnopenable` uses: a file sits where a
     /// parent directory needs to be, so `VoxFlowDatabase.init(url:)`'s `createDirectory` fails and
     /// the open never succeeds — `status` ends up `.disabled(reason:)`. Forces the open (`ready()`)
-    /// *inside* this helper, before `dir` (a local `TemporaryDirectory`) goes out of scope and
-    /// deletes the blocker file on `deinit` — opening is lazy, so doing this in the caller instead
-    /// would race the directory being removed before the open ever runs.
+    /// The injected fixture opener retains this directory while the service is alive.
     func makeDisabledHistory() async throws -> HistoryService {
         let dir = TemporaryDirectory()
         let blocker = dir.file("blocker")
         try Data().write(to: blocker)
-        let url = blocker.appendingPathComponent("nested").appendingPathComponent("voxflow.sqlite")
         let settings = DictationSettings(store: InMemoryKeyValueStore())
-        let service = HistoryService(url: url, settings: settings, keyProvider: { FakeMCPHistoryKeyProvider() }, clock: FakeClock())
+        let service = HistoryService(directory: dir, relativePath: "blocker/nested/voxflow.sqlite", settings: settings, keyProvider: { FakeMCPHistoryKeyProvider() }, clock: FakeClock())
         await service.ready()
         return service
     }
@@ -549,7 +546,7 @@ struct MCPToolRunnerTests {
         let dictationSettings = DictationSettings(store: InMemoryKeyValueStore())
         dictationSettings.retentionDays = 0
         let keyProvider = RotatingKeyProvider()
-        let history = HistoryService(url: dir.file("voxflow.sqlite"), settings: dictationSettings, keyProvider: { keyProvider }, clock: FakeClock())
+        let history = HistoryService(directory: dir, settings: dictationSettings, keyProvider: { keyProvider }, clock: FakeClock())
         await history.ready()
         let store = try #require(history.store)
         _ = try store.insert(DictationDraft(text: "secret note", rawText: "secret note", appName: nil, style: nil, language: "en",

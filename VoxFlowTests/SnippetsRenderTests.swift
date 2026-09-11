@@ -37,7 +37,7 @@ struct SnippetsRenderTests {
         let dir = TemporaryDirectory()
         let settings = DictationSettings(store: InMemoryKeyValueStore())
         let styling = StylingSettings(store: InMemoryKeyValueStore())
-        let service = HistoryService(url: dir.file("voxflow.sqlite"), settings: settings, keyProvider: { InsecureSnippetsKeyProvider() },
+        let service = HistoryService(directory: dir, settings: settings, keyProvider: { InsecureSnippetsKeyProvider() },
                                      clock: SystemMonotonicClock())
         let content = ContentService(history: service)
         let vm = SnippetsViewModel(content: content, stylingSettings: styling, installedApps: apps)

@@ -4,9 +4,13 @@ import GRDB
 /// The `snippets` table: a trigger phrase that expands to a fixed body, optionally scoped to one
 /// app (design Snippets tab). Synchronous and blocking like `DictationStore`.
 public final class SnippetStore: Sendable {
+    private let database: VoxFlowDatabase
     private let queue: DatabaseQueue
 
-    public init(database: VoxFlowDatabase) { queue = database.queue }
+    public init(database: VoxFlowDatabase) {
+        self.database = database
+        queue = database.queue
+    }
 
     /// Throws `StorageError.duplicate(existingID:)` when a row with the same folded trigger already
     /// exists. The `find` is a fast pre-check; the `trigger_folded` `UNIQUE` column is the real

@@ -15,6 +15,9 @@ struct VoxFlowDatabaseTests {
         // A pre-phase-4a database: only the v1 (dictations) migration has ever run, recorded in
         // GRDB's own migrations table exactly as a real installed app would leave it.
         let rawQueue = try DatabaseQueue(path: url.path)
+        defer {
+            do { try rawQueue.close() } catch { Issue.record("raw migration queue close failed: \(error)") }
+        }
         var v1Only = DatabaseMigrator()
         v1Only.registerMigration("v1") { db in
             try db.execute(sql: """
@@ -27,6 +30,9 @@ struct VoxFlowDatabaseTests {
         try v1Only.migrate(rawQueue)
 
         let database = try VoxFlowDatabase(url: url)
+        defer {
+            do { try database.queue.close() } catch { Issue.record("database queue close failed: \(error)") }
+        }
         let tableNames: [String] = try database.queue.read { db in
             try String.fetchAll(db, sql: "SELECT name FROM sqlite_master WHERE type = 'table'")
         }

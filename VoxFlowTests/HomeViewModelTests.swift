@@ -168,7 +168,7 @@ struct HomeViewModelTests {
             dictationSettings = DictationSettings(store: InMemoryKeyValueStore())
             dictationSettings.retentionDays = 0
             dictationSettings.encryptHistory = false
-            history = HistoryService(url: dir.file("voxflow.sqlite"), settings: dictationSettings,
+            history = HistoryService(directory: dir, settings: dictationSettings,
                                      keyProvider: { FakeHistoryKeyProvider() }, clock: FakeClock())
             stats = StatsService(history: history, now: { now })
             permissions = FakePermissions(microphone: microphone, requestResult: microphone, accessibility: accessibility)
@@ -243,7 +243,7 @@ struct HomeViewModelTests {
 
         let settings = DictationSettings(store: InMemoryKeyValueStore())
         settings.retentionDays = 0
-        let brokenHistory = HistoryService(url: url, settings: settings, keyProvider: { FakeFreshKeyProvider() }, clock: FakeClock())
+        let brokenHistory = HistoryService(directory: dir, settings: settings, keyProvider: { FakeFreshKeyProvider() }, clock: FakeClock())
         let stats = StatsService(history: brokenHistory)
         let navigation = Navigation()
         let permissions = FakePermissions(microphone: .granted, requestResult: .granted, accessibility: true)

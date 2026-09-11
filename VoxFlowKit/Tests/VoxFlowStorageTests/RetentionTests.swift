@@ -7,6 +7,21 @@ import VoxFlowTestSupport
 
 @Suite("Retention", .timeLimit(.minutes(1)))
 struct RetentionTests {
+    @Test("a sleeping runner releases its store and cancels its clock when its owner releases it")
+    func sleepingRunnerLifetime() async throws {
+        let clock = FakeClock()
+        var runner: RetentionRunner? = RetentionRunner(store: try DictationStore(inMemoryWith: nil),
+            policy: { RetentionPolicy(days: 0) }, now: Date.init, clock: clock)
+        weak let weakRunner = runner
+        await runner?.start()
+        await clock.waitForSleepers(1)
+        runner = nil
+        #expect(weakRunner == nil)
+        #expect(clock.sleeperCount == 0)
+        // Baseline cleanup after reporting the lifetime regression.
+        await weakRunner?.stop()
+    }
+
     @Test("policy cutoff is now minus days; 0 days means keep forever")
     func policy() {
         let now = Date(timeIntervalSince1970: 100 * 86_400)

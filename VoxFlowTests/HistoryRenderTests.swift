@@ -35,7 +35,7 @@ struct HistoryRenderTests {
         settings.retentionDays = 30
         settings.keepHistory = keepHistory
         let navigation = Navigation()
-        let service = HistoryService(url: dir.file("voxflow.sqlite"), settings: settings,
+        let service = HistoryService(directory: dir, settings: settings,
                                      keyProvider: { InsecureHistoryKeyProvider() }, clock: clock)
         let updateText: ((Int64, String) async -> DictationRecord?)? = saveFails ? { _, _ in nil } : nil
         let vm = HistoryViewModel(service: service, settings: settings, navigation: navigation, clock: clock,

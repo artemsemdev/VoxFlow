@@ -29,6 +29,8 @@ public struct DayWords: Sendable, Equatable {
 /// Synchronous and blocking: every call does SQLite I/O, and `search`/`fetch` additionally run
 /// AES-GCM over every candidate row, all on the calling thread. Call this off the main actor.
 public final class DictationStore: Sendable {
+    // The database wrapper coordinates fixture lifetime release after its queue closes.
+    private let database: VoxFlowDatabase
     private let queue: DatabaseQueue
     private let cipher: DictationCipher?
 
@@ -50,6 +52,7 @@ public final class DictationStore: Sendable {
     }
 
     public init(database: VoxFlowDatabase, keyProvider: (any HistoryKeyProviding)?) throws {
+        self.database = database
         self.queue = database.queue
         var isNewlyCreated = false
         if let keyProvider {
