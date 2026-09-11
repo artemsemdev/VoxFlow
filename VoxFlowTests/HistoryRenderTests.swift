@@ -138,6 +138,31 @@ struct HistoryRenderTests {
         try Self.writePNG(image, to: directory.appendingPathComponent("History-restyle-menu.png"))
     }
 
+    @Test("expanded detail has the white surface and column separator drawn in canvas 2e")
+    func cardStructure() throws {
+        let record = DictationRecord(id: 1, text: "Inserted words", rawText: "Spoken words",
+            appName: "Mail", style: "formal", language: "en", duration: 1, words: 2, createdAt: Date())
+        let renderer = ImageRenderer(content: HistoryDetailView(record: record)
+            .frame(width: 860, height: 230).background(Color.white).environment(\.colorScheme, .light))
+        renderer.scale = 2
+        let image = try #require(renderer.nsImage)
+        let directory = Self.rendersDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try Self.writePNG(image, to: directory.appendingPathComponent("History-card-structure.png"))
+        let tiff = try #require(image.tiffRepresentation)
+        let bitmap = try #require(NSBitmapImageRep(data: tiff))
+        let scale = CGFloat(bitmap.pixelsWide) / 860
+        func red(at x: Int) throws -> CGFloat {
+            try #require(bitmap.colorAt(x: Int(CGFloat(x) * scale), y: Int(110 * scale))?
+                .usingColorSpace(.deviceRGB)).redComponent
+        }
+        // Samples avoid text: plain white within the left column, then the 6% black separator
+        // through the middle gutter. A narrow band tolerates the separator's pixel alignment.
+        #expect(try red(at: 200) > 0.99)
+        let divider = try #require(try (428...431).map { try red(at: $0) }.min())
+        #expect(divider > 0.90 && divider < 0.96)
+    }
+
     @Test("renders app and date filter choices using the live popover content")
     func renderFilters() async throws {
         let directory = Self.rendersDirectory()
