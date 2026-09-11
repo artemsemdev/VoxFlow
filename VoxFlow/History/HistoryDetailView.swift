@@ -5,6 +5,7 @@ import VoxFlowStorage
 struct HistoryDetailView: View {
     let record: DictationRecord
     @Bindable var model: HistoryViewModel
+    var addToDictionary: @MainActor (String) -> Void = { _ in }
     @FocusState private var editorFocused: Bool
     @Environment(\.colorScheme) private var colorScheme
     private var colors: HistoryCardColors { HistoryCardColors(scheme: colorScheme) }
@@ -38,10 +39,9 @@ struct HistoryDetailView: View {
                         Text(error).font(.caption).foregroundStyle(.red)
                     }
                 } else {
-                    Text(HistoryViewModel.displayText(for: record))
-                        .font(.system(size: 13)).lineSpacing(5.2)
+                    TranscriptWordView(text: HistoryViewModel.displayText(for: record), addToDictionary: addToDictionary)
                 }
-                Text("Audio was not saved.")
+                Text("Right-click a word → Add to Dictionary · Audio was not saved")
                     .font(.system(size: 11.5))
                     .foregroundStyle(colors.secondaryText)
                     .padding(.top, 2)

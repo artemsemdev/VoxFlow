@@ -97,6 +97,10 @@ final class DictionaryViewModel {
     /// an edit isn't a collision with itself.
     var validation: Validation? {
         guard let sheet else { return nil }
+        return validation(for: sheet)
+    }
+
+    private func validation(for sheet: AddWordDraft) -> Validation? {
         let trimmed = sheet.word.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty { return .empty }
         if let existing = entries.first(where: { $0.word.foldedForDictionaryMatching == trimmed.foldedForDictionaryMatching && $0.id != sheet.editingID }) {
@@ -141,6 +145,10 @@ final class DictionaryViewModel {
     /// race with a duplicate landing between keystrokes) can't write invalid state.
     func add() async {
         guard let draft = sheet, canAdd else { return }
+        if await persist(draft) { sheet = nil }
+    }
+
+    private func persist(_ draft: AddWordDraft) async -> Bool {
         let soundsLike = draft.soundsLike.trimmingCharacters(in: .whitespacesAndNewlines)
         let word = draft.word.trimmingCharacters(in: .whitespacesAndNewlines)
         do {
@@ -156,13 +164,23 @@ final class DictionaryViewModel {
                                                         type: draft.type, fixTyping: draft.fixTyping)
             }
             entries = await content.dictionary.all()
-            sheet = nil
+            return true
         } catch {
             // A duplicate slipped in between keystroke validation and this write (e.g. two windows) —
             // refresh so `validation` picks it up and shows the same "already in your dictionary"
             // message instead of silently doing nothing.
             entries = await content.dictionary.all()
+            return false
         }
+    }
+
+    /// Uses the same draft validation and persistence path as the Add Word sheet. The temporary
+    /// draft is independent so a context-menu action cannot disturb a sheet opened in another window.
+    func addFromHistory(_ word: String) async {
+        entries = await content.dictionary.all()
+        let draft = AddWordDraft(word: word, type: .term)
+        guard validation(for: draft) == nil else { return }
+        _ = await persist(draft)
     }
 
     /// Removes the row locally right away, then issues the store delete — a failure there is logged

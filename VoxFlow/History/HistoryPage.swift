@@ -9,7 +9,9 @@ struct HistoryPage: View {
     private var model: HistoryViewModel { services.historyViewModel }
 
     var body: some View {
-        HistoryPageBody(viewModel: model, ephemeralScope: services.ephemeralScope)
+        HistoryPageBody(viewModel: model, ephemeralScope: services.ephemeralScope) { word in
+            Task { await services.dictionaryViewModel.addFromHistory(word) }
+        }
             .navigationTitle("History")
             // `.task` re-runs on every navigation back to History — `refresh()` (not `load()`)
             // respects an in-progress search so it doesn't clobber a filtered list with the
@@ -23,6 +25,7 @@ struct HistoryPage: View {
 struct HistoryPageBody: View {
     let viewModel: HistoryViewModel
     let ephemeralScope: EphemeralScope
+    var addToDictionary: @MainActor (String) -> Void = { _ in }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -103,7 +106,7 @@ struct HistoryPageBody: View {
     }
 
     private var list: some View {
-        ScrollView { HistoryRowList(viewModel: viewModel) }
+        ScrollView { HistoryRowList(viewModel: viewModel, addToDictionary: addToDictionary) }
     }
 }
 
@@ -205,12 +208,13 @@ struct HistoryFilterOptions: View {
 /// `ScrollView` (M3) — a live `ScrollView` renders blank under `ImageRenderer` in this environment.
 struct HistoryRowList: View {
     let viewModel: HistoryViewModel
+    var addToDictionary: @MainActor (String) -> Void = { _ in }
 
     var body: some View {
         VStack(spacing: 0) {
             ForEach(viewModel.records) { record in
                 if viewModel.expandedID == record.id {
-                    HistoryCardView(record: record, model: viewModel)
+                    HistoryCardView(record: record, model: viewModel, addToDictionary: addToDictionary)
                 } else {
                     HistoryRowView(record: record, model: viewModel)
                     Divider()
@@ -226,6 +230,7 @@ struct HistoryRowList: View {
 struct HistoryCardView: View {
     let record: DictationRecord
     let model: HistoryViewModel
+    var addToDictionary: @MainActor (String) -> Void = { _ in }
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
@@ -233,7 +238,7 @@ struct HistoryCardView: View {
         VStack(spacing: 0) {
             HistoryRowView(record: record, model: model)
             if model.expandedID == record.id {
-                HistoryDetailView(record: record, model: model)
+                HistoryDetailView(record: record, model: model, addToDictionary: addToDictionary)
             }
         }
         .background(colors.surface)

@@ -6,6 +6,8 @@ versioning.
 ## Unreleased
 
 ### Added
+- Right-click an inserted History transcript word to add it to Dictionary, with the same validation
+  and case/diacritic-insensitive duplicate handling as the Dictionary page.
 - Record Push-to-talk, Hands-free, Cancel and Re-insert last shortcuts in Settings, with saved
   bindings, system/VoxFlow conflict checks, and live keyboard monitoring suspended while recording.
 - Re-insert the last dictation into a fresh privacy-checked target without adding duplicate history;
