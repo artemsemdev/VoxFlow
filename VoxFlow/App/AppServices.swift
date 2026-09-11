@@ -365,8 +365,16 @@ final class AppServices {
             onFn: { dictation.fn($0) },
             onEscape: { dictation.escape() },
             onAnyKey: { dictation.anyKey() },
-            isHUDActive: { dictation.shortcutContext.hudActive }
+            isHUDActive: { dictation.shortcutContext.hudActive },
+            shortcuts: { dictationSettings.shortcuts },
+            context: { dictation.shortcutContext },
+            onPush: { transition in
+                if transition == .down { dictation.shortcutDown(.pushToTalk) }
+                else { dictation.pushToTalkReleased() }
+            },
+            onHandsFree: { dictation.shortcutDown(.handsFree) }
         )
+        dictationSettings.onShortcutsChange = { fnMonitor.configurationDidChange() }
 
         let onboardingState = OnboardingState(store: settingsStore)
         let onboardingViewModel = OnboardingViewModel(state: onboardingState, permissions: permissions, settings: dictationSettings,
