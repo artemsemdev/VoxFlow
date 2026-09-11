@@ -53,3 +53,16 @@ cd VoxFlowKit && swift test                                             # packag
 ## Code of conduct
 
 See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+
+## MCP transport integration tests
+
+Default hosted tests keep real sockets disabled, including the integration-suite availability probe.
+`LoopbackListenerLifecycleTests` uses fake candidates and entry/release barriers for startup, joining,
+stop and fallback behavior. To exercise real binding, occupied-port fallback and HTTP handling:
+
+```bash
+TEST_RUNNER_VOXFLOW_MCP_INTEGRATION=1 xcodebuild -xcconfig Build.xcconfig -scheme VoxFlow -destination 'platform=macOS,arch=arm64' test -only-testing:VoxFlowTests/LoopbackListenerPortScanTests -only-testing:VoxFlowTests/LoopbackListenerReentrancyTests -only-testing:VoxFlowTests/MCPServerIntegrationTests
+```
+
+The MCP HTTP integration suite skips when none of ports 7331–7340 is available. Its keys, stores and
+approval decisions use fakes or temporary data; it never reads the owner's Keychain.

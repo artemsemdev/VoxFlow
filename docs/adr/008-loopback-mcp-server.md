@@ -60,6 +60,11 @@ whole stack over a real socket, and records the resulting design as this ADR.
   candidate's `.ready`/`.failed` rather than trusting the initializer not throwing. When the bound
   port isn't 7331, ST-06 shows the real endpoint and the note "Port 7331 was busy — update your
   client with the Copy button" (canvas 3e).
+  Startup callers share one attempt. Stopping cancels its pending candidate immediately and
+  invalidates every joined caller; an old caller cannot initiate a new scan or accept a delayed
+  connection after stop. A new explicit start can bind independently of the old attempt's completion.
+  Socket-free lifecycle regressions use controlled candidates; real port/HTTP coverage is opt-in
+  via `TEST_RUNNER_VOXFLOW_MCP_INTEGRATION=1` (see CONTRIBUTING.md).
 - **`libproc` peer identity, sandbox-dependent.** `LibprocPeerResolver` walks every process's open
   file descriptors (`proc_listallpids` → `PROC_PIDLISTFDS` → `PROC_PIDFDSOCKETINFO`) looking for an
   *established* TCP socket whose local port matches the accepted connection's peer port **and**
