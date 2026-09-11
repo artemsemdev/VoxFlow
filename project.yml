@@ -79,6 +79,9 @@ targets:
       Release: Signing.xcconfig
     sources:
       - path: VoxFlowTests
+      # Compile the dictation fake against the same package product as the test host. Keeping it
+      # in VoxFlowTestSupport would statically link a second copy of Dictation into this bundle.
+      - path: VoxFlowKit/Tests/VoxFlowDictationTests/FakeDictationTranscriber.swift
     dependencies:
       - target: VoxFlow
       - package: VoxFlowKit

@@ -2,6 +2,7 @@ import Foundation
 import Synchronization
 import VoxFlowCore
 import VoxFlowDictation
+import VoxFlowTestSupport
 
 /// Collects the feed and returns a scripted result when it ends; `cancelledCount` proves aborts propagate.
 public final class FakeDictationTranscriber: DictationTranscribing, Sendable {
