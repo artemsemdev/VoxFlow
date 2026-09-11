@@ -1,4 +1,5 @@
 import SwiftUI
+import VoxFlowStorage
 
 /// The History page (design MW-02, MW-02d/e/n, T-01): thin `AppServices` wrapper around
 /// `HistoryPageBody`, which holds the actual layout so `HistoryRenderTests` can render exactly the
@@ -199,7 +200,7 @@ struct HistoryFilterOptions: View {
 }
 
 /// The row list's content: one `HistoryRowView` per record, its `HistoryDetailView` inline when
-/// expanded, hairline dividers between. Factored out of `HistoryPageBody.list` (which wraps this in a
+/// expanded, with separators between collapsed rows. Factored out of `HistoryPageBody.list` (which wraps this in a
 /// `ScrollView`) so `HistoryRenderTests` can host the exact same rows/detail wiring without a
 /// `ScrollView` (M3) — a live `ScrollView` renders blank under `ImageRenderer` in this environment.
 struct HistoryRowList: View {
@@ -208,16 +209,36 @@ struct HistoryRowList: View {
     var body: some View {
         VStack(spacing: 0) {
             ForEach(viewModel.records) { record in
-                VStack(spacing: 0) {
+                if viewModel.expandedID == record.id {
+                    HistoryCardView(record: record, model: viewModel)
+                } else {
                     HistoryRowView(record: record, model: viewModel)
-                    if viewModel.expandedID == record.id {
-                        HistoryDetailView(record: record, model: viewModel)
-                    }
                     Divider()
                 }
             }
         }
         .padding(.horizontal, 20)
+        .padding(.vertical, 1)
+    }
+}
+
+/// One joined card, shared by the production list and native editor render fixtures.
+struct HistoryCardView: View {
+    let record: DictationRecord
+    let model: HistoryViewModel
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        let colors = HistoryCardColors(scheme: colorScheme)
+        VStack(spacing: 0) {
+            HistoryRowView(record: record, model: model)
+            if model.expandedID == record.id {
+                HistoryDetailView(record: record, model: model)
+            }
+        }
+        .background(colors.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(colors.border))
     }
 }
 
