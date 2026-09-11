@@ -92,6 +92,8 @@ versioning.
   [docs/runbooks/connect-an-mcp-client.md](docs/runbooks/connect-an-mcp-client.md).
 
 ### Fixed
+- MCP startup and stop races: concurrent first callers share initialization, and an older operation
+  cannot restart a disabled server or overwrite a newer endpoint and setting.
 - Stopping the MCP listener cancels pending binding; old waiting callers cannot restart it or
   interfere with a later explicit start. Default unit tests no longer probe or bind loopback sockets.
 - Hosted tests no longer construct live app scenes or services, preventing Home and menu-bar
