@@ -339,7 +339,8 @@ final class AppServices {
         // History's "Try it in a scratchpad" (design 2d) enters/leaves `ephemeralScope` from its own
         // sheet view (`HistoryPage.ScratchpadSheet`) — this view model doesn't need to know about it.
         let historyViewModel = HistoryViewModel(service: historyService, settings: dictationSettings, navigation: navigation,
-                                                clock: SystemMonotonicClock(), pasteboard: SystemPasteboard(), restyler: restyler)
+                                                clock: SystemMonotonicClock(), pasteboard: SystemPasteboard(), restyler: restyler,
+                                                initialDateRange: .thisWeek)
 
         // Home's numbers (design MW-01, ruling 1) — subscribes itself to `historyService.onChange`
         // (see its own doc comment), so a dictation/delete/undo anywhere keeps these live.

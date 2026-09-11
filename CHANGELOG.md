@@ -6,6 +6,7 @@ versioning.
 ## Unreleased
 
 ### Added
+- History app and calendar-date filters, plus "Search all time" without clearing the query or app.
 - Files results: Sentences / Short / Long segmentation controls preview, search, cleanup and all
   exports without re-transcribing. Original transcript data remains available when switching back.
 - Dictation logic: microphone capture, Flow Bar state machine, windowed transcription,
