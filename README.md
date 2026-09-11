@@ -19,7 +19,8 @@ any app, style cleanup with a local LLM and an MCP server follow in 2.x (see the
   over four hours, failed rows that never stall the queue, a "2×" badge for duplicate drops.
 - Transcripts saved to `~/Transcripts` in the format you chose — TXT, SRT, VTT, JSON or Markdown —
   and re-exported to any other format instantly, without re-processing. Spec: [docs/formats.md](docs/formats.md).
-- A result view with the transcript's segments, search, Copy, Save as… and Reveal in Finder.
+- A result view with Sentences / Short / Long segment lengths, search, Copy, Save as… and Reveal in
+  Finder. Preview and export share the chosen segmentation without running recognition again.
 - Settings › Models: download Whisper large-v3-turbo (default, 1.6 GB) or Whisper small (480 MB),
   pause and resume, checksum verification before a model counts as installed, remove.
 - Everything on this Mac: audio is processed in memory and discarded; the only network action is a
@@ -37,8 +38,8 @@ any app, style cleanup with a local LLM and an MCP server follow in 2.x (see the
   and a scratchpad to try dictation before the main window opens; SETUP.md explains how to reset it.
 - VoxFlow's own window is frontmost at launch, so click into the text field you want to dictate
   into (e.g. TextEdit) before the first fn press, or the dictation lands on the clipboard instead.
-- History page: search past dictations, expand a row for the full transcript, Copy, Delete with
-  Undo; the expanded row shows the resolved style. Settings › Hotkeys (mode + shortcuts), Audio
+- History page: search past dictations and filter by app or date, expand a row for the full
+  transcript, Edit, Copy, Delete with Undo; the expanded row shows the resolved style. Settings › Hotkeys (mode + shortcuts), Audio
   (input device, silence-stop, hands-free) and Privacy (encrypt-at-rest toggle, retention) are
   built.
 - Home page: today's words/dictations/speaking pace/time saved, a 7-day word chart with a streak,
@@ -103,7 +104,7 @@ There are no signed binaries yet; build from source (see [SETUP.md](SETUP.md)).
 
 ```bash
 xcodegen generate                       # creates VoxFlow.xcodeproj (gitignored)
-xcodebuild -xcconfig Build.xcconfig -scheme VoxFlow -destination 'platform=macOS' build test
+xcodebuild -xcconfig Build.xcconfig -scheme VoxFlow -destination 'platform=macOS,arch=arm64' build test
 ```
 
 Package-only tests, no Xcode project needed:

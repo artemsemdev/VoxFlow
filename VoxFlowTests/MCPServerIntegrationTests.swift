@@ -19,6 +19,7 @@ import VoxFlowTestSupport
 /// same way the listener itself would — same small race window that file already accepts.
 private enum LoopbackAvailability {
     static let anyPortFree: Bool = {
+        guard ProcessInfo.processInfo.environment["VOXFLOW_MCP_INTEGRATION"] == "1" else { return false }
         for port: UInt16 in 7331...7340 where LoopbackListenerPortScanTests.canBind(port: port) { return true }
         return false
     }()
@@ -270,7 +271,7 @@ private enum RawSocket {
 /// fresh port from the same 7331…7340 range, and running them one at a time (with teardown properly
 /// awaited — see `withIntegrationServer`) avoids exhausting that 10-port range.
 @Suite("MCP server (loopback integration)", .serialized,
-       .enabled(if: LoopbackAvailability.anyPortFree, "No port in 7331…7340 could be bound on this machine"))
+       .enabled(if: LoopbackAvailability.anyPortFree, "Set VOXFLOW_MCP_INTEGRATION=1; a free loopback port is required"))
 @MainActor
 struct MCPServerIntegrationTests {
     // MARK: initialize → tools/list → search_history

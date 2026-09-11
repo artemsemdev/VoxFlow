@@ -162,6 +162,20 @@ final class HistoryService {
         return updated
     }
 
+    /// Inline correction: notify Home/menu-bar statistics only after a successful persisted edit.
+    func updateText(id: Int64, text: String) async -> DictationRecord? {
+        ensureOpened()
+        await openTask?.value
+        guard let store else { return nil }
+        let log = Self.log
+        let updated: DictationRecord? = await Task.detached(priority: .userInitiated) {
+            do { return try store.updateText(id: id, text: text) }
+            catch { log.error("history updateText failed: \(String(describing: error))"); return nil }
+        }.value
+        if updated != nil { notifyChanged() }
+        return updated
+    }
+
     /// See `onChange`'s doc comment — called after every write that changes what's on disk.
     func notifyChanged() { onChange?() }
 

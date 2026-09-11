@@ -119,6 +119,9 @@ final class MCPViewModel {
                 try await server.start()
                 settings.enabled = true
                 enabled = true
+            } catch is CancellationError {
+                // A stop invalidated this attempt; a newer operation owns the visible state.
+                return
             } catch {
                 settings.enabled = false
                 enabled = false
