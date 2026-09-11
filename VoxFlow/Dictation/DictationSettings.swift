@@ -47,6 +47,7 @@ final class DictationSettings {
         guard shortcuts[action] != binding else { return true }
         var updated = shortcuts
         updated[action] = binding
+        guard updated.isValid else { return false }
         guard let data = try? JSONEncoder().encode(updated), let value = String(data: data, encoding: .utf8) else { return false }
         shortcuts = updated
         store.set(value, forKey: Keys.shortcuts)

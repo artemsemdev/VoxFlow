@@ -76,5 +76,14 @@ struct DictationShortcuts: Codable, Equatable, Sendable {
         get { bindings[action.rawValue] ?? action.defaultBinding }
         set { bindings[action.rawValue] = newValue }
     }
-    var isValid: Bool { ShortcutAction.allCases.allSatisfy { self[$0].validationError(for: $0) == nil } }
+    func conflictingAction(with binding: ShortcutBinding, for action: ShortcutAction) -> ShortcutAction? {
+        ShortcutAction.allCases.first { other in
+            guard other != action else { return false }
+            let candidate = self[other]
+            return candidate.keyCode == binding.keyCode && candidate.flags == binding.flags && candidate.doubleTap == binding.doubleTap
+        }
+    }
+    var isValid: Bool {
+        ShortcutAction.allCases.allSatisfy { self[$0].validationError(for: $0) == nil && conflictingAction(with: self[$0], for: $0) == nil }
+    }
 }

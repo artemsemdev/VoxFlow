@@ -82,4 +82,19 @@ struct DictationShortcutTests {
             #expect(settings.shortcuts == DictationShortcuts())
         }
     }
+
+    @Test("one physical shortcut cannot trigger two actions; an ambiguous saved configuration is rejected")
+    func duplicateActions() throws {
+        let store = InMemoryKeyValueStore()
+        let settings = DictationSettings(store: store)
+        let chord = ShortcutBinding(keyCode: 40, modifiers: .command, label: "K")
+        #expect(settings.setShortcut(chord, for: .handsFree))
+        #expect(!settings.setShortcut(chord, for: .pushToTalk))
+        #expect(settings.shortcuts[.pushToTalk] == ShortcutAction.pushToTalk.defaultBinding)
+        #expect(settings.shortcuts[.handsFree] == chord)
+        var invalid = settings.shortcuts
+        invalid[.pushToTalk] = chord
+        store.set(String(data: try JSONEncoder().encode(invalid), encoding: .utf8), forKey: DictationSettings.Keys.shortcuts)
+        #expect(DictationSettings(store: store).shortcuts == DictationShortcuts())
+    }
 }
