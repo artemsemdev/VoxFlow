@@ -59,6 +59,13 @@ defaults write dev.artemsem.voxflow voxflow.onboarding.step -string 0
       TextEdit, with existing text before the insertion point. The marker disappears and the caret
       lands on the blank line before Artem; typing a character puts it there. Repeat with an emoji
       before the marker and while replacing a selected word.
+      An opt-in insertion-only check is also available: create a disposable TextEdit document
+      containing exactly `VOXFLOW-161-CURSOR-CHECK` followed by a newline, leave the caret at its end,
+      and activate it when the fixture prints that it is ready. With Accessibility already granted,
+      run `TEST_RUNNER_VOXFLOW_AX_CARET_CHECK=1 xcodebuild -xcconfig Build.xcconfig -scheme VoxFlow
+      -destination 'platform=macOS,arch=arm64' test -only-testing:VoxFlowTests/SnippetCaretIntegrationTests`.
+      This check exercises the real snippet expander and Accessibility insertion without the microphone;
+      it is skipped in normal unit runs and does not replace the dictation checks above.
 - [ ] Styles: set the Mail override to Formal, dictate into Mail — contractions are expanded
       ("can't" → "cannot").
 - [ ] History: expand one of those rows — the style used is shown in the row's meta line.
