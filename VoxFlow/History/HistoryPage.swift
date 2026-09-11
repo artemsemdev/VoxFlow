@@ -25,7 +25,7 @@ struct HistoryPageBody: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            searchBar
+            searchBar.disabled(viewModel.editingID != nil)
             Group {
                 if let emptyState = viewModel.emptyState {
                     HistoryEmptyView(state: emptyState, model: viewModel)
@@ -211,7 +211,7 @@ struct HistoryRowList: View {
                 VStack(spacing: 0) {
                     HistoryRowView(record: record, model: viewModel)
                     if viewModel.expandedID == record.id {
-                        HistoryDetailView(record: record)
+                        HistoryDetailView(record: record, model: viewModel)
                     }
                     Divider()
                 }

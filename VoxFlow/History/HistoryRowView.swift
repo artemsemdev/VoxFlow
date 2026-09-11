@@ -68,6 +68,7 @@ struct HistoryRowView: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(.tint)
+            .disabled(model.editingID != nil)
             .popover(isPresented: $isRestyleShown, arrowEdge: .bottom) {
                 RestyleMenuView(record: record, model: model)
             }
@@ -76,6 +77,6 @@ struct HistoryRowView: View {
                 .foregroundStyle(.red)
         }
         .font(.callout)
-        .disabled(model.restylingID != nil)
+        .disabled(model.restylingID != nil || model.isSavingEdit)
     }
 }

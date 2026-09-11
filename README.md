@@ -39,7 +39,7 @@ any app, style cleanup with a local LLM and an MCP server follow in 2.x (see the
 - VoxFlow's own window is frontmost at launch, so click into the text field you want to dictate
   into (e.g. TextEdit) before the first fn press, or the dictation lands on the clipboard instead.
 - History page: search past dictations and filter by app or date, expand a row for the full
-  transcript, Copy, Delete with Undo; the expanded row shows the resolved style. Settings › Hotkeys (mode + shortcuts), Audio
+  transcript, Edit, Copy, Delete with Undo; the expanded row shows the resolved style. Settings › Hotkeys (mode + shortcuts), Audio
   (input device, silence-stop, hands-free) and Privacy (encrypt-at-rest toggle, retention) are
   built.
 - Home page: today's words/dictations/speaking pace/time saved, a 7-day word chart with a streak,
