@@ -42,6 +42,7 @@ public enum FlowBarEvent: Sendable, Equatable {
     case microphoneFailed(MicrophoneError)
     case insertionFinished(InsertionResult)
     case copyRawRequested
+    case reinsertionFinished(text: String, result: InsertionResult), reinsertionBlocked(String)
     /// FB-09: "Pause dictation for 1 hour" from the menu bar or the Flow Bar pill.
     case pause(seconds: TimeInterval)
     case resume
@@ -150,6 +151,18 @@ public struct FlowBarMachine: Sendable, Equatable {
 
     public mutating func handle(_ event: FlowBarEvent, now: TimeInterval) -> [FlowBarEffect] {
         switch (state, event) {
+        case (let s, .reinsertionFinished(let text, let result)) where s == .idle || s.isDismissable:
+            switch result {
+            case .inserted(let app):
+                state = .inserted(appName: app, words: Self.wordCount(text), limitReached: false)
+                return [.cancelTimer(.dismiss), .startTimer(.dismiss, seconds: config.dismissInserted)]
+            case .copiedToClipboard:
+                state = .copied
+                return [.cancelTimer(.dismiss), .startTimer(.dismiss, seconds: config.dismissCopied)]
+            }
+        case (let s, .reinsertionBlocked(let app)) where s == .idle || s.isDismissable:
+            state = .excluded(app: app)
+            return [.cancelTimer(.dismiss), .startTimer(.dismiss, seconds: config.dismissError)]
         case (.idle, .shortcutDown(let mode, let p?)):
             return begin(p, now: now, cancelDismiss: false, mode: mode)
         case (let s, .shortcutDown(let mode, let p?)) where s.isDismissable:
