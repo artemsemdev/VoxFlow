@@ -1,55 +1,58 @@
 import SwiftUI
 import VoxFlowStorage
 
-/// The inline expanded detail (design MW-02d): raw vs. inserted text side by side. The design's
-/// filler/confidence chips are phase 5 (LLM cleanup) — omitted here per the task brief.
+/// Canvas 2e: equal transcript columns joined to the compact row. Annotations are tracked in #177.
 struct HistoryDetailView: View {
     let record: DictationRecord
     @Bindable var model: HistoryViewModel
     @FocusState private var editorFocused: Bool
+    @Environment(\.colorScheme) private var colorScheme
+    private var colors: HistoryCardColors { HistoryCardColors(scheme: colorScheme) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 24) {
-                column(title: "WHAT YOU SAID", text: HistoryViewModel.displayRawText(for: record))
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Text(HistoryViewModel.detailHeader(for: record))
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        editActions
-                    }
-                    if model.editingID == record.id {
-                        TextEditor(text: $model.editedText)
-                            .font(.callout)
-                            .scrollContentBackground(.hidden)
-                            .padding(4)
-                            .frame(height: 100)
-                            .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
-                            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.accentColor.opacity(0.5)))
-                            .focused($editorFocused)
-                            .onAppear { editorFocused = true }
-                            .onExitCommand { model.cancelEdit() }
-                            .disabled(model.isSavingEdit)
-                            .accessibilityLabel("Edit inserted text")
-                        if let error = model.editError {
-                            Text(error).font(.caption).foregroundStyle(.red)
-                        }
-                    } else {
-                        Text(HistoryViewModel.displayText(for: record)).font(.callout)
-                    }
+        HStack(alignment: .top, spacing: 0) {
+            column(title: "WHAT YOU SAID", text: HistoryViewModel.displayRawText(for: record))
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text(HistoryViewModel.detailHeader(for: record))
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .tracking(0.46)
+                        .foregroundStyle(colors.secondaryText)
+                    Spacer()
+                    editActions
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                if model.editingID == record.id {
+                    TextEditor(text: $model.editedText)
+                        .font(.system(size: 13))
+                        .scrollContentBackground(.hidden)
+                        .padding(4)
+                        .frame(height: 100)
+                        .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
+                        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.accentColor.opacity(0.5)))
+                        .focused($editorFocused)
+                        .onAppear { editorFocused = true }
+                        .onExitCommand { model.cancelEdit() }
+                        .disabled(model.isSavingEdit)
+                        .accessibilityLabel("Edit inserted text")
+                    if let error = model.editError {
+                        Text(error).font(.caption).foregroundStyle(.red)
+                    }
+                } else {
+                    Text(HistoryViewModel.displayText(for: record))
+                        .font(.system(size: 13)).lineSpacing(5.2)
+                }
+                Text("Audio was not saved.")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(colors.secondaryText)
+                    .padding(.top, 2)
             }
-            Text("Audio was not saved.")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(16)
-        .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .padding(.horizontal, 16)
-        .padding(.bottom, 12)
+        .background(colors.surface)
+        .overlay { colors.separator.frame(width: 1).allowsHitTesting(false) }
+        .overlay(alignment: .top) { colors.separator.frame(height: 1).allowsHitTesting(false) }
     }
 
     private var editActions: some View {
@@ -66,19 +69,35 @@ struct HistoryDetailView: View {
             }
         }
         .buttonStyle(.plain)
-        .font(.caption)
+        .font(.system(size: 11.5, weight: .medium))
         .foregroundStyle(.tint)
     }
 
     private func column(title: String, text: String) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             Text(title)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .font(.system(size: 11.5, weight: .semibold))
+                .tracking(0.46)
+                .foregroundStyle(colors.secondaryText)
             Text(text)
-                .font(.callout)
-                .foregroundStyle(.secondary)
+                .font(.system(size: 13)).lineSpacing(5.2)
+                .foregroundStyle(colors.rawText)
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
+}
+
+/// The light/dark card surfaces and hairlines specified by canvas 2e.
+struct HistoryCardColors {
+    let scheme: ColorScheme
+    private var ink: Color { scheme == .dark ? .white : .black }
+    var surface: Color { scheme == .dark ? Color(red: 42 / 255, green: 42 / 255, blue: 46 / 255) : .white }
+    var header: Color { ink.opacity(scheme == .dark ? 0.03 : 0.02) }
+    var border: Color { ink.opacity(0.07) }
+    var separator: Color { ink.opacity(scheme == .dark ? 0.07 : 0.06) }
+    var neutralAction: Color { ink.opacity(scheme == .dark ? 0.08 : 0.05) }
+    var secondaryText: Color { ink.opacity(0.5) }
+    var rawText: Color { ink.opacity(scheme == .dark ? 0.72 : 0.7) }
 }
