@@ -10,15 +10,8 @@ import VoxFlowTestSupport
 /// Design-fidelity renders (Task 5) for the Files result view (design 2f), gated behind
 /// `VOXFLOW_RENDER` so normal test runs never touch disk — same convention as
 /// `HistoryRenderTests`/`StylesRenderTests`. Run with
-/// `VOXFLOW_RENDER=1 xcodebuild … -only-testing:VoxFlowTests/FilesRenderTests`, then compare the
-/// PNGs in `.superpowers/design/renders/` against `canvas.pdf` page 7 (2f) — the
-/// "✓ Apply Casual cleanup" checkbox is what this task adds; "Segment length" is a follow-up and
-/// stays unbuilt.
-///
-/// Known `ImageRenderer` limitation (see `DictionaryRenderTests`'s doc comment for the first
-/// writeup): a live `Toggle` rasterizes as a plain yellow "unavailable cursor" glyph instead of a
-/// real checkbox. So in these PNGs the "Apply Casual cleanup" checkbox shows that glyph, not its
-/// real on-screen appearance — verify the actual checkbox by running the live app.
+/// `TEST_RUNNER_VOXFLOW_RENDER=1 xcodebuild … -only-testing:VoxFlowTests/FilesRenderTests`, then compare
+/// against `canvas.pdf` pages 9–10 (2f). Native hosting captures the actual picker and checkbox.
 @Suite(.enabled(if: ProcessInfo.processInfo.environment["VOXFLOW_RENDER"] != nil))
 @MainActor
 struct FilesRenderTests {
@@ -28,23 +21,18 @@ struct FilesRenderTests {
         return vm
     }
 
-    @Test("renders the Files result view for design-fidelity comparison against canvas page 7 (2f)")
+    @Test("renders the Files result view for design-fidelity comparison against canvas 2f")
     func render() throws {
         let directory = Self.rendersDirectory()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 
         // 1. 2f default — "Apply Casual cleanup" unchecked (controller ruling 6: off by default).
-        // The live `ScrollView` segment list rasterizes blank under `ImageRenderer` (same known
-        // limitation `StylesRenderTests` documents for `Toggle`/`Picker`/live `ScrollView`s), so
-        // this render is the header/search/footer chrome only — see case 3 below for the rows.
         try Self.render(TranscriptResultView(resultModel: makeVM(applyCleanup: false), onBack: {}), name: "1-cleanup-off", directory: directory)
 
         // 2. 2f as the canvas sample shows it — checked.
         try Self.render(TranscriptResultView(resultModel: makeVM(applyCleanup: true), onBack: {}), name: "2-cleanup-on", directory: directory)
 
-        // 3. Segment rows outside the live `ScrollView` (the actual `TranscriptSegmentRow` type
-        // `segmentList` uses, not a hand-retyped copy) — the only way to see the raw-vs-cleaned
-        // text difference under `ImageRenderer`. Off on top, on (rewritten, periods added) below.
+        // 3. Shared production rows isolate the raw-vs-cleaned text comparison.
         let offVM = makeVM(applyCleanup: false)
         let onVM = makeVM(applyCleanup: true)
         let rowsPreview = VStack(alignment: .leading, spacing: 16) {
@@ -56,17 +44,33 @@ struct FilesRenderTests {
         }
         .padding(16)
         try Self.render(rowsPreview, name: "3-segment-rows-off-vs-on", directory: directory)
+        var source = ResultViewModelTests.smallDoc()
+        source.transcript.segments = [try #require(TranscriptSegment(start: 0, end: 12,
+            text: "Welcome back. Today we are picking up where we left off with attention mechanisms and the encoder states from last week."))]
+        for length in SegmentLength.allCases {
+            let vm = ResultViewModel.makeForRender(document: source)
+            vm.segmentLength = length
+            try Self.render(TranscriptResultView(resultModel: vm, onBack: {}), name: "segments-\(length.rawValue)", directory: directory)
+        }
     }
 
     @MainActor
     private static func render(_ view: some View, name: String, directory: URL) throws {
-        let renderer = ImageRenderer(content: view.frame(width: 900, height: 600).background(Color(nsColor: .windowBackgroundColor)))
-        renderer.scale = 2
-        guard let image = renderer.nsImage else {
-            Issue.record("Failed to render \(name)")
-            return
-        }
-        try writePNG(image, to: directory.appendingPathComponent("Files-\(name).png"))
+        let content = view.frame(width: 900, height: 600).background(Color.white).environment(\.colorScheme, .light)
+        let host = NSHostingView(rootView: content)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 600),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.appearance = NSAppearance(named: .aqua)
+        host.appearance = window.appearance
+        window.contentView = host
+        defer { window.close() }
+        host.frame = window.contentView!.bounds
+        host.layoutSubtreeIfNeeded()
+        let bitmap = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        host.cacheDisplay(in: host.bounds, to: bitmap)
+        try #require(bitmap.representation(using: .png, properties: [:]))
+            .write(to: directory.appendingPathComponent("Files-\(name).png"))
     }
 
     private static func rendersDirectory() -> URL {
@@ -76,14 +80,6 @@ struct FilesRenderTests {
             .appendingPathComponent(".superpowers/design/renders")
     }
 
-    private static func writePNG(_ image: NSImage, to url: URL) throws {
-        guard let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
-              let png = rep.representation(using: .png, properties: [:]) else {
-            Issue.record("Failed to encode PNG for \(url.lastPathComponent)")
-            return
-        }
-        try png.write(to: url)
-    }
 }
 
 private extension ResultViewModel {
