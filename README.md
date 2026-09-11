@@ -62,7 +62,8 @@ any app, style cleanup with a local LLM and an MCP server follow in 2.x (see the
 - Dictionary page: add names, terms, products and places with an optional phonetic hint; recognised
   words feed the speech engine directly, and "Learn names from Contacts" imports names locally.
 - Snippets page: define a trigger (e.g. `/sig`) and a body with `cursor`/`date`/`clipboard`/`app`
-  placeholders; say or type the trigger in any app to expand it.
+  placeholders; say or type the trigger in any app to expand it. `cursor` (also `{cursor}`) places
+  the caret within the inserted text when the target supports Accessibility selection.
 - Styles page: pick a rewrite tone (Formal, Casual, Very casual, Verbatim) and per-app overrides;
   rule-based styling (fillers removed, punctuation and capitalization added) runs on every
   dictation before it's inserted — see [ADR-005](docs/adr/005-rule-based-styling-pipeline.md).

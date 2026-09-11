@@ -28,7 +28,7 @@ ripple through storage, History or the dictation path.
   placeholders are whole-word, case-insensitive: `date` → today's date (medium style, current
   locale), `clipboard` → the current pasteboard string, `app` → the frontmost app's name,
   `cursor` → removed from the body, its position recorded as `DictationResult.cursorOffset`
-  (the phase-4b inserter moves the caret there; 4a only records it — see Consequences). "Only
+  (the Accessibility inserter consumes it — see Consequences). "Only
   in {app}" scopes a snippet to a bundle id; unmatched snippets are left untouched in the text.
   The "Say 'snippet' before the trigger" toggle requires the spoken word "snippet" immediately
   before the trigger to count as a match.
@@ -64,9 +64,12 @@ ripple through storage, History or the dictation path.
   like,`) or opening a clause followed by a comma, so "I like this" or "it's like a demo" are
   left alone. A broader rule would eat the verb "to like" and the preposition "like" too often
   to be safe as a blind regex.
-- `cursorOffset` is computed and returned in 4a but nothing consumes it yet — the Accessibility
-  inserter does not move the caret. Caret placement for the `cursor` snippet placeholder is
-  deferred to phase 4b.
+- Caret placement (#161): `cursorOffset` counts Swift Characters in the final expanded text. The
+  controller passes it with that text to the inserter, which records the target's selected range
+  before replacing its contents and adds the UTF-16 prefix length to the selection's start.
+  After a successful insertion it requests a zero-length selection there. Missing or unsupported
+  selection attributes silently preserve the target's normal caret behavior; text is not duplicated
+  onto the clipboard. Both bare `cursor` and `{cursor}` markers are removed completely.
 - `dictionary`, `snippets` and `app_style_overrides` live in the same SQLite file as dictation
   history (`VoxFlowDatabase`, one `DatabaseQueue`) but are not encrypted — only dictation text
   is sensitive (ADR-004); words, snippet bodies and per-app style choices are not.

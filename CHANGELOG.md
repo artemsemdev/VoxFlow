@@ -6,6 +6,8 @@ versioning.
 ## Unreleased
 
 ### Added
+- Snippet `cursor` / `{cursor}` placeholders position the caret after insertion, including Unicode
+  text. Targets without settable selection keep the inserted text and their normal caret behavior.
 - History cards match the canvas surfaces, compact actions and divided transcript columns.
 - History app and calendar-date filters, plus "Search all time" without clearing the query or app.
 - Files results: Sentences / Short / Long segmentation controls preview, search, cleanup and all
