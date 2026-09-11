@@ -5,6 +5,8 @@ import VoxFlowCore
 
 /// Decodes any AVFoundation-readable audio/video file to `AudioSamples` (16 kHz mono Float32).
 public struct AudioDecoder: AudioDecoding {
+    typealias FileRead = @Sendable (AVAudioFile, AVAudioPCMBuffer, AVAudioFrameCount) throws -> Void
+
     /// Delegates to `SupportedAudio`, the single source of truth; kept as a name for existing call sites.
     public static var supportedExtensions: Set<String> { SupportedAudio.extensions }
 
@@ -12,7 +14,15 @@ public struct AudioDecoder: AudioDecoding {
     /// holds the whole file (≈ 690 MB for 3 h) — chunking long files is a phase-2 decision.
     private static let chunkFrames: AVAudioFrameCount = 65_536
 
-    public init() {}
+    private let fileRead: FileRead
+
+    public init() {
+        fileRead = { try $0.read(into: $1, frameCount: $2) }
+    }
+
+    init(fileRead: @escaping FileRead) {
+        self.fileRead = fileRead
+    }
 
     public func decode(_ url: URL) throws -> AudioSamples {
         let ext = url.pathExtension.lowercased()
@@ -61,7 +71,7 @@ public struct AudioDecoder: AudioDecoding {
                     return nil
                 }
                 do {
-                    try file.read(into: chunk, frameCount: Self.chunkFrames)
+                    try fileRead(file, chunk, Self.chunkFrames)
                 } catch {
                     readError.withLock { $0 = error }
                     outStatus.pointee = .endOfStream

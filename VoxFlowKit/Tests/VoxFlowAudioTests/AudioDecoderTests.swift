@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Testing
 import VoxFlowCore
 import VoxFlowTestSupport
@@ -82,5 +83,31 @@ struct AudioDecoderTests {
         let url = dir.file("silent.wav")
         try FixtureAudio.writeSine(to: url, seconds: 0.001, sampleRate: 16_000, channels: 1)
         #expect(try decoder.decode(url).samples.count < 100)
+    }
+
+    @Test("a read failure after decoded frames returns no partial AudioSamples")
+    func midFileReadFailure() throws {
+        struct MidReadFailure: LocalizedError {
+            var errorDescription: String? { "mid-file read failed" }
+        }
+        let directory = TemporaryDirectory()
+        let url = directory.file("long.wav")
+        try FixtureAudio.writeSine(to: url, seconds: 10, sampleRate: 16_000, channels: 1)
+        let reads = Mutex(0)
+        let decoder = AudioDecoder { file, buffer, frameCount in
+            let attempt = reads.withLock { count in count += 1; return count }
+            if attempt == 2 { throw MidReadFailure() }
+            try file.read(into: buffer, frameCount: frameCount)
+        }
+        var returnedSamples = false
+
+        #expect {
+            _ = try decoder.decode(url)
+            returnedSamples = true
+        } throws: { error in
+            (error as? AudioDecodingError) == .decodeFailed("mid-file read failed")
+        }
+        #expect(reads.withLock { $0 } == 2)
+        #expect(returnedSamples == false)
     }
 }
