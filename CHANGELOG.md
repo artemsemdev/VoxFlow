@@ -87,6 +87,8 @@ versioning.
   [docs/runbooks/connect-an-mcp-client.md](docs/runbooks/connect-an-mcp-client.md).
 
 ### Fixed
+- Hosted tests no longer construct live app scenes or services, preventing Home and menu-bar
+  refreshes from opening the real history database and prompting for its Keychain key.
 - Settings › General's appearance and Flow Bar position now apply at launch, not only once
   Settings has been opened at least once.
 - The Flow Bar HUD and the menu bar's "Paused until 10:41" now read the same clock instead of two
