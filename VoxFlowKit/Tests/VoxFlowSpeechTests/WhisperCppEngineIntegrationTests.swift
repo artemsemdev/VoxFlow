@@ -45,17 +45,20 @@ struct WhisperCppEngineIntegrationTests {
         #expect(segments.allSatisfy { ($0.confidence ?? -1) >= 0 && ($0.confidence ?? 2) <= 1 })
     }
 
-    @Test("cancelling the consumer aborts the run")
+    @Test("consumer cancellation after an event follows the documented stream contract")
     func cancellation() async throws {
         let fixture = Bundle.module.url(forResource: "attention-10s", withExtension: "wav", subdirectory: "Fixtures")!
         let audio = try AudioDecoder().decode(fixture)
         let engine = WhisperCppEngine()
         try await engine.load(modelAt: InstalledModel.url!)
         let task = Task {
-            for try await _ in engine.transcribe(audio, options: TranscriptionOptions(language: "en")) {}
+            for try await _ in engine.transcribe(audio, options: TranscriptionOptions(language: "en")) {
+                withUnsafeCurrentTask { $0?.cancel() }
+            }
+            // #125 / ADR-003: mid-run cancellation may end iteration silently. The consumer
+            // must translate that outcome; this test does not measure native abort latency.
+            if Task.isCancelled { throw SpeechEngineError.cancelled }
         }
-        // Cancel almost immediately; the engine must stop and throw `cancelled`.
-        task.cancel()
         await #expect(throws: SpeechEngineError.cancelled) { try await task.value }
     }
 
@@ -65,5 +68,18 @@ struct WhisperCppEngineIntegrationTests {
         await #expect(throws: SpeechEngineError.modelNotLoaded) {
             _ = try await engine.detectLanguage(in: AudioSamples([Float](repeating: 0, count: 16_000)))
         }
+    }
+}
+
+@Suite("WhisperCppEngine cancellation without a model")
+struct WhisperCppEngineCancellationTests {
+    @Test("cancelling before transcribe throws without loading a model or starting native work")
+    func cancelledBeforeStreamCreation() async {
+        let engine = WhisperCppEngine()
+        let task = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            for try await _ in engine.transcribe(AudioSamples([]), options: TranscriptionOptions()) {}
+        }
+        await #expect(throws: SpeechEngineError.cancelled) { try await task.value }
     }
 }
