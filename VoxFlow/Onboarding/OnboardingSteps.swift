@@ -169,32 +169,45 @@ struct PermissionsStepView: View {
 /// ONB-03 "How do you want to start?" — two selectable hotkey-mode cards.
 struct HotkeyStepView: View {
     let viewModel: OnboardingViewModel
+    @State private var fnWarningState: FnSystemActionWarningState
+    let openKeyboard: @MainActor () -> Void
+
+    init(
+        viewModel: OnboardingViewModel,
+        fnWarningState: FnSystemActionWarningState = FnSystemActionWarningState(),
+        openKeyboard: @escaping @MainActor () -> Void = FnSystemActionWarning.openKeyboardSettings
+    ) {
+        self.viewModel = viewModel
+        _fnWarningState = State(initialValue: fnWarningState)
+        self.openKeyboard = openKeyboard
+    }
 
     var body: some View {
         VStack(spacing: 18) {
             VStack(spacing: 6) {
                 Text("How do you want to start?").font(.system(size: 24, weight: .bold))
-                Text("Both use the fn key. You can change this anytime.")
+                Text(viewModel.hotkeyStepSubtitle)
                     .font(.system(size: 13)).foregroundStyle(.secondary)
             }
             HStack(spacing: 16) {
-                modeCard(mode: .pushToTalk, title: "Push-to-talk", keycaps: ["fn"],
-                        body: "Hold fn while you speak. Release and the text is inserted. Precise, nothing runs on its own.")
-                modeCard(mode: .handsFree, title: "Hands-free", keycaps: ["fn", "fn"],
-                        body: "Double-tap fn to start, tap once to stop. Best for longer thoughts. Stops after 3 s of silence.")
+                modeCard(mode: .pushToTalk, title: "Push-to-talk")
+                modeCard(mode: .handsFree, title: "Hands-free")
+            }
+            if viewModel.showsFnSystemActionWarning {
+                FnSystemActionWarning(state: fnWarningState, openKeyboard: openKeyboard)
             }
         }
         .frame(maxWidth: 560)
     }
 
-    private func modeCard(mode: HotkeyMode, title: String, keycaps: [String], body: String) -> some View {
+    private func modeCard(mode: HotkeyMode, title: String) -> some View {
         let selected = viewModel.hotkeyMode == mode
         return VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 6) {
-                ForEach(Array(keycaps.enumerated()), id: \.offset) { _, cap in keycap(cap) }
+                ForEach(Array(viewModel.hotkeyKeycaps(for: mode).enumerated()), id: \.offset) { _, cap in keycap(cap) }
             }
             Text(title).font(.system(size: 15, weight: .semibold))
-            Text(body).font(.system(size: 12)).foregroundStyle(.secondary)
+            Text(viewModel.hotkeyDescription(for: mode)).font(.system(size: 12)).foregroundStyle(.secondary)
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -234,9 +247,8 @@ struct TryItStepView: View {
             }
             VStack(spacing: 6) {
                 Text("You're set. Try it.").font(.system(size: 24, weight: .bold))
-                (Text("Hold ").foregroundStyle(.secondary)
-                 + Text("fn").fontWeight(.semibold)
-                 + Text(", say a sentence, let go.").foregroundStyle(.secondary))
+                Text(viewModel.tryItInstruction)
+                    .foregroundStyle(.secondary)
                     .font(.system(size: 13))
             }
             TextEditor(text: $scratchpad)

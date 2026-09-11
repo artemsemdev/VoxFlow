@@ -29,6 +29,18 @@ struct OnboardingWindow: View {
 /// clearance for them (D-1: one set of chrome, not a hand-drawn pair layered under the real ones).
 struct OnboardingContentView: View {
     let viewModel: OnboardingViewModel
+    let fnWarningState: FnSystemActionWarningState
+    let openKeyboard: @MainActor () -> Void
+
+    init(
+        viewModel: OnboardingViewModel,
+        fnWarningState: FnSystemActionWarningState = FnSystemActionWarningState(),
+        openKeyboard: @escaping @MainActor () -> Void = FnSystemActionWarning.openKeyboardSettings
+    ) {
+        self.viewModel = viewModel
+        self.fnWarningState = fnWarningState
+        self.openKeyboard = openKeyboard
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -48,7 +60,7 @@ struct OnboardingContentView: View {
         switch viewModel.step {
         case .welcome: WelcomeStepView()
         case .permissions: PermissionsStepView(viewModel: viewModel)
-        case .hotkey: HotkeyStepView(viewModel: viewModel)
+        case .hotkey: HotkeyStepView(viewModel: viewModel, fnWarningState: fnWarningState, openKeyboard: openKeyboard)
         case .model: ModelStepView(viewModel: viewModel)
         case .tryIt: TryItStepView(viewModel: viewModel)
         }

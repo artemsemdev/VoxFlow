@@ -28,11 +28,13 @@ final class DictationCoordinator {
     /// the prompt, not a dictation, and must not be replayed against the very next armed state).
     private(set) var isRequestingMicrophoneAccess = false
     private var pendingActivation: (id: UUID, mode: HotkeyMode?)?
+    private var pendingReinsertion: UUID?
 
     private(set) var state: FlowBarState = .idle
     private(set) var levels: [Float] = Array(repeating: 0, count: DictationCoordinator.barCount)
     private(set) var elapsed: TimeInterval = 0
     var hotkeyMode: HotkeyMode { settings.hotkeyMode }
+    var shortcuts: DictationShortcuts { settings.shortcuts }
     /// I1: `.paused` is excluded even though `state != .idle` — before FB-09 every non-idle state
     /// was seconds long, but `.paused(until:)` lasts up to an hour, and `FnKeyMonitor` gates its
     /// *global* `.keyDown` handler on this. Leaving `.paused` "HUD active" meant every keystroke in
@@ -43,7 +45,7 @@ final class DictationCoordinator {
     /// hides off `state`, never off this property.
     var isHUDActive: Bool { state != .idle && pausedUntil == nil }
     var shortcutContext: ShortcutContext {
-        ShortcutContext(hudActive: isHUDActive || pendingActivation != nil,
+        ShortcutContext(hudActive: isHUDActive || pendingActivation != nil || pendingReinsertion != nil,
                         handsFree: activeMode == .handsFree || pendingActivation?.mode == .handsFree)
     }
     private var activeMode: HotkeyMode? {
@@ -55,6 +57,20 @@ final class DictationCoordinator {
     }
     func shortcutDown(_ mode: HotkeyMode) { activate(mode: mode) }
     func pushToTalkReleased() { commands.send { [controller] in await controller.pushToTalkReleased() } }
+    func reinsertLast(using support: ReinsertionSupport) {
+        guard pausedUntil == nil, pendingReinsertion == nil else { return }
+        let id = UUID()
+        pendingReinsertion = id
+        commands.send(preparation: true) { [weak self, controller] in
+            await controller.reinsertLast(prepare: { await support.prepareTarget() },
+                                          lastSaved: { await support.lastSaved() })
+            await self?.finishReinsertion(id)
+        }
+    }
+
+    private func finishReinsertion(_ id: UUID) {
+        if pendingReinsertion == id { pendingReinsertion = nil }
+    }
 
     init(controller: DictationController, settings: DictationSettings, permissions: any PermissionChecking, navigation: Navigation,
          clock: any MonotonicClock = SystemMonotonicClock()) {
@@ -152,6 +168,7 @@ final class DictationCoordinator {
 
     func escape() {
         pendingActivation = nil
+        pendingReinsertion = nil
         commands.cancelPreparations()
         commands.send { [controller] in await controller.escape() }
     }

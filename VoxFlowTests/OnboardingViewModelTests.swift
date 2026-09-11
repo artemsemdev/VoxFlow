@@ -200,6 +200,39 @@ struct OnboardingViewModelTests {
         #expect(h.dictationSettings.hotkeyMode == .handsFree)
     }
 
+    @Test("default shortcut guidance preserves the onboarding copy")
+    func defaultShortcutGuidance() throws {
+        let vm = try Harness().viewModel(step: .hotkey).vm
+
+        #expect(vm.hotkeyStepSubtitle == "Both use the fn key. You can change this anytime.")
+        #expect(vm.hotkeyKeycaps(for: .pushToTalk) == ["fn"])
+        #expect(vm.hotkeyKeycaps(for: .handsFree) == ["fn", "fn"])
+        #expect(vm.hotkeyDescription(for: .pushToTalk).hasPrefix("Hold fn while you speak."))
+        #expect(vm.hotkeyDescription(for: .handsFree).hasPrefix("Double-tap fn to start"))
+        #expect(vm.tryItInstruction == "Hold fn, say a sentence, let go.")
+        #expect(vm.showsFnSystemActionWarning)
+    }
+
+    @Test("saved shortcuts drive cards, try-it guidance, and fn warning visibility")
+    func customShortcutGuidance() throws {
+        let h = try Harness()
+        #expect(h.dictationSettings.setShortcut(
+            ShortcutBinding(keyCode: 40, modifiers: [.control, .option], label: "K"), for: .pushToTalk))
+        #expect(h.dictationSettings.setShortcut(
+            ShortcutBinding(keyCode: 49, modifiers: .option, label: "Space"), for: .handsFree))
+        let vm = h.viewModel(step: .hotkey).vm
+
+        #expect(vm.hotkeyStepSubtitle == "Your saved shortcuts are shown below. You can change them anytime.")
+        #expect(vm.hotkeyKeycaps(for: .pushToTalk) == ["⌃", "⌥", "K"])
+        #expect(vm.hotkeyKeycaps(for: .handsFree) == ["⌥", "Space"])
+        #expect(vm.hotkeyDescription(for: .pushToTalk).hasPrefix("Hold ⌃ + ⌥ + K while you speak."))
+        #expect(vm.hotkeyDescription(for: .handsFree).hasPrefix("Press ⌥ + Space to start or stop."))
+        #expect(vm.tryItInstruction == "Hold ⌃ + ⌥ + K, say a sentence, let go.")
+        vm.choose(.handsFree)
+        #expect(vm.tryItInstruction == "Press ⌥ + Space to start, say a sentence, then press it again to stop.")
+        #expect(!vm.showsFnSystemActionWarning)
+    }
+
     @Test("model step: download() installs the default model and auto-advances to .tryIt")
     func modelDownloadAdvances() async throws {
         let h = try Harness()

@@ -199,7 +199,47 @@ final class OnboardingViewModel {
     // MARK: Hotkey (ONB-03)
 
     var hotkeyMode: HotkeyMode { settings.hotkeyMode }
+    var hotkeyStepSubtitle: String {
+        usesDefaultHotkeys
+            ? "Both use the fn key. You can change this anytime."
+            : "Your saved shortcuts are shown below. You can change them anytime."
+    }
+    var showsFnSystemActionWarning: Bool { settings.shortcuts.usesFunctionKey }
+    func hotkeyKeycaps(for mode: HotkeyMode) -> [String] { binding(for: mode).keycaps }
+    func hotkeyDescription(for mode: HotkeyMode) -> String {
+        let shortcut = binding(for: mode)
+        let label = shortcut.keycaps.joined(separator: " + ")
+        switch mode {
+        case .pushToTalk:
+            return "Hold \(label) while you speak. Release and the text is inserted. Precise, nothing runs on its own."
+        case .handsFree where shortcut.doubleTap:
+            return "Double-tap fn to start, tap once to stop. Best for longer thoughts. Stops after 3 s of silence."
+        case .handsFree:
+            return "Press \(label) to start or stop. Best for longer thoughts. Stops after 3 s of silence."
+        }
+    }
+    var tryItInstruction: String {
+        let shortcut = binding(for: hotkeyMode)
+        let label = shortcut.keycaps.joined(separator: " + ")
+        switch hotkeyMode {
+        case .pushToTalk:
+            return "Hold \(label), say a sentence, let go."
+        case .handsFree where shortcut.doubleTap:
+            return "Double-tap fn to start, say a sentence, then tap fn once to stop."
+        case .handsFree:
+            return "Press \(label) to start, say a sentence, then press it again to stop."
+        }
+    }
     func choose(_ mode: HotkeyMode) { settings.hotkeyMode = mode }
+
+    private var usesDefaultHotkeys: Bool {
+        settings.shortcuts[.pushToTalk] == ShortcutAction.pushToTalk.defaultBinding
+            && settings.shortcuts[.handsFree] == ShortcutAction.handsFree.defaultBinding
+    }
+
+    private func binding(for mode: HotkeyMode) -> ShortcutBinding {
+        settings.shortcuts[mode == .pushToTalk ? .pushToTalk : .handsFree]
+    }
 
     // MARK: Model (ONB-04)
 

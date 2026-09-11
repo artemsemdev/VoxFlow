@@ -90,6 +90,7 @@ final class AppServices {
     let privacyViewModel: PrivacyViewModel
 
     let dictationSettings: DictationSettings
+    let shortcutRecorder: ShortcutRecorderModel
     /// Shared with the Files `LazyModelFileTranscriber` (ruling 9: one place knows which model is loaded).
     let modelLoader: ModelLoader
     /// Owns the `DictationStore`/`RetentionRunner`; `historyService.status` is `.disabled(reason:)`
@@ -165,7 +166,7 @@ final class AppServices {
     private init(modelStore: ModelStore, engine: WhisperCppEngine, queue: FileQueue, filesSettings: FilesSettings,
                  durations: AudioDurationReader, exports: ExportCoordinator, navigation: Navigation,
                  filesViewModel: FilesViewModel, modelsViewModel: ModelsViewModel, audioViewModel: AudioViewModel,
-                 privacyViewModel: PrivacyViewModel, dictationSettings: DictationSettings,
+                 privacyViewModel: PrivacyViewModel, dictationSettings: DictationSettings, shortcutRecorder: ShortcutRecorderModel,
                  modelLoader: ModelLoader, historyService: HistoryService, historyViewModel: HistoryViewModel,
                  statsService: StatsService, homeViewModel: HomeViewModel,
                  stylingSettings: StylingSettings, styleModelLoader: StyleModelLoader, restyler: Restyler,
@@ -189,6 +190,7 @@ final class AppServices {
         self.audioViewModel = audioViewModel
         self.privacyViewModel = privacyViewModel
         self.dictationSettings = dictationSettings
+        self.shortcutRecorder = shortcutRecorder
         self.modelLoader = modelLoader
         self.historyService = historyService
         self.historyViewModel = historyViewModel
@@ -361,6 +363,11 @@ final class AppServices {
         let flowBarPanel = FlowBarPanel(rootView: FlowBarView(coordinator: dictation))
         let flowBar = FlowBarPresenter(panel: flowBarPanel, scheduler: TaskHideScheduler())
 
+        let systemShortcuts = SystemShortcutConflicts()
+        let shortcutRecorder = ShortcutRecorderModel(settings: dictationSettings, systemConflict: systemShortcuts.name)
+        let reinsertion = ReinsertionSupport(frontmost: frontmost, settings: dictationSettings.box,
+            captureFocus: { app in await inserter.captureFocus(app: app) },
+            fetchLatest: { await historyService.fetch(limit: 1).first })
         let fnMonitor = FnKeyMonitor(
             onFn: { dictation.fn($0) },
             onEscape: { dictation.escape() },
@@ -368,13 +375,16 @@ final class AppServices {
             isHUDActive: { dictation.shortcutContext.hudActive },
             shortcuts: { dictationSettings.shortcuts },
             context: { dictation.shortcutContext },
+            suspended: { shortcutRecorder.isRecording },
             onPush: { transition in
                 if transition == .down { dictation.shortcutDown(.pushToTalk) }
                 else { dictation.pushToTalkReleased() }
             },
-            onHandsFree: { dictation.shortcutDown(.handsFree) }
+            onHandsFree: { dictation.shortcutDown(.handsFree) },
+            onReinsert: { dictation.reinsertLast(using: reinsertion) }
         )
-        dictationSettings.onShortcutsChange = { fnMonitor.configurationDidChange() }
+        dictationSettings.onShortcutsChange = { [weak fnMonitor] in fnMonitor?.configurationDidChange() }
+        shortcutRecorder.onRecordingChange = { [weak fnMonitor] in fnMonitor?.suspensionDidChange() }
 
         let onboardingState = OnboardingState(store: settingsStore)
         let onboardingViewModel = OnboardingViewModel(state: onboardingState, permissions: permissions, settings: dictationSettings,
@@ -450,7 +460,7 @@ final class AppServices {
         return AppServices(modelStore: modelStore, engine: engine, queue: queue, filesSettings: filesSettings,
                            durations: durations, exports: exports, navigation: navigation, filesViewModel: filesViewModel,
                            modelsViewModel: modelsViewModel, audioViewModel: audioViewModel, privacyViewModel: privacyViewModel,
-                           dictationSettings: dictationSettings, modelLoader: modelLoader,
+                           dictationSettings: dictationSettings, shortcutRecorder: shortcutRecorder, modelLoader: modelLoader,
                            historyService: historyService, historyViewModel: historyViewModel,
                            statsService: statsService, homeViewModel: homeViewModel,
                            stylingSettings: stylingSettings, styleModelLoader: styleModelLoader, restyler: restyler,

@@ -15,12 +15,12 @@ struct DictationCoordinatorTests {
               permissionsMicrophone: PermissionState = .granted, permissionsRequestResult: PermissionState = .granted,
               loadModel: @escaping @Sendable () async throws -> Void = {},
               prepare: @escaping @Sendable () async -> Void = {}, start: Bool = true,
-              preferredMode: HotkeyMode = .pushToTalk)
+              preferredMode: HotkeyMode = .pushToTalk, inserter: FakeTextInserter = FakeTextInserter())
         -> (DictationCoordinator, FakeMicrophone, FakeClock, FakePermissions, Navigation) {
         let mic = FakeMicrophone(), clock = FakeClock()
         let permissions = FakePermissions(microphone: permissionsMicrophone, requestResult: permissionsRequestResult, accessibility: true)
         let transcriber = FakeDictationTranscriber(result: DictationResult(text: "hi there", rawText: "hi there", segments: [], language: nil, duration: 1, lowConfidence: false))
-        let controller = DictationController(config: FlowBarConfig(), microphone: mic, transcriber: transcriber, inserter: FakeTextInserter(), clock: clock,
+        let controller = DictationController(config: FlowBarConfig(), microphone: mic, transcriber: transcriber, inserter: inserter, clock: clock,
                                              preflight: { await prepare(); if let gate { await gate.wait() }; return preflight },
                                              loadModel: loadModel, options: { TranscriptionOptions() },
                                              onSave: { _, _ in }, copyToClipboard: { _ in })
@@ -70,6 +70,31 @@ struct DictationCoordinatorTests {
         await wait(c) { if case .paused = $0 { true } else { false } }
         #expect(calls.withLock { $0 } == 0 && mic.startCount == 0)
         #expect(!c.shortcutContext.hudActive)
+    }
+
+    @Test("reinsertion uses the cancellable queue and exposes pending work to Escape", arguments: [false, true])
+    func reinsertPreparation(cancel: Bool) async throws {
+        let entered = Gate(), release = Gate(), cancelled = Mutex(false)
+        defer { Task { await release.open() } }
+        let inserter = FakeTextInserter()
+        let (c, mic, _, permissions, _) = make(permissionsMicrophone: .notDetermined, inserter: inserter)
+        let support = ReinsertionSupport(frontmost: FakeFrontmost(app: ReinsertionSupportTests.mail, secure: false),
+            settings: ReinsertionSupportTests().settings(), captureFocus: { _ in
+                await entered.open(); await release.wait()
+                cancelled.withLock { $0 = Task.isCancelled }
+            }, fetchLatest: { ReinsertionSupportTests.record })
+        c.reinsertLast(using: support)
+        try #require(c.shortcutContext.hudActive)
+        await entered.wait()
+        if cancel { c.escape() }
+        await release.open()
+        // The queued pause observes completion of reinsertion (or its cancelled preparation).
+        c.pause(for: 42)
+        await wait(c) { if case .paused = $0 { true } else { false } }
+        #expect(inserter.insertedTexts == (cancel ? [] : ["Edited text"]))
+        #expect(cancelled.withLock { $0 } == cancel)
+        #expect(!c.shortcutContext.hudActive)
+        #expect(permissions.requests == 0 && mic.startCount == 0)
     }
 
     @Test("a cancelled preparation cannot clear or cancel a newer hands-free activation")

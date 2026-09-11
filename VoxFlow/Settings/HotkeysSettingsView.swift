@@ -7,34 +7,24 @@ import VoxFlowDictation
 /// `ScrollView`).
 struct HotkeysSettingsView: View {
     let settings: DictationSettings
+    var recorder: ShortcutRecorderModel? = nil
+    @State private var fnWarning = FnSystemActionWarningState()
 
     var body: some View {
-        ScrollView { HotkeysSettingsBody(settings: settings) }
+        ScrollView { HotkeysSettingsBody(settings: settings, recordShortcut: { recorder?.begin($0) }, fnWarning: fnWarning) }
             .frame(maxWidth: .infinity)
+            .sheet(isPresented: Binding(get: { recorder?.isRecording == true }, set: { if !$0 { recorder?.cancel() } })) {
+                if let recorder { ShortcutRecorderView(model: recorder) }
+            }
+            .onDisappear { recorder?.cancel() }
     }
 }
 
-/// Recording a shortcut (ST-02r/ST-02c) is phase 4 — rows here are read-only, so no view model
-/// beyond the `DictationSettings` binding for "Default mode".
+/// ST-02 rows read the persisted bindings and open the shared recorder.
 struct HotkeysSettingsBody: View {
     let settings: DictationSettings
-
-    private struct Row: Identifiable {
-        let id: String
-        let title: String
-        let subtitle: String
-        let keys: [String]
-        let hint: String?
-        var disabled = false
-    }
-
-    private static let rows: [Row] = [
-        Row(id: "push", title: "Push-to-talk", subtitle: "Hold to dictate, release to insert", keys: ["fn"], hint: "hold"),
-        Row(id: "free", title: "Hands-free", subtitle: "Press to start, press again to stop", keys: ["fn", "fn"], hint: "double-tap"),
-        Row(id: "cancel", title: "Cancel", subtitle: "Discard the current dictation", keys: ["esc"], hint: nil),
-        Row(id: "reinsert", title: "Re-insert last dictation", subtitle: "Useful when the wrong field had focus",
-           keys: ["⌥", "⌘", "V"], hint: nil, disabled: true),
-    ]
+    var recordShortcut: (ShortcutAction) -> Void = { _ in }
+    var fnWarning: FnSystemActionWarningState? = nil
 
     var body: some View {
         @Bindable var settings = settings
@@ -47,14 +37,19 @@ struct HotkeysSettingsBody: View {
             .frame(maxWidth: 320)
 
             VStack(spacing: 0) {
-                ForEach(Array(Self.rows.enumerated()), id: \.element.id) { index, row in
-                    rowView(row)
-                    if index < Self.rows.count - 1 {
+                ForEach(Array(ShortcutAction.allCases.enumerated()), id: \.element) { index, action in
+                    Button { recordShortcut(action) } label: { rowView(action) }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("shortcut-" + action.rawValue)
+                        .accessibilityLabel("Record shortcut for " + action.title)
+                    if index < ShortcutAction.allCases.count - 1 {
                         Divider().padding(.leading, 16)
                     }
                 }
             }
             .background(.background.secondary, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+            if settings.shortcuts.usesFunctionKey, let fnWarning { FnSystemActionWarning(state: fnWarning) }
 
             Text(HotkeysCopy.footer(mode: settings.hotkeyMode))
                 .font(.caption)
@@ -64,23 +59,23 @@ struct HotkeysSettingsBody: View {
         .frame(maxWidth: 640, alignment: .leading)
     }
 
-    private func rowView(_ row: Row) -> some View {
+    private func rowView(_ action: ShortcutAction) -> some View {
         HStack(spacing: 14) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(row.title).fontWeight(.medium)
-                Text(row.subtitle).font(.caption).foregroundStyle(.secondary)
+                Text(action.title).fontWeight(.medium)
+                Text(action.subtitle).font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
             HStack(spacing: 4) {
-                ForEach(Array(row.keys.enumerated()), id: \.offset) { _, key in KeycapView(text: key) }
-                if let hint = row.hint {
-                    Text(hint).font(.caption2).foregroundStyle(.secondary).padding(.leading, 2)
+                ForEach(Array(settings.shortcuts[action].keycaps.enumerated()), id: \.offset) { _, key in KeycapView(text: key) }
+                if action == .pushToTalk || settings.shortcuts[action].doubleTap {
+                    Text(action == .pushToTalk ? "hold" : "double-tap").font(.caption2).foregroundStyle(.secondary).padding(.leading, 2)
                 }
             }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
-        .opacity(row.disabled ? 0.5 : 1)
+        .contentShape(Rectangle())
     }
 }
 

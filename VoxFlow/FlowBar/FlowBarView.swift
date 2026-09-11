@@ -47,7 +47,8 @@ struct FlowBarView: View {
             // is really a snapshot taken when `.paused` was entered, not a live clock. Harmless today
             // (`FlowBarPresenter.pausedHideDelay` hides the pill again after 3 s), but would go stale
             // if that delay ever grew, or if the pill started reappearing on menu-bar hover.
-            FlowBarContent.make(state: coordinator.state, elapsed: coordinator.elapsed, mode: coordinator.hotkeyMode, now: coordinator.now())
+            FlowBarContent.make(state: coordinator.state, elapsed: coordinator.elapsed, mode: coordinator.hotkeyMode,
+                                now: coordinator.now(), shortcuts: coordinator.shortcuts)
         }
     }
 
@@ -235,7 +236,7 @@ struct FlowBarView: View {
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(Palette.hudText)
                     .fixedSize()
-                Text("fn")
+                Text(content.retryKey)
                     .font(.system(size: 12))
                     .foregroundStyle(Palette.hudSecondary)
                     .fixedSize()
