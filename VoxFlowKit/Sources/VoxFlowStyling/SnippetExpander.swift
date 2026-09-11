@@ -110,7 +110,7 @@ public struct SnippetExpander: Sendable {
         result = replaceAllOccurrences(of: "clipboard", with: context.clipboard ?? "", in: result)
         result = replaceAllOccurrences(of: "app", with: context.appName ?? "", in: result)
 
-        let cursorRanges = wordRanges(result, "cursor")
+        let cursorRanges = wordRanges(result, "cursor", includingBraces: true)
         guard let first = cursorRanges.first else {
             return (collapseSpaces(result), nil)
         }
@@ -153,8 +153,9 @@ public struct SnippetExpander: Sendable {
     }
 
     /// All whole-word, case-insensitive ranges of `word` in `text`, in left-to-right order.
-    private func wordRanges(_ text: String, _ word: String) -> [Range<String.Index>] {
-        let pattern = "\\b\(NSRegularExpression.escapedPattern(for: word))\\b"
+    private func wordRanges(_ text: String, _ word: String, includingBraces: Bool = false) -> [Range<String.Index>] {
+        let escaped = NSRegularExpression.escapedPattern(for: word)
+        let pattern = includingBraces ? "\\{\(escaped)\\}|\\b\(escaped)\\b" : "\\b\(escaped)\\b"
         guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return [] }
         let nsRange = NSRange(text.startIndex..., in: text)
         return regex.matches(in: text, options: [], range: nsRange).compactMap { Range($0.range, in: text) }

@@ -55,6 +55,10 @@ defaults write dev.artemsem.voxflow voxflow.onboarding.step -string 0
       than mis-heard.
 - [ ] Snippets: create one with trigger `/sig`, then dictate "slash sig" — the body is expanded
       into the text.
+- [ ] Snippet caret (#161): set `/sig` to three lines `Best,`, `{cursor}`, `Artem`. Dictate it into
+      TextEdit, with existing text before the insertion point. The marker disappears and the caret
+      lands on the blank line before Artem; typing a character puts it there. Repeat with an emoji
+      before the marker and while replacing a selected word.
 - [ ] Styles: set the Mail override to Formal, dictate into Mail — contractions are expanded
       ("can't" → "cannot").
 - [ ] History: expand one of those rows — the style used is shown in the row's meta line.

@@ -6,6 +6,8 @@ versioning.
 ## Unreleased
 
 ### Added
+- Snippet `cursor` / `{cursor}` placeholders position the caret after insertion, including Unicode
+  text. Targets without settable selection keep the inserted text and their normal caret behavior.
 - Dictation logic: microphone capture, Flow Bar state machine, windowed transcription,
   encrypted history with 30-day retention (no UI yet — phase 3b).
 - Dictation wired end-to-end: hold (or double-tap) fn anywhere to dictate. The floating Flow Bar
