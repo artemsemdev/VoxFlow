@@ -9,6 +9,7 @@ versioning.
 - History app and calendar-date filters, plus "Search all time" without clearing the query or app.
 - Files results: Sentences / Short / Long segmentation controls preview, search, cleanup and all
   exports without re-transcribing. Original transcript data remains available when switching back.
+- Inline History editing with Save/Cancel, preserving the raw transcript and encryption.
 - Dictation logic: microphone capture, Flow Bar state machine, windowed transcription,
   encrypted history with 30-day retention (no UI yet — phase 3b).
 - Dictation wired end-to-end: hold (or double-tap) fn anywhere to dictate. The floating Flow Bar
