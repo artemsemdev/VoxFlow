@@ -5,7 +5,7 @@ import whisper
 /// `SpeechEngine` over whisper.cpp. The C context is touched only on `queue`; the actor
 /// serializes calls and awaits the queue, so long transcriptions never block a cooperative thread.
 public actor WhisperCppEngine: SpeechEngine {
-    private let queue = DispatchQueue(label: "dev.artemsem.voxflow.whisper", qos: .userInitiated)
+    private let queue = WhisperWorkQueue()
     private var context: ContextBox?
 
     public init() {}
@@ -172,10 +172,6 @@ public actor WhisperCppEngine: SpeechEngine {
 
     /// Runs `body` on the engine's serial queue and resumes when it finishes.
     private func onQueue<T: Sendable>(_ body: @escaping @Sendable () throws -> T) async throws -> T {
-        try await withCheckedThrowingContinuation { continuation in
-            queue.async {
-                do { continuation.resume(returning: try body()) } catch { continuation.resume(throwing: error) }
-            }
-        }
+        try await queue.run(priority: .dictation, body)
     }
 }
