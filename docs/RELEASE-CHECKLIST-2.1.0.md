@@ -42,6 +42,9 @@ defaults write dev.artemsem.voxflow voxflow.onboarding.step -string 0
 - [ ] Open TextEdit, hold fn, say a sentence, release: the Flow Bar shows listening → processing,
       and the text lands in TextEdit.
 - [ ] A History row appears for it. Expand it, use Copy, then Delete, then Undo — the row returns.
+- [ ] While a ten-minute file is transcribing, dictate a sentence into TextEdit: it is inserted
+      before the 20-second processing timeout, and the file then completes with continuous
+      timestamps and no missing/repeated words at window boundaries (#145).
 - [ ] Settings › Privacy: turn encryption **off** → existing rows read "Encrypted — …" → turn it
       back **on** → they are readable again.
 - [ ] Settings › Audio: set silence-stop to 5 s, switch to hands-free, dictate — the capture ends

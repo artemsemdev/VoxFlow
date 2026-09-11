@@ -14,6 +14,55 @@ struct FakeDecoder: AudioDecoding {
 struct FileTranscriberTests {
     let url = URL(fileURLWithPath: "/tmp/interview-raw.m4a")
 
+    @Test("long files yield the engine between bounded windows and preserve absolute timestamps")
+    func boundedWindows() async throws {
+        let samples = (0..<400_000).map { Float($0 % 100) / 100 }
+        let engine = WindowRecordingEngine()
+        let transcriber = FileTranscriber(decoder: FakeDecoder(result: .success(AudioSamples(samples))), engine: engine, modelID: "m")
+        let progress = Progress()
+        let document = try await transcriber.transcribe(url, options: TranscriptionOptions()) { progress.append($0) }
+        #expect(engine.calls.map { $0.audio.duration } == [10, 10, 5])
+        #expect(engine.calls.flatMap { $0.audio.samples } == samples)
+        #expect(engine.detectionDurations == [25])
+        #expect(document.transcript.segments.map(\.start) == [0, 10, 20])
+        #expect(document.transcript.segments.map(\.end) == [10, 20, 25])
+        #expect(engine.calls.allSatisfy { $0.options.promptContext == nil })
+        #expect(document.audioDuration == 25 && document.modelID == "m" && document.sourceURL == url)
+        #expect(progress.values == progress.values.sorted() && progress.values.last == 1)
+    }
+
+    @Test("tails below 200ms stay with the previous window, including Whisper's mel-frame rounding boundary",
+          arguments: [1, 1599, 1600, 1799, 3199, 3200])
+    func tinyTail(samples tail: Int) async throws {
+        let engine = WindowRecordingEngine()
+        let samples = [Float](repeating: 0, count: 320_000 + tail)
+        let transcriber = FileTranscriber(decoder: FakeDecoder(result: .success(AudioSamples(samples))), engine: engine, modelID: "m")
+        _ = try await transcriber.transcribe(url, options: TranscriptionOptions(language: "en")) { _ in }
+        let expected = tail < 3200 ? [160_000, 160_000 + tail] : [160_000, 160_000, tail]
+        #expect(engine.calls.map { $0.audio.samples.count } == expected)
+    }
+
+    @Test("auto detection retains Whisper's first thirty seconds independently of transcription windows")
+    func detectionWindow() async throws {
+        let engine = WindowRecordingEngine()
+        let transcriber = FileTranscriber(decoder: FakeDecoder(result: .success(AudioSamples([Float](repeating: 0, count: 45 * 16_000)))),
+                                          engine: engine, modelID: "m")
+        _ = try await transcriber.transcribe(url, options: TranscriptionOptions()) { _ in }
+        #expect(engine.detectionDurations == [30])
+        #expect(engine.calls.allSatisfy { $0.options.language == "en" })
+    }
+
+    @Test("a quiet boundary is preferred to cutting through speech at ten seconds")
+    func quietBoundary() async throws {
+        var samples = [Float](repeating: 0.1, count: 400_000)
+        samples.replaceSubrange(128_000..<134_400, with: repeatElement(Float(0), count: 6400))
+        let engine = WindowRecordingEngine()
+        let transcriber = FileTranscriber(decoder: FakeDecoder(result: .success(AudioSamples(samples))), engine: engine, modelID: "m")
+        _ = try await transcriber.transcribe(url, options: TranscriptionOptions(language: "en")) { _ in }
+        #expect(engine.calls.map { $0.audio.samples.count } == [134_400, 160_000, 105_600])
+        #expect(engine.calls.flatMap { $0.audio.samples } == samples)
+    }
+
     @Test("decodes, auto-detects language, streams progress and builds the document")
     func happyPath() async throws {
         let engine = FakeSpeechEngine(script: [
@@ -60,6 +109,28 @@ struct FileTranscriberTests {
     func noModel() async {
         let transcriber = FileTranscriber(decoder: FakeDecoder(result: .success(AudioSamples([0]))), engine: FakeSpeechEngine(script: []), modelID: "m")
         await #expect(throws: FileTranscriptionError.noModelInstalled) { _ = try await transcriber.transcribe(url, options: TranscriptionOptions(language: "en")) { _ in } }
+    }
+}
+
+private final class WindowRecordingEngine: SpeechEngine, Sendable {
+    struct Call: Sendable { let audio: AudioSamples; let options: TranscriptionOptions }
+    private let recorded = Mutex<[Call]>([])
+    private let detections = Mutex<[Double]>([])
+    var calls: [Call] { recorded.withLock { $0 } }
+    var detectionDurations: [Double] { detections.withLock { $0 } }
+    func load(modelAt url: URL) async throws {}
+    func detectLanguage(in audio: AudioSamples) async throws -> LanguageDetection {
+        detections.withLock { $0.append(audio.duration) }
+        return LanguageDetection(code: "en", confidence: 1)
+    }
+    func transcribe(_ audio: AudioSamples, options: TranscriptionOptions) -> AsyncThrowingStream<SegmentEvent, Error> {
+        recorded.withLock { $0.append(Call(audio: audio, options: options)) }
+        return AsyncThrowingStream { continuation in
+            continuation.yield(.progress(0.5))
+            continuation.yield(.segment(TranscriptSegment(start: 0, end: audio.duration, text: "window")!))
+            continuation.yield(.progress(1))
+            continuation.finish()
+        }
     }
 }
 

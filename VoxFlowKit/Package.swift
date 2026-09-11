@@ -51,7 +51,7 @@ let package = Package(
         .testTarget(name: "VoxFlowCoreTests", dependencies: ["VoxFlowCore", "VoxFlowTestSupport"]),
         .testTarget(name: "VoxFlowAudioTests", dependencies: ["VoxFlowAudio", "VoxFlowTestSupport"],
                     resources: [.copy("Fixtures")]),
-        .testTarget(name: "VoxFlowSpeechTests", dependencies: ["VoxFlowSpeech", "VoxFlowAudio", "VoxFlowTestSupport", "VoxFlowDictation"],
+        .testTarget(name: "VoxFlowSpeechTests", dependencies: ["VoxFlowSpeech", "VoxFlowAudio", "VoxFlowTestSupport", "VoxFlowDictation", "VoxFlowFiles"],
                     resources: [.copy("Fixtures")]),
         .testTarget(name: "VoxFlowModelsTests", dependencies: ["VoxFlowModels", "VoxFlowTestSupport"]),
         .testTarget(name: "VoxFlowFilesTests", dependencies: ["VoxFlowFiles", "VoxFlowTestSupport"]),
