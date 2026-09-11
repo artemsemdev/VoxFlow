@@ -41,7 +41,8 @@ any app, style cleanup with a local LLM and an MCP server follow in 2.x (see the
 - VoxFlow's own window is frontmost at launch, so click into the text field you want to dictate
   into (e.g. TextEdit) before the first fn press, or the dictation lands on the clipboard instead.
 - History page: search past dictations and filter by app or date, expand a row for the full
-  transcript, Edit, Copy, Delete with Undo; the expanded row shows the resolved style. Settings › Hotkeys records
+  transcript, Edit, Copy, Delete with Undo; right-click an inserted word to add it to Dictionary.
+  The expanded row shows the resolved style. Settings › Hotkeys records
   Push-to-talk, Hands-free, Cancel and Re-insert last bindings, checks known system/VoxFlow conflicts,
   and updates the live monitor and HUD hints. Re-insert uses a fresh privacy-checked target and
   supports the current session with history disabled. fn guidance opens Keyboard settings. Audio
