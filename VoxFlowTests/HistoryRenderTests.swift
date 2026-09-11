@@ -139,6 +139,31 @@ struct HistoryRenderTests {
         try Self.writePNG(image, to: directory.appendingPathComponent("History-restyle-menu.png"))
     }
 
+    @Test("expanded detail has the white surface and column separator drawn in canvas 2e")
+    func cardStructure() throws {
+        let record = DictationRecord(id: 1, text: "Inserted words", rawText: "Spoken words",
+            appName: "Mail", style: "formal", language: "en", duration: 1, words: 2, createdAt: Date())
+        let renderer = ImageRenderer(content: HistoryDetailView(record: record, model: makeBundle().vm)
+            .frame(width: 860, height: 230).background(Color.white).environment(\.colorScheme, .light))
+        renderer.scale = 2
+        let image = try #require(renderer.nsImage)
+        let directory = Self.rendersDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try Self.writePNG(image, to: directory.appendingPathComponent("History-card-structure.png"))
+        let tiff = try #require(image.tiffRepresentation)
+        let bitmap = try #require(NSBitmapImageRep(data: tiff))
+        let scale = CGFloat(bitmap.pixelsWide) / 860
+        func red(at x: Int) throws -> CGFloat {
+            try #require(bitmap.colorAt(x: Int(CGFloat(x) * scale), y: Int(110 * scale))?
+                .usingColorSpace(.deviceRGB)).redComponent
+        }
+        // Samples avoid text: plain white within the left column, then the 6% black separator
+        // through the middle gutter. A narrow band tolerates the separator's pixel alignment.
+        #expect(try red(at: 200) > 0.99)
+        let divider = try #require(try (428...431).map { try red(at: $0) }.min())
+        #expect(divider > 0.90 && divider < 0.96)
+    }
+
     @Test("renders app and date filter choices using the live popover content")
     func renderFilters() async throws {
         let directory = Self.rendersDirectory()
@@ -152,6 +177,25 @@ struct HistoryRenderTests {
             let image = try #require(renderer.nsImage)
             try Self.writePNG(image, to: directory.appendingPathComponent("History-filter-\(name).png"))
         }
+    }
+
+    @Test("expanded card header wraps the transcript instead of truncating it")
+    func expandedHeaderWraps() throws {
+        let vm = makeBundle().vm
+        vm.toggleExpanded(id: 1)
+        let record = DictationRecord(id: 1,
+            text: String(repeating: "Please send the revised numbers before Thursday afternoon. ", count: 4),
+            rawText: "Please send the numbers", appName: "Mail", style: "formal", language: "en",
+            duration: 30, words: 36, createdAt: Date())
+        let renderer = ImageRenderer(content: HistoryRowView(record: record, model: vm)
+            .frame(width: 860).background(Color.white).environment(\.colorScheme, .light))
+        renderer.scale = 2
+        let image = try #require(renderer.nsImage)
+        // Four sentences need multiple lines in the space beside the tile and actions.
+        #expect(image.size.height > 80)
+        let directory = Self.rendersDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try Self.writePNG(image, to: directory.appendingPathComponent("History-long-header.png"))
     }
 
     /// Native popover chrome needs an interactive computer capture. Run this fixture with both
@@ -207,24 +251,30 @@ struct HistoryRenderTests {
             .write(to: directory.appendingPathComponent("History-\(name).png"))
     }
 
-    @Test("renders the native inline editor and failed-save draft", arguments: [false, true])
-    func renderEditor(saveFails: Bool) async throws {
-        let bundle = makeBundle(saveFails: saveFails)
+    @Test("renders the native card, inline editor and failed-save draft in both appearances",
+          arguments: ["expanded-card", "inline-edit", "edit-error"], [false, true])
+    func renderNativeCard(state: String, dark: Bool) async throws {
+        let bundle = makeBundle(saveFails: state == "edit-error")
         await seed(bundle)
         await bundle.vm.load()
         let record = try #require(bundle.vm.records.first)
-        bundle.vm.beginEditing(record)
-        bundle.vm.editedText = "Hi Priya, attaching the corrected NDA. Let me know if legal needs anything else."
-        if saveFails { await bundle.vm.saveEdit() }
+        bundle.vm.toggleExpanded(id: record.id)
+        if state != "expanded-card" {
+            bundle.vm.beginEditing(record)
+            bundle.vm.editedText = "Hi Priya, attaching the corrected NDA. Let me know if legal needs anything else."
+            if state == "edit-error" { await bundle.vm.saveEdit() }
+        }
         // Host the production view in AppKit so the native text editor is captured too.
         // An opaque background keeps secondary labels visible in the exported PNG.
-        let content = HistoryDetailView(record: record, model: bundle.vm)
-            .frame(width: 860, height: 230).background(Color.white).environment(\.colorScheme, .light)
+        let content = HistoryCardView(record: record, model: bundle.vm)
+            .frame(width: 860, height: 300)
+            .background(dark ? Color(white: 0.1) : .white)
+            .environment(\.colorScheme, dark ? .dark : .light)
         let view = NSHostingView(rootView: content)
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 860, height: 230),
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 860, height: 300),
                               styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
-        window.appearance = NSAppearance(named: .aqua)
+        window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
         view.appearance = window.appearance
         window.contentView = view
         defer { window.close() }
@@ -232,7 +282,7 @@ struct HistoryRenderTests {
         view.layoutSubtreeIfNeeded()
         let directory = Self.rendersDirectory()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        try Self.captureNative(view, name: saveFails ? "edit-error" : "inline-edit", directory: directory)
+        try Self.captureNative(view, name: state + (dark ? "-dark" : ""), directory: directory)
     }
 
     private static func rendersDirectory() -> URL {
