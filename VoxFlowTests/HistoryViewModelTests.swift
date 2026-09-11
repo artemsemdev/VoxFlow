@@ -58,10 +58,14 @@ struct HistoryViewModelTests {
         /// (`AppServices` always passes the real `services.restyler`).
         func vm(pasteboard: any Pasteboard = FakePasteboard(), restyler: Restyler? = nil) -> HistoryViewModel {
             if let restyler {
-                return HistoryViewModel(service: service, settings: settings, navigation: navigation, clock: clock,
+                let model = HistoryViewModel(service: service, settings: settings, navigation: navigation, clock: clock,
                                         pasteboard: pasteboard, restyler: restyler)
+                model.dateRange = .allTime
+                return model
             }
-            return HistoryViewModel(service: service, settings: settings, navigation: navigation, clock: clock, pasteboard: pasteboard)
+            let model = HistoryViewModel(service: service, settings: settings, navigation: navigation, clock: clock, pasteboard: pasteboard)
+            model.dateRange = .allTime // These existing tests use retained epoch fixtures, independent of date filtering.
+            return model
         }
 
         @discardableResult

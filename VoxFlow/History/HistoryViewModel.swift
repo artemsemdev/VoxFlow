@@ -10,6 +10,22 @@ import VoxFlowStyling
 /// it; nothing else decides.
 @Observable @MainActor
 final class HistoryViewModel {
+    enum DateRange: String, CaseIterable {
+        case today = "Today", thisWeek = "This week", thisMonth = "This month", allTime = "All time"
+
+        func includes(_ date: Date, now: Date, calendar: Calendar) -> Bool {
+            let component: Calendar.Component
+            switch self {
+            case .today: component = .day
+            case .thisWeek: component = .weekOfYear
+            case .thisMonth: component = .month
+            case .allTime: return true
+            }
+            guard let interval = calendar.dateInterval(of: component, for: now) else { return false }
+            return date >= interval.start && date < interval.end
+        }
+    }
+
     enum EmptyState: Equatable {
         case noDictations
         case historyOff
@@ -24,15 +40,24 @@ final class HistoryViewModel {
 
     static let debounceInterval: TimeInterval = 0.15
     static let undoWindow: TimeInterval = 6
-    static let fetchLimit = 500
     static let unreadableMessage = "Encrypted — turn on 'Encrypt history at rest' to read"
 
     private(set) var records: [DictationRecord] = []
+    private var allRecords: [DictationRecord] = []
+    private var searchResults: [DictationRecord] = []
+    private var appliedQuery = ""
+    private var searchGeneration = 0
+    private var deletionTask: Task<Void, Never>?
+    var selectedApp: String? { didSet { applyFilters() } }
+    var dateRange: DateRange { didSet { applyFilters() } }
+    var availableApps: [String] {
+        Array(Set(allRecords.map(Self.appLabel))).sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
     var query: String = "" {
         didSet { scheduleSearch() }
     }
     var expandedID: Int64?
-    private(set) var pendingDeletion: (record: DictationRecord, index: Int)?
+    private(set) var pendingDeletion: (record: DictationRecord, index: Int, query: String)?
     var toastVisible: Bool { pendingDeletion != nil }
     /// Bound by `HistoryPage`'s `.sheet(isPresented:)` for the "Try it in a scratchpad" button
     /// (design 2d). The sheet itself (`ScratchpadSheet.onAppear`/`onDisappear`) enters/leaves
@@ -50,6 +75,10 @@ final class HistoryViewModel {
     private let navigation: Navigation
     private let clock: any MonotonicClock
     private let pasteboard: any Pasteboard
+    private let calendar: Calendar
+    private let now: () -> Date
+    private let deleteRecord: (Int64) async -> Void
+    private let searchRecords: (String) async -> [DictationRecord]
     /// Injected (not built here) so tests swap in a `FakeLLMBackend`-backed one — defaults to a
     /// rule-only styler so existing call sites (and every test that doesn't care about Re-style)
     /// keep compiling unchanged.
@@ -64,13 +93,22 @@ final class HistoryViewModel {
          pasteboard: any Pasteboard = SystemPasteboard(),
          restyler: Restyler = Restyler(styler: RuleStyler(),
                                        settings: StylingSettingsBox(StylingSettingsSnapshot(
-                                           defaultStyle: .casual, removeFillers: true, autoPunctuate: true, snippetSayPrefix: false)))) {
+                                           defaultStyle: .casual, removeFillers: true, autoPunctuate: true, snippetSayPrefix: false))),
+         calendar: Calendar = .current, now: @escaping () -> Date = Date.init,
+         initialDateRange: DateRange = .allTime,
+         deleteRecord: ((Int64) async -> Void)? = nil,
+         searchRecords: ((String) async -> [DictationRecord])? = nil) {
         self.service = service
         self.settings = settings
         self.navigation = navigation
         self.clock = clock
         self.pasteboard = pasteboard
         self.restyler = restyler
+        self.calendar = calendar
+        self.now = now
+        self.dateRange = initialDateRange
+        self.deleteRecord = deleteRecord ?? { await service.delete(id: $0) }
+        self.searchRecords = searchRecords ?? { await service.search($0) }
     }
 
     deinit {
@@ -89,7 +127,7 @@ final class HistoryViewModel {
         }
         guard settings.keepHistory else { return .historyOff }
         guard records.isEmpty else { return nil }
-        return query.isEmpty ? .noDictations : .noResults(query)
+        return query.isEmpty && allRecords.isEmpty ? .noDictations : .noResults(query)
     }
 
     /// I-4: `HistoryService.Status.disabled(reason:)`'s reason is written for the log
@@ -110,14 +148,14 @@ final class HistoryViewModel {
     // MARK: Actions
 
     func load() async {
-        records = await service.fetch(limit: Self.fetchLimit)
+        await search()
     }
 
     /// Re-fetches respecting whatever `query` currently holds — used by the page's `.task` (fires on
     /// every navigation back to History) so it doesn't clobber an in-progress search with the
     /// unfiltered list while the search field still shows a query.
     func refresh() async {
-        if query.isEmpty { await load() } else { await search() }
+        await search()
     }
 
     func toggleExpanded(id: Int64) {
@@ -131,11 +169,20 @@ final class HistoryViewModel {
     /// Removes the row locally right away (design T-01: "row collapses immediately"), issues the
     /// store delete, and arms a 6 s undo window.
     func delete(_ record: DictationRecord) {
-        guard let index = records.firstIndex(where: { $0.id == record.id }) else { return }
-        records.remove(at: index)
+        guard records.contains(where: { $0.id == record.id }),
+              let index = searchResults.firstIndex(where: { $0.id == record.id }) else { return }
+        searchGeneration += 1
+        records.removeAll { $0.id == record.id }
+        searchResults.removeAll { $0.id == record.id }
+        allRecords.removeAll { $0.id == record.id }
         if expandedID == record.id { expandedID = nil }
-        pendingDeletion = (record, index)
-        Task { await service.delete(id: record.id) }
+        pendingDeletion = (record, index, appliedQuery)
+        let previous = deletionTask
+        deletionTask = Task { [deleteRecord] in
+            await previous?.value
+            await deleteRecord(record.id)
+        }
+        scheduleSearch(debounce: false)
         armUndoTimer()
     }
 
@@ -145,16 +192,38 @@ final class HistoryViewModel {
         guard let pending = pendingDeletion else { return }
         undoTask.withLock { $0?.cancel(); $0 = nil }
         pendingDeletion = nil
+        let deletion = deletionTask
         Task { [weak self] in
             guard let self else { return }
+            await deletion?.value
             guard let restored = await self.service.reinsert(pending.record) else { return }
-            let index = min(pending.index, self.records.count)
-            self.records.insert(restored, at: index)
+            await self.refresh()
+            // Fresh IDs sort ahead of tied timestamps. Preserve the original position within the
+            // same query, then apply the user's current app/date filters to the restored cache.
+            if self.appliedQuery == pending.query, self.query == pending.query,
+               let index = self.searchResults.firstIndex(where: { $0.id == restored.id }) {
+                self.searchResults.remove(at: index)
+                self.searchResults.insert(restored, at: min(pending.index, self.searchResults.count))
+                self.applyFilters()
+            }
         }
     }
 
     func clearSearch() {
         query = ""
+    }
+
+    func searchAllTime() {
+        dateRange = .allTime
+    }
+
+    static func appLabel(_ record: DictationRecord) -> String {
+        guard let name = record.appName, !name.isEmpty else { return "Unknown app" }
+        return name
+    }
+
+    static func noResultsTitle(query: String) -> String {
+        query.isEmpty ? "No dictations match these filters" : "No dictations match “\(query)”"
     }
 
     func openPrivacySettings() {
@@ -180,7 +249,8 @@ final class HistoryViewModel {
 
     // MARK: Search debounce
 
-    private func scheduleSearch() {
+    private func scheduleSearch(debounce: Bool = true) {
+        searchGeneration += 1
         searchTask.withLock { $0?.cancel() }
         let task = Task { [weak self] in
             guard let self else { return }
@@ -188,7 +258,7 @@ final class HistoryViewModel {
             // entirely — waiting 150 ms here would show the wrong empty state in between: `records`
             // still holds the (typically empty) filtered results while `emptyState` already reads
             // `query.isEmpty`, so the view would flash "No dictations yet" before the real list returns.
-            if !self.query.isEmpty {
+            if debounce, !self.query.isEmpty {
                 do { try await self.clock.sleep(for: Self.debounceInterval) } catch { return }
                 guard !Task.isCancelled else { return }
             }
@@ -198,10 +268,30 @@ final class HistoryViewModel {
     }
 
     private func search() async {
+        searchGeneration += 1
+        let generation = searchGeneration
         let text = query
-        let results = text.isEmpty ? await service.fetch(limit: Self.fetchLimit) : await service.search(text)
-        guard query == text else { return }   // superseded by a newer query while this one awaited
-        records = results
+        await deletionTask?.value
+        guard generation == searchGeneration, !Task.isCancelled else { return }
+        // A blank search includes unreadable rows and the full app catalog, including older apps
+        // outside the current date range. Text matching/decryption stays in DictationStore.search.
+        let catalog = await searchRecords("")
+        guard generation == searchGeneration, !Task.isCancelled else { return }
+        let results = text.isEmpty ? catalog : await searchRecords(text)
+        guard generation == searchGeneration, query == text, !Task.isCancelled else { return }
+        allRecords = catalog
+        searchResults = results
+        appliedQuery = text
+        applyFilters()
+    }
+
+    private func applyFilters() {
+        let date = now()
+        records = searchResults.filter {
+            (selectedApp == nil || Self.appLabel($0) == selectedApp)
+                && dateRange.includes($0.createdAt, now: date, calendar: calendar)
+        }
+        if let expandedID, !records.contains(where: { $0.id == expandedID }) { self.expandedID = nil }
     }
 
     // MARK: Undo window
