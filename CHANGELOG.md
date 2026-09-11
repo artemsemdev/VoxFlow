@@ -103,6 +103,8 @@ versioning.
 - CI selects the arm64 Mac destination and rejects warnings from build/test logs regardless of letter case.
 - Style-model loading rejects missing, non-file and unreadable paths before starting the native
   backend, avoiding unnecessary GPU initialization and Metal compiler warnings in failure-path tests.
+- Long file jobs yield the speech engine between bounded windows, with queued dictation taking
+  priority instead of waiting for the entire file to finish.
 - Settings › General's appearance and Flow Bar position now apply at launch, not only once
   Settings has been opened at least once.
 - The Flow Bar HUD and the menu bar's "Paused until 10:41" now read the same clock instead of two
