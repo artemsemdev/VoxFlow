@@ -48,6 +48,15 @@ state with I/O.
   registration's place.
 - Capture starts on fn-down, before the hold/double-tap decision resolves, so no
   syllable is lost; a lone short tap discards the buffer silently.
+- Dedicated shortcuts (#162) carry their selected mode into the same reducer: push-to-talk starts
+  immediately and finishes on release; hands-free starts on one press and finishes on the next.
+  They use the same preflight gates, capture, insertion and history effects. A press assigned to
+  the other mode cannot change an active capture. The shared fn hold/double-tap path retains its
+  timing. Hold timers only resolve undecided gestures, so a timer left after a failed fn attempt
+  cannot change the mode of a dedicated retry.
+  A stop received while the model loads is remembered and finishes the capture when loading
+  completes. The controller obtains preflight only when starting: stopping must preserve the
+  insertion target captured at the start. An event without preflight can stop but cannot start.
 - Live audio is cut into windows by `WindowPlanner` — at least 3 s, ending in ≥ 0.4 s
   of trailing silence, or cut at 10 s regardless — and each window is transcribed by
   `WindowedTranscriber` against `SpeechEngine`, with the previous window's decoded
