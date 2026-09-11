@@ -69,6 +69,13 @@ final class HistoryViewModel {
     /// (see `restyle(_:to:)`) and what `HistoryRowView` reads to swap the chevron for a spinner and
     /// disable the action strip.
     private(set) var restylingID: Int64?
+    private(set) var editingID: Int64?
+    var editedText = ""
+    private(set) var editError: String?
+    private(set) var isSavingEdit = false
+    private var originalEditText = ""
+    var canSaveEdit: Bool { editingID != nil && !isSavingEdit && editedText != originalEditText }
+    var editSaveTitle: String { isSavingEdit ? "Saving…" : "Save" }
 
     private let service: HistoryService
     private let settings: DictationSettings
@@ -79,6 +86,7 @@ final class HistoryViewModel {
     private let now: () -> Date
     private let deleteRecord: (Int64) async -> Void
     private let searchRecords: (String) async -> [DictationRecord]
+    private let updateText: (Int64, String) async -> DictationRecord?
     /// Injected (not built here) so tests swap in a `FakeLLMBackend`-backed one — defaults to a
     /// rule-only styler so existing call sites (and every test that doesn't care about Re-style)
     /// keep compiling unchanged.
@@ -97,7 +105,8 @@ final class HistoryViewModel {
          calendar: Calendar = .current, now: @escaping () -> Date = Date.init,
          initialDateRange: DateRange = .allTime,
          deleteRecord: ((Int64) async -> Void)? = nil,
-         searchRecords: ((String) async -> [DictationRecord])? = nil) {
+         searchRecords: ((String) async -> [DictationRecord])? = nil,
+         updateText: ((Int64, String) async -> DictationRecord?)? = nil) {
         self.service = service
         self.settings = settings
         self.navigation = navigation
@@ -109,6 +118,7 @@ final class HistoryViewModel {
         self.dateRange = initialDateRange
         self.deleteRecord = deleteRecord ?? { await service.delete(id: $0) }
         self.searchRecords = searchRecords ?? { await service.search($0) }
+        self.updateText = updateText ?? { await service.updateText(id: $0, text: $1) }
     }
 
     deinit {
@@ -159,6 +169,7 @@ final class HistoryViewModel {
     }
 
     func toggleExpanded(id: Int64) {
+        guard editingID == nil else { return }
         expandedID = expandedID == id ? nil : id
     }
 
@@ -169,8 +180,11 @@ final class HistoryViewModel {
     /// Removes the row locally right away (design T-01: "row collapses immediately"), issues the
     /// store delete, and arms a 6 s undo window.
     func delete(_ record: DictationRecord) {
-        guard records.contains(where: { $0.id == record.id }),
-              let index = searchResults.firstIndex(where: { $0.id == record.id }) else { return }
+        guard !isSavingEdit, records.contains(where: { $0.id == record.id }) else { return }
+        // An open draft can remain visible outside the query. Its restored row will still pass
+        // through the current filters, so it needs no position in the nonmatching search results.
+        let index = searchResults.firstIndex(where: { $0.id == record.id }) ?? 0
+        if editingID == record.id { cancelEdit(refresh: false) }
         searchGeneration += 1
         records.removeAll { $0.id == record.id }
         searchResults.removeAll { $0.id == record.id }
@@ -226,6 +240,50 @@ final class HistoryViewModel {
         query.isEmpty ? "No dictations match these filters" : "No dictations match “\(query)”"
     }
 
+    func canEdit(_ record: DictationRecord) -> Bool {
+        !record.isUnreadable && restylingID == nil && editingID == nil && !isSavingEdit
+    }
+
+    func beginEditing(_ record: DictationRecord) {
+        guard canEdit(record) else { return }
+        searchTask.withLock { $0?.cancel() }
+        editingID = record.id
+        expandedID = record.id
+        editedText = record.text
+        originalEditText = record.text
+        editError = nil
+    }
+
+    func cancelEdit(refresh: Bool = true) {
+        guard !isSavingEdit else { return }
+        editingID = nil
+        editedText = ""
+        originalEditText = ""
+        editError = nil
+        applyFilters()
+        if refresh { scheduleSearch() }
+    }
+
+    func saveEdit() async {
+        guard canSaveEdit, let id = editingID else { return }
+        isSavingEdit = true
+        defer { isSavingEdit = false }
+        guard let updated = await updateText(id, editedText) else {
+            editError = "Couldn’t save changes. Your edit is still here."
+            return
+        }
+        // A newer query can supersede refresh. Publish the persisted value before enabling other
+        // actions so Delete/Undo cannot snapshot text from before the successful correction.
+        records = records.map { $0.id == id ? updated : $0 }
+        searchResults = searchResults.map { $0.id == id ? updated : $0 }
+        allRecords = allRecords.map { $0.id == id ? updated : $0 }
+        editingID = nil
+        editedText = ""
+        originalEditText = ""
+        editError = nil
+        await refresh()
+    }
+
     func openPrivacySettings() {
         navigation.page = .settings
         navigation.settingsTab = .privacy
@@ -238,7 +296,7 @@ final class HistoryViewModel {
     /// which has no raw text to rewrite. `updateStyled` returning `nil` (the row was deleted out from
     /// under this call) is silently skipped: the canvas has no error UI for Re-style.
     func restyle(_ record: DictationRecord, to style: TextStyle) async {
-        guard restylingID == nil, !record.isUnreadable else { return }
+        guard restylingID == nil, editingID == nil, !record.isUnreadable else { return }
         restylingID = record.id
         defer { restylingID = nil }
         let text = await restyler.restyle(rawText: record.rawText, to: style)
@@ -282,16 +340,26 @@ final class HistoryViewModel {
         allRecords = catalog
         searchResults = results
         appliedQuery = text
+        reconcileEdit()
         applyFilters()
     }
 
     private func applyFilters() {
+        // Keep Save/Cancel reachable if filters or an earlier search change during editing.
+        let edited = records.first { $0.id == editingID }
         let date = now()
         records = searchResults.filter {
             (selectedApp == nil || Self.appLabel($0) == selectedApp)
                 && dateRange.includes($0.createdAt, now: date, calendar: calendar)
         }
+        if let edited, !records.contains(where: { $0.id == edited.id }) { records.insert(edited, at: 0) }
         if let expandedID, !records.contains(where: { $0.id == expandedID }) { self.expandedID = nil }
+    }
+
+    /// Search may hide the edited row; only a real deletion may discard its draft on refresh.
+    private func reconcileEdit() {
+        guard let id = editingID, !isSavingEdit, !allRecords.contains(where: { $0.id == id }) else { return }
+        cancelEdit(refresh: false)
     }
 
     // MARK: Undo window
