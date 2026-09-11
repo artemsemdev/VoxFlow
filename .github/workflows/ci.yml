@@ -251,12 +251,12 @@ jobs:
       - name: Build
         run: |
           set -o pipefail
-          xcodebuild -scheme VoxFlow -destination 'platform=macOS' build | tee build.log
+          xcodebuild -xcconfig Build.xcconfig -scheme VoxFlow -destination 'platform=macOS' build | tee build.log
 
       - name: Test
         run: |
           set -o pipefail
-          xcodebuild -scheme VoxFlow -destination 'platform=macOS' test -resultBundlePath TestResults.xcresult | tee test.log
+          xcodebuild -xcconfig Build.xcconfig -scheme VoxFlow -destination 'platform=macOS' test -resultBundlePath TestResults.xcresult | tee test.log
 
       - name: Package tests without Xcode project
         run: swift test

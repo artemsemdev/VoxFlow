@@ -61,3 +61,10 @@ let package = Package(
     ],
     swiftLanguageModes: [.v6]
 )
+
+// Xcode-generated package targets do not inherit the app's warning policy. Apply it to our own
+// source and test targets; dependency packages retain their upstream build settings. This package
+// is consumed as a local path dependency by the app, which permits these compiler flags.
+for target in package.targets where target.type == .regular || target.type == .test {
+    target.swiftSettings = (target.swiftSettings ?? []) + [.unsafeFlags(["-warnings-as-errors"])]
+}

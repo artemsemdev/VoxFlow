@@ -13,6 +13,7 @@ on:
       - 'VoxFlowKit/**'
       - 'VoxFlowTests/**'
       - 'project.yml'
+      - 'Build.xcconfig'
       - '.github/workflows/codeql.yml'
   schedule:
     - cron: '0 6 * * 1'
@@ -77,7 +78,7 @@ jobs:
         if: steps.probe.outputs.has_swift == 'true'
         run: |
           xcodegen generate
-          xcodebuild -scheme VoxFlow -destination 'platform=macOS' build
+          xcodebuild -xcconfig Build.xcconfig -scheme VoxFlow -destination 'platform=macOS' build
           # The app links only VoxFlowCore; build the whole package so CodeQL traces all nine modules.
           swift build --package-path VoxFlowKit
 

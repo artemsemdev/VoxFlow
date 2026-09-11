@@ -12,10 +12,24 @@
 git clone https://github.com/artemsemdev/VoxFlow.git
 cd VoxFlow
 xcodegen generate
-xcodebuild -scheme VoxFlow -destination 'platform=macOS' build test
+xcodebuild -xcconfig Build.xcconfig -scheme VoxFlow -destination 'platform=macOS' build test
 ```
 
 The first build downloads the pinned whisper.cpp XCFramework (~51 MB) into the SwiftPM cache.
+
+The `-xcconfig Build.xcconfig` override sets `LM_SKIP_METADATA_EXTRACTION=YES` for the
+entire build, including Xcode-generated Swift package targets, which do not inherit `project.yml`
+settings. VoxFlow defines no App Intents. This avoids Xcode's "No AppIntents.framework dependency
+found" warnings without hiding diagnostics or adding an unused framework. The project setting also
+covers the app and its test host when building in Xcode. Revisit this setting if App Intents are
+introduced. See [Swift Build's extraction task](https://github.com/swiftlang/swift-build/blob/main/Sources/SWBApplePlatform/AppIntentsMetadataTaskProducer.swift).
+
+Running the full test scheme in Xcode's GUI can still emit package metadata warnings; use the
+command above for warning-free verification. The app's `SWIFT_TREAT_WARNINGS_AS_ERRORS` setting and
+VoxFlowKit's per-target compiler flags enforce warnings-as-errors for our source and tests in both
+build systems. External dependencies keep their upstream build settings. The override does not
+change the signing identity. Standalone SwiftPM runs use
+`swift test` for the same policy.
 
 ## Running the app
 
@@ -143,7 +157,7 @@ certificate instead (#143):
 ## Tests
 
 - Package logic, fast: `cd VoxFlowKit && swift test`
-- Everything, as CI runs it: `xcodebuild -scheme VoxFlow -destination 'platform=macOS' build test`
+- Everything, as CI runs it: `xcodebuild -xcconfig Build.xcconfig -scheme VoxFlow -destination 'platform=macOS' build test`
 - Integration tests that need a real model run only when one is installed and skip otherwise.
 
 ## Notes

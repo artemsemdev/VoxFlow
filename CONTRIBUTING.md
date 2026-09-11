@@ -30,7 +30,7 @@ Contributions must preserve that.
 ```bash
 brew install xcodegen
 xcodegen generate
-xcodebuild -scheme VoxFlow -destination 'platform=macOS' build test   # what CI runs
+xcodebuild -xcconfig Build.xcconfig -scheme VoxFlow -destination 'platform=macOS' build test   # what CI runs
 cd VoxFlowKit && swift test                                             # package only, fast
 ```
 

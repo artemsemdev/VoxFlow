@@ -103,7 +103,7 @@ There are no signed binaries yet; build from source (see [SETUP.md](SETUP.md)).
 
 ```bash
 xcodegen generate                       # creates VoxFlow.xcodeproj (gitignored)
-xcodebuild -scheme VoxFlow -destination 'platform=macOS' build test
+xcodebuild -xcconfig Build.xcconfig -scheme VoxFlow -destination 'platform=macOS' build test
 ```
 
 Package-only tests, no Xcode project needed:
