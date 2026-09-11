@@ -89,6 +89,8 @@ versioning.
   [docs/runbooks/connect-an-mcp-client.md](docs/runbooks/connect-an-mcp-client.md).
 
 ### Fixed
+- Stopping the MCP listener cancels pending binding; old waiting callers cannot restart it or
+  interfere with a later explicit start. Default unit tests no longer probe or bind loopback sockets.
 - Hosted tests no longer construct live app scenes or services, preventing Home and menu-bar
   refreshes from opening the real history database and prompting for its Keychain key.
 - CI selects the arm64 Mac destination and rejects warnings from build/test logs regardless of letter case.

@@ -148,6 +148,41 @@ struct MCPViewModelTests {
         #expect(h.server.stopCount == 1)
     }
 
+    @Test("a cancelled old enable cannot overwrite a newer stop or restart", .timeLimit(.minutes(1)),
+          arguments: [false, true])
+    func staleCancelledEnable(restart: Bool) async throws {
+        let h = try harness()
+        let entered = AsyncStream<Void>.makeStream()
+        var entry = entered.stream.makeAsyncIterator()
+        var pending: CheckedContinuation<Void, any Error>?
+        defer {
+            pending?.resume(throwing: CancellationError())
+            entered.continuation.finish()
+        }
+        h.server.onStart = {
+            try await withCheckedThrowingContinuation { continuation in
+                pending = continuation
+                entered.continuation.yield()
+            }
+        }
+        let old = Task { await h.vm.setEnabled(true) }
+        await entry.next()
+        h.server.onStart = nil
+        await h.vm.setEnabled(false)
+        if restart {
+            h.server.portToReturn = 7332
+            await h.vm.setEnabled(true)
+        }
+        let endpoint = h.vm.boundEndpoint
+        pending?.resume(throwing: CancellationError())
+        pending = nil
+        await old.value
+        #expect(h.vm.enabled == restart)
+        #expect(h.settings.enabled == restart)
+        #expect(h.vm.startFailure == nil)
+        #expect(h.vm.boundEndpoint == endpoint)
+    }
+
     // MARK: refresh (page appear — server may already be running from AppDelegate)
 
     @Test("refresh() re-syncs enabled/boundEndpoint from the server started outside this view model")
