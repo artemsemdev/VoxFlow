@@ -2,13 +2,26 @@ import Foundation
 import VoxFlowCore
 import whisper
 
-/// `SpeechEngine` over whisper.cpp. The C context is touched only on `queue`; the actor
-/// serializes calls and awaits the queue, so long transcriptions never block a cooperative thread.
+/// `SpeechEngine` over whisper.cpp. Native calls stay serial; pending dictation runs before file work.
 public actor WhisperCppEngine: SpeechEngine {
     private let queue = WhisperWorkQueue()
     private var context: ContextBox?
 
     public init() {}
+
+    /// Same loaded model and serial native queue, with lower priority between file windows.
+    public nonisolated var fileEngine: any SpeechEngine { FileEngine(owner: self) }
+
+    private struct FileEngine: SpeechEngine {
+        let owner: WhisperCppEngine
+        func load(modelAt url: URL) async throws { try await owner.load(modelAt: url) }
+        func detectLanguage(in audio: AudioSamples) async throws -> LanguageDetection {
+            try await owner.detectLanguage(in: audio, priority: .file)
+        }
+        func transcribe(_ audio: AudioSamples, options: TranscriptionOptions) -> AsyncThrowingStream<SegmentEvent, Error> {
+            owner.transcribe(audio, options: options, priority: .file)
+        }
+    }
 
     /// Owns the `whisper_context` pointer and frees it when the engine goes away.
     final class ContextBox: @unchecked Sendable {
@@ -47,10 +60,14 @@ public actor WhisperCppEngine: SpeechEngine {
     }
 
     public func detectLanguage(in audio: AudioSamples) async throws -> LanguageDetection {
+        try await detectLanguage(in: audio, priority: .dictation)
+    }
+
+    private func detectLanguage(in audio: AudioSamples, priority: WhisperWorkQueue.Priority) async throws -> LanguageDetection {
         guard let context else { throw SpeechEngineError.modelNotLoaded }
         let samples = audio.samples
         let threads = Int32(WhisperParameters(options: TranscriptionOptions(), availableCores: ProcessInfo.processInfo.activeProcessorCount).threadCount)
-        return try await onQueue {
+        return try await onQueue(priority: priority) {
             var probabilities = [Float](repeating: 0, count: Int(whisper_lang_max_id()) + 1)
             let languageID: Int32 = samples.withUnsafeBufferPointer { buffer in
                 guard whisper_pcm_to_mel(context.pointer, buffer.baseAddress, Int32(buffer.count), threads) == 0 else { return -1 }
@@ -63,6 +80,11 @@ public actor WhisperCppEngine: SpeechEngine {
     }
 
     public nonisolated func transcribe(_ audio: AudioSamples, options: TranscriptionOptions) -> AsyncThrowingStream<SegmentEvent, Error> {
+        transcribe(audio, options: options, priority: .dictation)
+    }
+
+    private nonisolated func transcribe(_ audio: AudioSamples, options: TranscriptionOptions,
+                                       priority: WhisperWorkQueue.Priority) -> AsyncThrowingStream<SegmentEvent, Error> {
         AsyncThrowingStream { continuation in
             // The stream builder runs synchronously on the caller's task, before any suspension. If that
             // task is already cancelled, `AsyncThrowingStream.next()` would otherwise end iteration
@@ -74,7 +96,7 @@ public actor WhisperCppEngine: SpeechEngine {
             }
             let task = Task {
                 do {
-                    try await self.run(audio, options: options, continuation: continuation)
+                    try await self.run(audio, options: options, priority: priority, continuation: continuation)
                     continuation.finish()
                 } catch {
                     continuation.finish(throwing: error)
@@ -84,7 +106,7 @@ public actor WhisperCppEngine: SpeechEngine {
         }
     }
 
-    private func run(_ audio: AudioSamples, options: TranscriptionOptions,
+    private func run(_ audio: AudioSamples, options: TranscriptionOptions, priority: WhisperWorkQueue.Priority,
                      continuation: AsyncThrowingStream<SegmentEvent, Error>.Continuation) async throws {
         guard let context else { throw SpeechEngineError.modelNotLoaded }
         let mapped = WhisperParameters(options: options, availableCores: ProcessInfo.processInfo.activeProcessorCount)
@@ -96,7 +118,8 @@ public actor WhisperCppEngine: SpeechEngine {
         let runState = RunState(continuation: continuation, isCancelled: { cancelFlag.isSet })
 
         try await withTaskCancellationHandler {
-            try await onQueue {
+            try await onQueue(priority: priority) {
+                guard !cancelFlag.isSet else { throw SpeechEngineError.cancelled }
                 var params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY)
                 params.n_threads = Int32(mapped.threadCount)
                 params.print_progress = false
@@ -171,7 +194,8 @@ public actor WhisperCppEngine: SpeechEngine {
     }
 
     /// Runs `body` on the engine's serial queue and resumes when it finishes.
-    private func onQueue<T: Sendable>(_ body: @escaping @Sendable () throws -> T) async throws -> T {
-        try await queue.run(priority: .dictation, body)
+    private func onQueue<T: Sendable>(priority: WhisperWorkQueue.Priority = .dictation,
+                                     _ body: @escaping @Sendable () throws -> T) async throws -> T {
+        try await queue.run(priority: priority, body)
     }
 }

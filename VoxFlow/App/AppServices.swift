@@ -228,7 +228,7 @@ final class AppServices {
         let filesSettings = FilesSettings(store: settingsStore)
         let snapshot = filesSettings.optionsSnapshot
         let modelLoader = ModelLoader(store: modelStore, engine: engine)
-        let transcriber = LazyModelFileTranscriber(loader: modelLoader, store: modelStore, engine: engine, decoder: AudioDecoder())
+        let transcriber = LazyModelFileTranscriber(loader: modelLoader, store: modelStore, engine: engine.fileEngine, decoder: AudioDecoder())
         let durations = AudioDurationReader()
         let queue = FileQueue(transcriber: transcriber, durations: durations,
                               supportedExtensions: SupportedAudio.extensions,

@@ -2,6 +2,8 @@ import Foundation
 import Testing
 import VoxFlowAudio
 import VoxFlowCore
+import VoxFlowDictation
+import VoxFlowFiles
 @testable import VoxFlowSpeech
 
 /// Runs the real engine when a Whisper model is installed on this machine; skipped otherwise.
@@ -17,6 +19,57 @@ enum InstalledModel {
 @Suite("WhisperCppEngine (RequiresModel)", .enabled(if: InstalledModel.url != nil,
        "No Whisper model in ~/Library/Application Support/VoxFlow/Models; download one via the app or the spike"))
 struct WhisperCppEngineIntegrationTests {
+    @Test("file windows and dictation transcribe correctly through one loaded native model", .timeLimit(.minutes(1)))
+    func sharedModelRoles() async throws {
+        let fixture = Bundle.module.url(forResource: "attention-10s", withExtension: "wav", subdirectory: "Fixtures")!
+        let audio = try AudioDecoder().decode(fixture)
+        let engine = WhisperCppEngine()
+        try await engine.load(modelAt: InstalledModel.url!)
+        let (progress, continuation) = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        let files = FileTranscriber(decoder: RepeatedAudio(audio: audio), engine: engine.fileEngine, modelID: "fixture")
+        let file = Task {
+            defer { continuation.finish() }
+            return try await files.transcribe(fixture, options: TranscriptionOptions(language: "en")) {
+                if $0 > 0.05 && $0 < 1 { continuation.yield(()) }
+            }
+        }
+        defer { file.cancel() }
+        var iterator = progress.makeAsyncIterator()
+        guard await iterator.next() != nil else {
+            _ = try await file.value
+            Issue.record("file completed without intermediate progress")
+            return
+        }
+        let dictation = try await WindowedTranscriber(engine: engine).transcribe(AsyncStream { c in
+            c.yield(AudioChunk(samples: audio.samples)); c.finish()
+        }, options: TranscriptionOptions(language: "en")) { _ in }
+        let document = try await file.value
+        continuation.finish()
+        var batch = ""
+        for try await event in engine.transcribe(try RepeatedAudio(audio: audio).decode(fixture), options: TranscriptionOptions(language: "en")) {
+            if case .segment(let segment) = event { batch += segment.text }
+        }
+        #expect(dictation.text.lowercased().contains("attention"))
+        #expect(document.transcript.plainText.lowercased().contains("attention"))
+        #expect(document.transcript.segments.map(\.start) == document.transcript.segments.map(\.start).sorted())
+        #expect(abs(document.audioDuration - audio.duration * 3) < 1 / AudioSamples.sampleRate)
+        #expect(document.transcript.plainText.lowercased().components(separatedBy: "attention").count - 1 == 3,
+                "File: \(document.transcript.plainText); batch: \(batch); dictation: \(dictation.text)")
+        #expect(Self.fixtureWords(document.transcript.plainText) == Self.fixtureWords(batch))
+    }
+
+    // The fixture pronounces "we're"/"we are" and "why"/"Y" alike; preserve every other word.
+    private static func fixtureWords(_ text: String) -> [Substring] {
+        text.lowercased().replacingOccurrences(of: "we're", with: "we are")
+            .replacingOccurrences(of: "we’re", with: "we are").replacingOccurrences(of: " y fixed", with: " why fixed")
+            .split { !$0.isLetter && !$0.isNumber }
+    }
+
+    private struct RepeatedAudio: AudioDecoding {
+        let audio: AudioSamples
+        func decode(_ url: URL) throws -> AudioSamples { AudioSamples(audio.samples + audio.samples + audio.samples) }
+    }
+
     @Test("transcribes the fixture, streams ordered segments and detects English")
     func transcribesFixture() async throws {
         let fixture = Bundle.module.url(forResource: "attention-10s", withExtension: "wav", subdirectory: "Fixtures")!
