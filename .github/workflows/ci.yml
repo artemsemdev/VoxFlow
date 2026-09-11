@@ -69,6 +69,8 @@ jobs:
             app:
               - 'VoxFlow/**'
               - 'VoxFlowTests/**'
+              # This package fixture is also compiled by the hosted test target.
+              - 'VoxFlowKit/Tests/VoxFlowDictationTests/FakeDictationTranscriber.swift'
               - 'project.yml'
             workflow:
               - '.github/workflows/ci.yml'
