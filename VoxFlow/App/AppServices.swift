@@ -365,7 +365,7 @@ final class AppServices {
             onFn: { dictation.fn($0) },
             onEscape: { dictation.escape() },
             onAnyKey: { dictation.anyKey() },
-            isHUDActive: { dictation.isHUDActive }
+            isHUDActive: { dictation.shortcutContext.hudActive }
         )
 
         let onboardingState = OnboardingState(store: settingsStore)
