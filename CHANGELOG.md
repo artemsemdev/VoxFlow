@@ -34,6 +34,7 @@ versioning.
 - Sidebar request-byte counter persists URLSession measurements from model downloads; its help
   explains the tracking start and excluded traffic.
 - History cards match the canvas surfaces, compact actions and divided transcript columns.
+- The macOS application and Dock now use the blue four-bar VoxFlow icon from the design canvas.
 - History app and calendar-date filters, plus "Search all time" without clearing the query or app.
 - Files results: Sentences / Short / Long segmentation controls preview, search, cleanup and all
   exports without re-transcribing. Original transcript data remains available when switching back.
@@ -124,6 +125,8 @@ versioning.
   [docs/runbooks/connect-an-mcp-client.md](docs/runbooks/connect-an-mcp-client.md).
 
 ### Fixed
+- Files previews follow the selected output format, retain the source filename extension, and keep
+  a compact header. Searching the preview leaves the complete copy/export transcript intact.
 - Live dictation limits model readiness and styling to the remaining processing time, falling back
   to rule cleanup after a slow final speech window instead of adding a fresh eight-second wait.
 - Models settings and download hints share the same decimal size labels, including 480 MB for Small.

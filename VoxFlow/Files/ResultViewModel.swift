@@ -147,6 +147,17 @@ final class ResultViewModel {
     /// Preview, search and every export share the selected segmentation and optional cleanup.
     var activeDocument: TranscriptDocument { applyCleanup ? cleanedDocument : segmentedDocument }
 
+    /// Timed formats use the canvas's cue columns; other formats preview their actual file text.
+    var usesTimedPreview: Bool { format == .srt || format == .vtt }
+
+    /// Search filters the preview only. Copy and export retain the complete active document.
+    var previewText: String {
+        guard !searchText.trimmingCharacters(in: .whitespaces).isEmpty else { return rendered }
+        var filtered = activeDocument
+        filtered.transcript.segments = visibleSegments
+        return TranscriptRenderer.render(filtered, format: format, timestamps: timestamps)
+    }
+
     /// (1-based transcript position, segment) pairs matching `searchText`, read from `activeDocument`
     /// so a checked "Apply {Style} cleanup" is what search matches against — `activeDocument.transcript.segments`
     /// is enumerated exactly once, so a row's number reflects its real position even when two
