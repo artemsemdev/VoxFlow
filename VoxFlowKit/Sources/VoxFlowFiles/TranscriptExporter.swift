@@ -1,6 +1,11 @@
 import Foundation
 import VoxFlowCore
 
+/// Retained by an exporter snapshot so replacing the selected folder cannot revoke its access.
+public protocol ExportDirectoryAccess: Sendable {
+    var directory: URL { get }
+}
+
 /// Writes rendered transcripts next to each other in one folder (design: "Save to ~/Transcripts").
 public struct TranscriptExporter: Sendable {
     public static var defaultDirectory: URL {
@@ -8,13 +13,16 @@ public struct TranscriptExporter: Sendable {
     }
 
     public let directory: URL
+    private let access: (any ExportDirectoryAccess)?
 
-    public init(directory: URL = TranscriptExporter.defaultDirectory) { self.directory = directory }
+    public init(directory: URL = TranscriptExporter.defaultDirectory) { self.directory = directory; access = nil }
+    public init(access: any ExportDirectoryAccess) { self.access = access; directory = access.directory }
 
     /// Writes `name.ext`, then `name-2.ext`, `name-3.ext`, … — an atomic exclusive-create write means
     /// two exporters racing on the same name can never overwrite each other's file.
     @discardableResult
     public func export(_ document: TranscriptDocument, format: OutputFormat, timestamps: Bool) throws -> URL {
+        defer { withExtendedLifetime(access) {} }
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let ext = format.fileExtension
         let base = directory.appendingPathComponent(document.baseName)

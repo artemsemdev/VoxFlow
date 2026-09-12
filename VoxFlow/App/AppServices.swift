@@ -239,7 +239,7 @@ final class AppServices {
                               supportedExtensions: SupportedAudio.extensions,
                               options: { snapshot.current })
         let exports = ExportCoordinator(queue: queue, settings: filesSettings,
-                                        exporter: { TranscriptExporter(directory: filesSettings.outputFolder) })
+                                        exporter: { filesSettings.makeExporter() })
         let filesViewModel = FilesViewModel(queue: queue, settings: filesSettings, modelStore: modelStore,
                                             durations: durations, exports: exports)
         let modelsViewModel = ModelsViewModel(store: modelStore, modelLoader: modelLoader)
@@ -495,7 +495,7 @@ final class AppServices {
         return speech + style
     }
 
-    var exporter: TranscriptExporter { TranscriptExporter(directory: filesSettings.outputFolder) }
+    var exporter: TranscriptExporter { filesSettings.makeExporter() }
 
     /// `MCPServerService`'s `serverVersion` (`tools/list`'s `serverInfo.version`, `MCPRouter`) —
     /// the same `CFBundleShortVersionString` `project.yml` sets from `MARKETING_VERSION`, so it

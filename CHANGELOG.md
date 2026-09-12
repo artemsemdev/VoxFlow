@@ -8,6 +8,8 @@ versioning.
 ### Added
 - Files cleanup optionally improves transcripts up to 150 words with the shared local style model,
   preserving segment timing and updating the displayed word count; rules remain the fallback.
+- Persist output-folder access with security-scoped bookmarks, migrate usable path-only settings,
+  retain access through exports, and explain fallback to Transcripts when a saved folder is unavailable.
 - Microphone changes reach dictation and Settings › Audio live. Missing input stops capture;
   switching devices preserves pending audio and transcript timing across the restart gap.
 - Expanded History highlights the actual removed fillers and low-confidence raw words, with
