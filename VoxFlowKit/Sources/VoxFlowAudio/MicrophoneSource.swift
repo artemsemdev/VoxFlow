@@ -8,10 +8,14 @@ import VoxFlowCore
 public final class MicrophoneSource: MicrophoneCapturing, Sendable {
     private let chunkSeconds: Double
     private let microphoneUse: any MicrophoneUseMonitoring
+    private let processing: @Sendable () -> MicrophoneProcessingOptions
+    private let lease = MicrophoneCaptureLease()
 
-    public init(chunkSeconds: Double = 0.1, microphoneUse: any MicrophoneUseMonitoring = UnmonitoredMicrophoneUse()) {
+    public init(chunkSeconds: Double = 0.1, microphoneUse: any MicrophoneUseMonitoring = UnmonitoredMicrophoneUse(),
+                processing: @escaping @Sendable () -> MicrophoneProcessingOptions = { .init() }) {
         self.chunkSeconds = chunkSeconds
         self.microphoneUse = microphoneUse
+        self.processing = processing
     }
 
     public func classifiedStartError(_ description: String) -> MicrophoneError {
@@ -29,11 +33,14 @@ public final class MicrophoneSource: MicrophoneCapturing, Sendable {
 
     public func start() -> AsyncThrowingStream<MicrophoneEvent, Error> {
         AsyncThrowingStream { continuation in
+            guard lease.acquire() else {
+                continuation.finish(throwing: MicrophoneError.inUse(by: "VoxFlow")); return
+            }
             let classifyStartError: @Sendable (String) -> MicrophoneError = { [microphoneUse] description in
                 Self.classifyStartError(description, microphoneUse: microphoneUse)
             }
-            let session = CaptureSession(chunkSeconds: chunkSeconds, classifyStartError: classifyStartError,
-                                         continuation: continuation)
+            let session = CaptureSession(chunkSeconds: chunkSeconds, processing: processing(), classifyStartError: classifyStartError,
+                                         continuation: continuation, onStopped: { [lease] in lease.release() })
             continuation.onTermination = { _ in session.stop() }
             session.start()
         }
@@ -46,22 +53,29 @@ private final class CaptureSession: @unchecked Sendable {
     private let queue = DispatchQueue(label: "dev.artemsem.voxflow.microphone")
     private let engine = AVAudioEngine()
     private let chunkSeconds: Double
+    private let processing: MicrophoneProcessingOptions
     private let classifyStartError: @Sendable (String) -> MicrophoneError
     private let continuation: AsyncThrowingStream<MicrophoneEvent, Error>.Continuation
+    private let onStopped: @Sendable () -> Void
     private var observer: NSObjectProtocol?
     private var stopped = false
     private var gapTracker = CaptureGapTracker()
     private var currentTap: CaptureAudioTapBox?
 
-    init(chunkSeconds: Double, classifyStartError: @escaping @Sendable (String) -> MicrophoneError,
-         continuation: AsyncThrowingStream<MicrophoneEvent, Error>.Continuation) {
+    init(chunkSeconds: Double, processing: MicrophoneProcessingOptions,
+         classifyStartError: @escaping @Sendable (String) -> MicrophoneError,
+         continuation: AsyncThrowingStream<MicrophoneEvent, Error>.Continuation,
+         onStopped: @escaping @Sendable () -> Void) {
         self.chunkSeconds = chunkSeconds
+        self.processing = processing
         self.classifyStartError = classifyStartError
         self.continuation = continuation
+        self.onStopped = onStopped
     }
 
     func start() {
         queue.async { [self] in
+            guard !stopped else { return }
             observer = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil) { [weak self] _ in
                 guard let self else { return }
                 let interruptedAt = AVAudioTime.seconds(forHostTime: mach_absolute_time())
@@ -73,7 +87,8 @@ private final class CaptureSession: @unchecked Sendable {
 
     private func installTapAndRun(generation: UInt64) throws {
         let input = engine.inputNode
-        let inputFormat = input.inputFormat(forBus: 0)
+        try VoiceProcessingConfiguration.apply(processing, to: input)
+        let inputFormat = input.outputFormat(forBus: 0)
         guard inputFormat.channelCount > 0, inputFormat.sampleRate > 0 else { throw MicrophoneError.noInputDevice }
         let target = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: AudioSamples.sampleRate, channels: 1, interleaved: false)!
         guard let converter = AVAudioConverter(from: inputFormat, to: target) else { throw MicrophoneError.engineFailed("no converter \(inputFormat) → 16 kHz mono") }
@@ -150,5 +165,8 @@ private final class CaptureSession: @unchecked Sendable {
         if let observer { NotificationCenter.default.removeObserver(observer) }
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
+        // Disabling the stopped voice-processing IO also releases its output attenuation.
+        try? VoiceProcessingConfiguration.apply(.init(), to: engine.inputNode)
+        onStopped()
     }
 }
