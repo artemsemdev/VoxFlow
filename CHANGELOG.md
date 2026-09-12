@@ -10,6 +10,8 @@ versioning.
   preserving segment timing and updating the displayed word count; rules remain the fallback.
 - Microphone changes reach dictation and Settings › Audio live. Missing input stops capture;
   switching devices preserves pending audio and transcript timing across the restart gap.
+- Settings → Audio offers optional noise suppression with honest minimum/standard/maximum audio
+  reduction, plus a five-second microphone record/playback test that keeps audio only in memory.
 - Expanded History highlights the actual removed fillers and low-confidence raw words, with
   persisted cleanup counts and token-derived confidence; older rows show only available metadata.
 - Name a reported exclusive microphone owner in the Flow Bar and automatically retry a still-active

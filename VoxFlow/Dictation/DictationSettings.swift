@@ -8,6 +8,7 @@ struct DictationSettingsSnapshot: Sendable, Equatable {
     var excludedBundleIDs: [String]
     var keepHistory: Bool
     var options: TranscriptionOptions
+    var audioProcessing = MicrophoneProcessingOptions()
 }
 
 final class DictationSettingsBox: Sendable {
@@ -71,6 +72,10 @@ final class DictationSettings {
         }
     }
     var language: String? { didSet { store.set(language, forKey: "dictation.language"); sync() } }
+    var noiseSuppression: Bool { didSet { store.set(noiseSuppression ? "1" : "0", forKey: "audio.noiseSuppression"); sync() } }
+    var otherAudioReduction: MicrophoneProcessingOptions.Ducking {
+        didSet { store.set(otherAudioReduction.rawValue, forKey: "audio.otherAudioReduction"); sync() }
+    }
     var keepHistory: Bool { didSet { store.set(keepHistory ? "1" : "0", forKey: "privacy.keepHistory"); sync() } }
     var encryptHistory: Bool { didSet { store.set(encryptHistory ? "1" : "0", forKey: "privacy.encryptHistory"); onHistorySettingsChange?() } }
     var retentionDays: Int { didSet { store.set(String(retentionDays), forKey: Keys.retentionDays); onHistorySettingsChange?() } }
@@ -85,6 +90,8 @@ final class DictationSettings {
         hotkeyMode = store.string(forKey: "dictation.hotkeyMode").flatMap(HotkeyMode.init(rawValue:)) ?? .pushToTalk
         silenceStop = FlowBarConfig(silenceStop: store.string(forKey: "dictation.silenceStop").flatMap(Double.init) ?? 3).silenceStop
         language = store.string(forKey: "dictation.language")
+        noiseSuppression = store.string(forKey: "audio.noiseSuppression") == "1"
+        otherAudioReduction = store.string(forKey: "audio.otherAudioReduction").flatMap(MicrophoneProcessingOptions.Ducking.init(rawValue:)) ?? .minimum
         keepHistory = store.string(forKey: "privacy.keepHistory") != "0"
         encryptHistory = store.string(forKey: "privacy.encryptHistory") != "0"
         retentionDays = store.string(forKey: Keys.retentionDays).flatMap(Int.init) ?? 30
@@ -98,6 +105,7 @@ final class DictationSettings {
     var snapshot: DictationSettingsSnapshot { box.current }
 
     private func sync() {
-        box.update(DictationSettingsSnapshot(excludedBundleIDs: excludedBundleIDs, keepHistory: keepHistory, options: transcriptionOptions))
+        box.update(DictationSettingsSnapshot(excludedBundleIDs: excludedBundleIDs, keepHistory: keepHistory, options: transcriptionOptions,
+                                             audioProcessing: .init(noiseSuppression: noiseSuppression, ducking: otherAudioReduction)))
     }
 }

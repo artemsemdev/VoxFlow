@@ -63,6 +63,17 @@ struct SettingsRenderTests {
                                     navigation: Navigation())
     }
 
+    private struct RenderAudioPlayer: AudioSamplePlaying {
+        func play(_ samples: [Float]) async throws {}
+        func stop() {}
+    }
+
+    private func makeMicrophoneTest() -> MicrophoneTestController {
+        MicrophoneTestController(microphone: FakeMicrophone(), player: RenderAudioPlayer(),
+                                 permissions: FakePermissions(microphone: .granted, requestResult: .granted, accessibility: false),
+                                 clock: FakeClock(), canStart: { true })
+    }
+
     private func makePrivacyModel(dir: TemporaryDirectory, excluded: [String] = DictationSettings.defaultExcluded,
                                   secureEnclaveAvailable: Bool = true) -> PrivacyViewModel {
         let settings = DictationSettings(store: InMemoryKeyValueStore())
@@ -86,10 +97,12 @@ struct SettingsRenderTests {
 
         // Audio (ST-04, ST-04n): a device present, then none (banner).
         let withDevice = AudioViewModel(devices: FakeInputDeviceProvider(name: "MacBook Pro Microphone"),
-                                        settings: DictationSettings(store: InMemoryKeyValueStore()), dictation: makeCoordinator())
+                                        settings: DictationSettings(store: InMemoryKeyValueStore()), dictation: makeCoordinator(),
+                                        microphoneTest: makeMicrophoneTest())
         try Self.render(AudioSettingsView(audio: withDevice), name: "audio-1-device", to: directory)
         let noDevice = AudioViewModel(devices: FakeInputDeviceProvider(name: nil),
-                                      settings: DictationSettings(store: InMemoryKeyValueStore()), dictation: makeCoordinator())
+                                      settings: DictationSettings(store: InMemoryKeyValueStore()), dictation: makeCoordinator(),
+                                        microphoneTest: makeMicrophoneTest())
         try Self.render(AudioSettingsView(audio: noDevice), name: "audio-2-no-device", to: directory)
 
         // Privacy (ST-05): the default excluded apps, plus one with an extra app + Keychain subtitle.
