@@ -157,3 +157,22 @@ Transcripts are exported to `~/Transcripts` by default. The exporter creates the
 **Naming:** Files are named `<basename>.<extension>`. When a file already exists, the exporter appends a counter: `<basename>-2.<extension>`, `<basename>-3.<extension>`, and so on. Files are never overwritten.
 
 **Batch export:** All formats can be re-exported from the same transcript document without re-processing the audio. Use the same source transcript document to export in different formats or with different timestamp settings.
+
+## History annotations
+
+History keeps optional numeric annotations alongside the unchanged raw transcript. Filler ranges
+are UTF-16 offsets captured during the actual sequential cleanup pass, including multiword fillers;
+the removed count is the number of those observed occurrences. Word confidence is the mean of the
+Whisper token probabilities overlapping each whitespace-delimited raw word. Token and segment
+code units must align exactly before any ranges are calculated.
+
+The expanded History row dims removed filler ranges and underlines words below 80% confidence.
+A single flagged word shows its percentage; multiple flagged words show their count and explicitly
+label the mean of their confidence values. These are model scores, not a guarantee of correctness.
+Unknown, malformed and unreadable metadata produces no annotations. Existing rows are not
+backfilled with guessed values.
+
+Manual editing clears cleanup provenance while preserving confidence about the unchanged raw
+transcript. Re-style replaces cleanup provenance from its new pass and retains raw confidence;
+reinsertion preserves both. Annotations never infer alignment into rewritten or snippet-expanded
+inserted text. They contain no copy of the transcript and do not change the file export fields above.

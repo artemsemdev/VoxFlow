@@ -6,6 +6,8 @@ versioning.
 ## Unreleased
 
 ### Added
+- Expanded History highlights the actual removed fillers and low-confidence raw words, with
+  persisted cleanup counts and token-derived confidence; older rows show only available metadata.
 - Right-click an inserted History transcript word to add it to Dictionary, with the same validation
   and case/diacritic-insensitive duplicate handling as the Dictionary page.
 - Record Push-to-talk, Hands-free, Cancel and Re-insert last shortcuts in Settings, with saved

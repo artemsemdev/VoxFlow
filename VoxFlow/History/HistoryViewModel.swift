@@ -299,8 +299,9 @@ final class HistoryViewModel {
         guard restylingID == nil, editingID == nil, !record.isUnreadable else { return }
         restylingID = record.id
         defer { restylingID = nil }
-        let text = await restyler.restyle(rawText: record.rawText, to: style)
-        guard let updated = await service.updateStyled(id: record.id, text: text, style: style.rawValue) else { return }
+        let styled = await restyler.restyleResult(rawText: record.rawText, to: style)
+        guard let updated = await service.updateStyled(id: record.id, text: styled.text, style: style.rawValue,
+                                                       removedFillerSpans: styled.removedFillerSpans) else { return }
         pasteboard.setString(updated.text)
         await refresh()
     }
