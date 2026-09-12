@@ -289,6 +289,10 @@ struct MCPToolRunnerTests {
         await mic.waitUntilCapturing()
         mic.emit(rms: 0.3, seconds: 1)
         await transcriber.waitUntilReceived(1)
+        // receive(_:capture:) yields the chunk and resets silence synchronously on the
+        // controller actor. The transcriber's acknowledgment can precede that reset;
+        // this actor barrier waits for it before counting the replacement timer's sleepers.
+        _ = await controller.state
         await clock.waitForSleepers(3)              // cap + silence (FlowBarMachine) + this dictate call's own timeout
         await clock.advance(by: 3)                   // FlowBarConfig.silenceStop default
         let (status, body) = await task.value
@@ -359,12 +363,17 @@ struct MCPToolRunnerTests {
         await mic.waitUntilCapturing()
         mic.emit(rms: 0.3, seconds: 1)
         await transcriber.waitUntilReceived(1)
+        // receive(_:capture:) yields the chunk and resets silence synchronously on the
+        // controller actor. The transcriber's acknowledgment can precede that reset;
+        // this actor barrier waits for it before counting the replacement timer's sleepers.
+        _ = await controller.state
         await clock.waitForSleepers(3)
         await clock.advance(by: 3)
         let (status1, body1) = await task1.value
         let response1 = try decode(body1)
         #expect(status1 == 200)
         #expect(text(from: response1.result) == "only mine")
+        #expect(mic.startCount == 1)
     }
 
     // MARK: dictate — fast failure (review item 6, -32005)

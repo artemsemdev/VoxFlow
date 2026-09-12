@@ -1,5 +1,6 @@
 import AppKit
 import CryptoKit
+import Observation
 import SwiftUI
 import Testing
 import VoxFlowCore
@@ -14,7 +15,7 @@ import VoxFlowTestSupport
 /// (xcodebuild does not forward a plain `VOXFLOW_RENDER=1` prefix into the xctest host process — see
 /// the task report), then compare the PNGs in `.superpowers/design/renders/` against `canvas.pdf`
 /// pages 10–12.
-@Suite(.enabled(if: ProcessInfo.processInfo.environment["VOXFLOW_RENDER"] != nil))
+@Suite(.enabled(if: ProcessInfo.processInfo.environment["VOXFLOW_RENDER"] != nil), .timeLimit(.minutes(1)))
 @MainActor
 struct OnboardingRenderTests {
     static func payload(_ seed: UInt8, count: Int) -> Data { Data((0..<count).map { UInt8(($0 &+ Int(seed)) % 256) }) }
@@ -44,6 +45,7 @@ struct OnboardingRenderTests {
         let vm: OnboardingViewModel
         let dictation: DictationCoordinator
         let clock: FakeClock
+        let ephemeralScope: EphemeralScope
     }
 
     private func makeBundle(step: OnboardingStep, accessibility: Bool = true) -> Bundle {
@@ -77,7 +79,7 @@ struct OnboardingRenderTests {
         state.step = step
         let vm = OnboardingViewModel(state: state, permissions: permissions, settings: dictationSettings, models: models,
                                      dictation: dictation, ephemeralScope: ephemeralScope, navigation: navigation, clock: clock)
-        return Bundle(vm: vm, dictation: dictation, clock: clock)
+        return Bundle(vm: vm, dictation: dictation, clock: clock, ephemeralScope: ephemeralScope)
     }
 
     private struct RenderCase {
@@ -103,13 +105,12 @@ struct OnboardingRenderTests {
             // never fires). `waitForSleepers(1)` makes this deterministic, same fix as the unit test.
             await bundle.clock.waitForSleepers(1)
             await bundle.clock.advance(by: 1)
-            for _ in 0..<1_000 where !bundle.vm.showsAccessibilityDenied { await Task.yield() }
-            if !bundle.vm.showsAccessibilityDenied { Issue.record("2a-accessibility-denied: never reached the denied variant") }
+            await waitFor { bundle.vm.showsAccessibilityDenied }
         },
         RenderCase(name: "3-hotkey", step: .hotkey, fnAction: .changeInputSource) { _ in },
         RenderCase(name: "3a-hotkey-fn-unknown", step: .hotkey, fnAction: .unknown) { _ in },
         RenderCase(name: "4-model", step: .model) { bundle in
-            for _ in 0..<200 where bundle.vm.modelRow == nil { await Task.yield() }
+            await waitFor { bundle.vm.modelRow != nil }
         },
         // `render()` attaches the production view to its native host before configuration, so the
         // Try It view's own `.onAppear` starts the exercise exactly as it does in the app.
@@ -118,15 +119,12 @@ struct OnboardingRenderTests {
             // M-7: exercises the result chip — the most distinctive element on ONB-05 — which no
             // render case previously drove to `.inserted`.
             bundle.dictation.fn(.down)
-            for _ in 0..<1_000 where !isArmed(bundle.dictation.state) { await Task.yield() }
-            if !isArmed(bundle.dictation.state) { Issue.record("5b-tryit-inserted: never reached .armed (state: \(bundle.dictation.state))") }
+            await waitFor { isArmed(bundle.dictation.state) }
             await bundle.clock.waitForSleepers(1)
             await bundle.clock.advance(by: 0.3)   // past the 0.25 s hold threshold: armed → listening
-            for _ in 0..<1_000 where !isListening(bundle.dictation.state) { await Task.yield() }
-            if !isListening(bundle.dictation.state) { Issue.record("5b-tryit-inserted: never reached .listening (state: \(bundle.dictation.state))") }
+            await waitFor { isListening(bundle.dictation.state) }
             bundle.dictation.fn(.up)
-            for _ in 0..<2_000 where bundle.vm.tryItResult == nil { await Task.yield() }
-            if bundle.vm.tryItResult == nil { Issue.record("5b-tryit-inserted: tryItResult never set (state: \(bundle.dictation.state))") }
+            await waitFor { bundle.vm.tryItResult != nil }
         },
     ]
 
@@ -142,11 +140,31 @@ struct OnboardingRenderTests {
             let fnState = FnSystemActionWarningState(action: testCase.fnAction, currentAction: { testCase.fnAction })
             let content = OnboardingContentView(viewModel: bundle.vm, fnWarningState: fnState, openKeyboard: {})
             let host = NativeRenderHost(RenderChrome(content: content), size: NSSize(width: 700, height: 520))
-            defer { host.close() }
-            await testCase.configure(bundle)
-            await Task.yield()
-            host.layout()
-            try host.capture(to: directory.appendingPathComponent("Onboarding-\(testCase.name).png"))
+            // NativeRenderHost is lazy: prepare the real view so TryIt's production onAppear
+            // arms observation and history suppression before sending any dictation commands.
+            await host.prepareForAlert()
+            do {
+                if testCase.step == .tryIt { try #require(bundle.ephemeralScope.isActive) }
+                await testCase.configure(bundle)
+            } catch {
+                await host.closeSettled()
+                throw error
+            }
+            try await host.captureSettled(to: directory.appendingPathComponent("Onboarding-\(testCase.name).png"))
+        }
+    }
+
+    /// Observe the actual consumer state instead of assuming a fixed number of scheduler turns.
+    /// AsyncStream safely coalesces a change even when it arrives before the waiter starts.
+    private static func waitFor(_ condition: @escaping @MainActor () -> Bool) async {
+        while !Task.isCancelled {
+            let (changes, continuation) = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            let satisfied = withObservationTracking(condition, onChange: {
+                continuation.yield(())
+                continuation.finish()
+            })
+            if satisfied { continuation.finish(); return }
+            for await _ in changes { break }
         }
     }
 
