@@ -113,8 +113,7 @@ struct FilesModelsAuditRenderTests {
             await host.prepareForAlert()
             fixture.viewModel.confirmation = confirmation
             try await host.captureAlert(to: output(name))
-            fixture.viewModel.cancelConfirmation()
-            try await host.closeAlert()
+            try await host.clickAlertButton(titled: name == "Files-141-stop" ? "Keep going" : "Cancel")
         }
         let small = try #require(ModelCatalog.model(id: "whisper-small"))
         let large = try #require(ModelCatalog.model(id: "whisper-large-v3-turbo"))
@@ -133,8 +132,9 @@ struct FilesModelsAuditRenderTests {
             await host.prepareForAlert()
             models.alert = alert
             try await host.captureAlert(to: output(name))
-            models.dismissAlert()
-            try await host.closeAlert()
+            let cancelTitle = ["Models-141-remove", "Models-141-disk", "Models-141-download-failed"].contains(name)
+                ? "Cancel" : "OK"
+            try await host.clickAlertButton(titled: cancelTitle)
         }
         withExtendedLifetime(fixture.dir) {}
     }

@@ -47,9 +47,10 @@ final class NativeRenderHost {
         try png.write(to: url)
     }
 
-    /// Ordered-window snapshots must also close on the run loop, including failed captures.
+    /// Settle content without ordering a window; only actual sheets need an ordered parent.
     func captureSettled(to url: URL) async throws {
-        await prepareForAlert()
+        await onMainRunLoop { self.layout() }
+        await nextRunLoopCycle()
         let result: Result<Void, Error> = await onMainRunLoop {
             Result { try self.capture(to: url) }
         }
@@ -70,19 +71,47 @@ final class NativeRenderHost {
         // Sheet attachment can be observed inside AppKit's Core Animation commit.
         // Let AppKit finish the current run-loop cycle before capturing the sheet.
         await nextRunLoopCycle()
-        sheet.appearance = window.appearance
-        view.layoutSubtreeIfNeeded()
-        guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
-            throw RenderError.couldNotCreateBitmap
+        let result: Result<Void, Error> = await onMainRunLoop {
+            Result {
+                sheet.appearance = self.window.appearance
+                view.layoutSubtreeIfNeeded()
+                guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
+                    throw RenderError.couldNotCreateBitmap
+                }
+                sheet.effectiveAppearance.performAsCurrentDrawingAppearance {
+                    view.cacheDisplay(in: view.bounds, to: bitmap)
+                }
+                guard let png = bitmap.representation(using: .png, properties: [:]) else {
+                    throw RenderError.couldNotEncodePNG
+                }
+                try png.write(to: url)
+            }
         }
-        // NSTextField colors otherwise resolve against the test process's global appearance.
-        sheet.effectiveAppearance.performAsCurrentDrawingAppearance {
-            view.cacheDisplay(in: view.bounds, to: bitmap)
+        try result.get()
+    }
+
+    /// Use the real native action: clearing a SwiftUI alert binding during layout can start
+    /// AppKit's sheet dismissal animation from inside a Core Animation commit.
+    func clickAlertButton(titled title: String) async throws {
+        let result: Result<Void, Error> = await onMainRunLoop {
+            Result {
+                guard let view = self.window.attachedSheet?.contentView,
+                      let button = self.alertButton(in: view, titled: title) else {
+                    throw RenderError.alertButtonNotFound
+                }
+                button.performClick(nil)
+            }
         }
-        guard let png = bitmap.representation(using: .png, properties: [:]) else {
-            throw RenderError.couldNotEncodePNG
+        try result.get()
+        try await closeAlert()
+    }
+
+    private func alertButton(in view: NSView, titled title: String) -> NSButton? {
+        if let button = view as? NSButton, button.title == title { return button }
+        for child in view.subviews {
+            if let button = alertButton(in: child, titled: title) { return button }
         }
-        try png.write(to: url)
+        return nil
     }
 
     /// Let SwiftUI dismiss its own sheet after the fixture clears the alert binding.
@@ -157,6 +186,7 @@ final class NativeRenderHost {
     func close() { window.close() }
 
     private enum RenderError: Error {
+        case alertButtonNotFound
         case alertDidNotDismiss
         case alertDidNotAppear
         case couldNotCreateBitmap
