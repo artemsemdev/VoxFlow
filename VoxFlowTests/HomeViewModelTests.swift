@@ -98,6 +98,7 @@ struct HomeViewModelSetupRowsTests {
         #expect(row.valueText == "Open Settings")
         #expect(row.isLink)
         #expect(row.action == .openMicrophoneSettings)
+        #expect(row.label == "Microphone required")
     }
 
     @Test("permissions: microphone granted, accessibility not trusted -> openAccessibilitySettings")
@@ -107,6 +108,7 @@ struct HomeViewModelSetupRowsTests {
                                                 hotkeyMode: .pushToTalk)
         #expect(rows[0].kind == .attention)
         #expect(rows[0].action == .openAccessibilitySettings)
+        #expect(rows[0].label == "Accessibility required")
     }
 
     @Test("model: installed -> ok, its display name, no action")
@@ -207,6 +209,27 @@ struct HomeViewModelTests {
         await h.vm.refresh()
         #expect(h.vm.headerTitle == h.stats.greeting)
         #expect(h.vm.headerSubtitle == h.stats.dateLine)
+    }
+
+    @Test("Home reflects a permission grant and later revocation without claiming setup is complete")
+    func permissionRecovery() async {
+        let h = Harness(accessibility: false)
+        await h.stats.refresh()
+        #expect(h.vm.headerSubtitle == "Complete setup below to start dictating.")
+        await h.vm.refresh()
+        #expect(h.vm.headerSubtitle == "Complete setup below to start dictating.")
+        #expect(h.vm.setupRows[0].label == "Accessibility required")
+
+        h.permissions.accessibility = true
+        await h.vm.refresh()
+        #expect(h.vm.setupRows[0].kind == .ok)
+        #expect(h.vm.headerSubtitle == "Everything is set up. Your stats appear after the first dictation.")
+
+        h.permissions.accessibility = false
+        await h.vm.refresh()
+        #expect(h.vm.setupRows[0].action == .openAccessibilitySettings)
+        #expect(h.vm.headerSubtitle == "Complete setup below to start dictating.")
+        #expect(h.permissions.prompted == 0)
     }
 
     @Test("modeChip follows hotkeyMode")

@@ -4,6 +4,7 @@ import AppKit
 /// `true` means the source must suppress the event instead of forwarding it to the focused app.
 @MainActor
 protocol ShortcutEventSource: AnyObject {
+    var isRunning: Bool { get }
     func start(handler: @escaping (ShortcutEvent) -> Bool, onLoss: @escaping () -> Void)
     func stop()
 }
@@ -17,8 +18,14 @@ private final class CGEventTapShortcutEventSource: ShortcutEventSource {
     private var handler: ((ShortcutEvent) -> Bool)?
     private var onLoss: (() -> Void)?
 
+    var isRunning: Bool {
+        guard let tap else { return false }
+        return CFMachPortIsValid(tap) && CGEvent.tapIsEnabled(tap: tap)
+    }
+
     func start(handler: @escaping (ShortcutEvent) -> Bool, onLoss: @escaping () -> Void) {
-        guard tap == nil else { return }
+        guard !isRunning else { return }
+        stop() // A disabled/invalid port must not prevent creation after permission is restored.
         self.handler = handler
         self.onLoss = onLoss
         let mask = [CGEventType.flagsChanged, .keyDown, .keyUp].reduce(CGEventMask(0)) {
@@ -90,6 +97,7 @@ final class FnKeyMonitor {
     private var decoder: ShortcutDecoder
     private var bindings: DictationShortcuts
     private var ownedKeyCodes: Set<UInt16> = []
+    private var wantsMonitoring = false
     private let source: any ShortcutEventSource
     private let shortcuts: () -> DictationShortcuts
     private let context: () -> ShortcutContext
@@ -130,12 +138,27 @@ final class FnKeyMonitor {
     }
 
     func start() {
+        wantsMonitoring = true
+        refreshEventSource()
+    }
+
+    /// Recheck after returning from System Settings. Healthy taps retain their current gesture;
+    /// failed creation or a revoked/disabled tap can recover without restarting the application.
+    func refreshEventSource() {
+        guard wantsMonitoring, !source.isRunning else { return }
+        reset()
+        ownedKeyCodes.removeAll() // Key-up may have been missed while the old tap was unavailable.
         source.start(
             handler: { [weak self] in self?.receive($0) ?? false },
             onLoss: { [weak self] in self?.eventSourceLost() })
     }
 
-    func stop() { reset(); source.stop(); ownedKeyCodes.removeAll() }
+    func stop() {
+        wantsMonitoring = false
+        reset()
+        source.stop()
+        ownedKeyCodes.removeAll()
+    }
     func eventSourceLost() { reset() }
     func configurationDidChange() { synchronizeBindings() }
     func suspensionDidChange() { if suspended() { reset() } }
