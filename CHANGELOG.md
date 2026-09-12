@@ -102,6 +102,8 @@ versioning.
   [docs/runbooks/connect-an-mcp-client.md](docs/runbooks/connect-an-mcp-client.md).
 
 ### Fixed
+- File decoding reports progress and responds to Stop between read/conversion chunks instead of
+  finishing the entire decode before observing cancellation.
 - MCP startup and stop races: concurrent first callers share initialization, and an older operation
   cannot restart a disabled server or overwrite a newer endpoint and setting.
 - Stopping the MCP listener cancels pending binding; old waiting callers cannot restart it or

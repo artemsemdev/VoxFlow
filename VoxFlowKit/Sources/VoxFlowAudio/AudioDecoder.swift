@@ -25,6 +25,11 @@ public struct AudioDecoder: AudioDecoding {
     }
 
     public func decode(_ url: URL) throws -> AudioSamples {
+        try decode(url, progress: { _ in })
+    }
+
+    public func decode(_ url: URL, progress: @Sendable (Double) -> Void) throws -> AudioSamples {
+        try Task.checkCancellation()
         let ext = url.pathExtension.lowercased()
         guard Self.supportedExtensions.contains(ext) else { throw AudioDecodingError.unsupportedType(ext) }
         guard FileManager.default.fileExists(atPath: url.path) else { throw AudioDecodingError.fileNotFound(url) }
@@ -48,7 +53,9 @@ public struct AudioDecoder: AudioDecoding {
 
         let ratio = AudioSamples.sampleRate / file.processingFormat.sampleRate
         var output: [Float] = []
-        output.reserveCapacity(Int(Double(file.length) * ratio) + 1024)
+        // Allocate incrementally, so cancelling early does not reserve hours of decoded PCM.
+        output.reserveCapacity(Int(Double(Self.chunkFrames) * ratio) + 1024)
+        progress(0)
 
         // The input block reads the next chunk directly from `file` each time the converter
         // asks for more; all state (the read cursor) lives on `file` itself, and `chunk` is
@@ -61,6 +68,7 @@ public struct AudioDecoder: AudioDecoding {
         let readError = Mutex<(any Error)?>(nil)
 
         conversionLoop: while true {
+            try Task.checkCancellation()
             let outputBuffer = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: outputCapacity)!
             let status = converter.convert(to: outputBuffer, error: &conversionError) { _, outStatus in
                 // `AVAudioFile.read` throws once `framePosition >= length` — that's the normal
@@ -71,7 +79,9 @@ public struct AudioDecoder: AudioDecoding {
                     return nil
                 }
                 do {
+                    try Task.checkCancellation()
                     try fileRead(file, chunk, Self.chunkFrames)
+                    try Task.checkCancellation()
                 } catch {
                     readError.withLock { $0 = error }
                     outStatus.pointee = .endOfStream
@@ -84,13 +94,18 @@ public struct AudioDecoder: AudioDecoding {
                 outStatus.pointee = .haveData
                 return chunk
             }
+            try Task.checkCancellation()
             if let error = readError.withLock({ $0 }) {
+                if error is CancellationError { throw error }
                 throw AudioDecodingError.decodeFailed(error.localizedDescription)
             }
             if let conversionError { throw AudioDecodingError.decodeFailed(conversionError.localizedDescription) }
             if status == .error { throw AudioDecodingError.decodeFailed("conversion failed") }
 
             appendDownmixed(outputBuffer, channels: Int(sourceChannels), to: &output)
+            if file.framePosition < file.length {
+                progress(Double(file.framePosition) / Double(max(file.length, 1)))
+            }
 
             switch status {
             case .haveData:
@@ -104,6 +119,8 @@ public struct AudioDecoder: AudioDecoding {
             }
         }
 
+        try Task.checkCancellation()
+        progress(1)
         return AudioSamples(output)
     }
 

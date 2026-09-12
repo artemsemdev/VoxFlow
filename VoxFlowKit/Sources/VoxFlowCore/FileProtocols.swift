@@ -11,6 +11,17 @@ public enum AudioDecodingError: Error, Equatable, Sendable {
 /// Decodes a file to engine-ready samples (implemented by `AudioDecoder`).
 public protocol AudioDecoding: Sendable {
     func decode(_ url: URL) throws -> AudioSamples
+    /// Reports a fraction in 0...1. Native decoders check task cancellation between chunks;
+    /// existing conformers can retain the compatibility implementation's completion-only report.
+    func decode(_ url: URL, progress: @Sendable (Double) -> Void) throws -> AudioSamples
+}
+
+public extension AudioDecoding {
+    func decode(_ url: URL, progress: @Sendable (Double) -> Void) throws -> AudioSamples {
+        let audio = try decode(url)
+        progress(1)
+        return audio
+    }
 }
 
 /// Reads a file's duration cheaply, without decoding (queue header, > 4 h confirmation).

@@ -26,7 +26,9 @@ public struct FileTranscriber: FileTranscribing {
         let started = now()
         let audio: AudioSamples
         do {
-            audio = try decoder.decode(url)
+            audio = try decoder.decode(url) { progress(Self.decodeShare * min(max($0, 0), 1)) }
+        } catch is CancellationError {
+            throw FileTranscriptionError.cancelled
         } catch let error as AudioDecodingError {
             switch error {
             case .unsupportedType(let ext): throw FileTranscriptionError.unsupportedType(ext)
