@@ -22,9 +22,12 @@ public struct DictationResult: Sendable, Equatable {
     public var cursorOffset: Int?
     /// How many filler occurrences were removed producing `text` from `rawText`.
     public var fillersRemoved: Int
+    /// Metadata anchored to `rawText`. Nil means unavailable, as for legacy rows and fakes.
+    public var annotations: DictationAnnotations?
 
     public init(text: String, rawText: String, segments: [TranscriptSegment], language: LanguageDetection?,
-                duration: TimeInterval, lowConfidence: Bool, style: String? = nil, cursorOffset: Int? = nil, fillersRemoved: Int = 0) {
+                duration: TimeInterval, lowConfidence: Bool, style: String? = nil, cursorOffset: Int? = nil,
+                fillersRemoved: Int = 0, annotations: DictationAnnotations? = nil) {
         self.text = text
         self.rawText = rawText
         self.segments = segments
@@ -34,6 +37,7 @@ public struct DictationResult: Sendable, Equatable {
         self.style = style
         self.cursorOffset = cursorOffset
         self.fillersRemoved = fillersRemoved
+        self.annotations = annotations?.validated(for: rawText)
     }
 
     public var wordCount: Int { text.wordCount }

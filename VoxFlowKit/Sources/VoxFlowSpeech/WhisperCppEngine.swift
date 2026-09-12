@@ -9,6 +9,30 @@ public actor WhisperCppEngine: SpeechEngine {
 
     public init() {}
 
+    static func wordConfidences(tokenTexts: [String], probabilities: [Double], segmentText: String) -> [WordConfidence]? {
+        guard tokenTexts.count == probabilities.count,
+              probabilities.allSatisfy({ $0.isFinite && (0...1).contains($0) }),
+              tokenTexts.flatMap({ Array($0.utf16) }).elementsEqual(segmentText.utf16) else { return nil }
+
+        var tokenRanges: [(NSRange, Double)] = []
+        var location = 0
+        for (token, probability) in zip(tokenTexts, probabilities) {
+            let length = (token as NSString).length
+            tokenRanges.append((NSRange(location: location, length: length), probability))
+            location += length
+        }
+        guard let regex = try? NSRegularExpression(pattern: "\\S+") else { return nil }
+        let words = regex.matches(in: segmentText, range: NSRange(location: 0, length: (segmentText as NSString).length))
+        return words.compactMap { match in
+            let probabilities = tokenRanges.compactMap { range, probability in
+                NSIntersectionRange(range, match.range).length > 0 ? probability : nil
+            }
+            guard !probabilities.isEmpty,
+                  let span = RawTextSpan(location: match.range.location, length: match.range.length) else { return nil }
+            return WordConfidence(span: span, confidence: probabilities.reduce(0, +) / Double(probabilities.count))
+        }
+    }
+
     /// Same loaded model and serial native queue, with lower priority between file windows.
     public nonisolated var fileEngine: any SpeechEngine { FileEngine(owner: self) }
 
@@ -151,10 +175,13 @@ public actor WhisperCppEngine: SpeechEngine {
                         let end = Double(whisper_full_get_segment_t1(ctx, i)) / 100
                         let text = String(cString: whisper_full_get_segment_text(ctx, i))
                         let tokenCount = whisper_full_n_tokens(ctx, i)
-                        let confidence: Double? = tokenCount > 0
-                            ? (0..<tokenCount).reduce(0.0) { $0 + Double(whisper_full_get_token_p(ctx, i, $1)) } / Double(tokenCount)
-                            : nil
-                        if let segment = TranscriptSegment(start: start, end: end, text: text, confidence: confidence) {
+                        let tokenTexts = (0..<tokenCount).map { String(cString: whisper_full_get_token_text(ctx, i, $0)) }
+                        let probabilities = (0..<tokenCount).map { Double(whisper_full_get_token_p(ctx, i, $0)) }
+                        let confidence = probabilities.isEmpty ? nil : probabilities.reduce(0, +) / Double(probabilities.count)
+                        let words = WhisperCppEngine.wordConfidences(tokenTexts: tokenTexts, probabilities: probabilities,
+                                                                    segmentText: text)
+                        if let segment = TranscriptSegment(start: start, end: end, text: text, confidence: confidence,
+                                                           wordConfidences: words) {
                             state.continuation.yield(.segment(segment))
                         }
                         state.emitted += 1
