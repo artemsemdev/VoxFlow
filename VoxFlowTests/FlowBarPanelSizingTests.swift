@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import Testing
 import VoxFlowDictation
 @testable import VoxFlow
@@ -23,6 +24,16 @@ struct FlowBarPanelSizingTests {
             await clock.waitForSleepers(1)
             await clock.advance(by: 0.3)
             await harness.wait(coordinator) { if case .listening = $0 { true } else { false } }
+            // Measure a fresh listening view using this runner's fonts and content. The panel's
+            // initial frame can still reflect an older state, so its width is not a growth baseline.
+            let listeningWidth = await onRunLoop {
+                let content = FlowBarContent.make(state: coordinator.state, elapsed: coordinator.elapsed,
+                    mode: coordinator.hotkeyMode, now: coordinator.now(), shortcuts: coordinator.shortcuts)
+                let reference = NSHostingView(rootView: FlowBarView(content: content, levels: coordinator.levels))
+                reference.layoutSubtreeIfNeeded()
+                return reference.fittingSize.width
+            }
+            #expect(listeningWidth > 0)
             let deadline = ContinuousClock.now + .seconds(3)
             var idealWidth: CGFloat = 0
             var frameWidth: CGFloat = 0
@@ -32,10 +43,10 @@ struct FlowBarPanelSizingTests {
                     return (panel.contentView?.fittingSize.width ?? 0, panel.frame.width)
                 }
                 (idealWidth, frameWidth) = widths
-            } while (panel.suppressReflow || idealWidth < armedWidth + 40 || frameWidth < idealWidth - 1) && ContinuousClock.now < deadline
-            #expect(idealWidth > armedWidth + 40, "Listening must add space for its timer and language chip")
+            } while (panel.suppressReflow || abs(idealWidth - listeningWidth) > 1 || frameWidth < listeningWidth - 1) && ContinuousClock.now < deadline
+            #expect(abs(idealWidth - listeningWidth) <= 1, "The live view must settle on its listening content")
             print("Flow Bar cycle \(cycle): armed=\(armedWidth), listening ideal=\(idealWidth), frame=\(frameWidth)")
-            #expect(frameWidth >= idealWidth - 1, "The reused panel must fit its current listening content")
+            #expect(frameWidth >= listeningWidth - 1, "The reused panel must fit its current listening content")
             await onRunLoop { panel.hide() }
             coordinator.escape()
             await harness.wait(coordinator) { if case .discarded = $0 { true } else { false } }
