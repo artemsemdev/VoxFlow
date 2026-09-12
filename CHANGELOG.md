@@ -128,6 +128,8 @@ versioning.
   [docs/runbooks/connect-an-mcp-client.md](docs/runbooks/connect-an-mcp-client.md).
 
 ### Fixed
+- Recover Fn and custom shortcuts when returning from permission settings after a failed keyboard
+  listener start. Home refreshes permission status and identifies the permission still required.
 - Wait for local style-model context and model cleanup before unload or replacement completes,
   preventing native teardown from crashing the process after generation finishes.
 

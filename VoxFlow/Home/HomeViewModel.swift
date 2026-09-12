@@ -104,7 +104,11 @@ final class HomeViewModel {
 
     /// The header's small line: MW-01e's fixed copy on first run, `dateLine` otherwise.
     var headerSubtitle: String {
-        isFirstRun ? "Everything is set up. Your stats appear after the first dictation." : dateLine
+        guard isFirstRun else { return dateLine }
+        guard !setupRows.isEmpty, !setupRows.contains(where: { $0.kind == .attention }) else {
+            return "Complete setup below to start dictating."
+        }
+        return "Everything is set up. Your stats appear after the first dictation."
     }
 
     // MARK: First run (design MW-01e, ruling 3)
@@ -204,9 +208,15 @@ final class HomeViewModel {
                                            hotkeyMode: HotkeyMode) -> [SetupRow] {
         let micGranted = microphone == .granted
         let permissionsGranted = micGranted && accessibilityTrusted
+        let permissionLabel: String
+        switch (micGranted, accessibilityTrusted) {
+        case (true, false): permissionLabel = "Accessibility required"
+        case (false, true): permissionLabel = "Microphone required"
+        default: permissionLabel = "Microphone & Accessibility"
+        }
         let permissionsRow = SetupRow(
             id: "permissions", kind: permissionsGranted ? .ok : .attention,
-            label: "Microphone & Accessibility",
+            label: permissionLabel,
             valueText: permissionsGranted ? "Granted" : "Open Settings",
             isLink: !permissionsGranted,
             action: permissionsGranted ? .none : (micGranted ? .openAccessibilitySettings : .openMicrophoneSettings))

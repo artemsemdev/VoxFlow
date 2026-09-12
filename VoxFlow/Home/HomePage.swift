@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// The Home page (design MW-01, MW-01e): thin `AppServices` wrapper around `HomePageBody`, which
@@ -13,6 +14,9 @@ struct HomePage: View {
             // Re-runs on every navigation back to Home, same reasoning as `HistoryPage`'s `.task` —
             // numbers stay current without the caller having to remember to refresh.
             .task { await model.refresh() }
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+                Task { await model.refresh() }
+            }
     }
 }
 

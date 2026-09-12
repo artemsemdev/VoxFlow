@@ -118,6 +118,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    func applicationDidBecomeActive(_ notification: Notification) {
+        guard !LaunchEnvironment.isRunningTests() else { return }
+        AppServices.shared.fnMonitor.refreshEventSource()
+    }
+
     func application(_ application: NSApplication, open urls: [URL]) {
         guard !LaunchEnvironment.isRunningTests() else { return }
         Task { @MainActor in

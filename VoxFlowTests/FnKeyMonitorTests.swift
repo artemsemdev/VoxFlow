@@ -7,12 +7,19 @@ struct FnKeyMonitorTests {
     final class Source: ShortcutEventSource {
         private var handler: ((ShortcutEvent) -> Bool)?
         private var onLoss: (() -> Void)?
+        var allowsStart = true
+        private(set) var isRunning = false
+        private(set) var startAttempts = 0
 
         func start(handler: @escaping (ShortcutEvent) -> Bool, onLoss: @escaping () -> Void) {
+            guard !isRunning else { return }
+            startAttempts += 1
+            guard allowsStart else { return }
             self.handler = handler
             self.onLoss = onLoss
+            isRunning = true
         }
-        func stop() { handler = nil; onLoss = nil }
+        func stop() { handler = nil; onLoss = nil; isRunning = false }
         func send(_ event: ShortcutEvent) -> Bool { handler?(event) ?? false }
         func loseTap() { onLoss?() }
     }
@@ -176,6 +183,87 @@ struct FnKeyMonitorTests {
         #expect(calls == ["pushDown", "pushUp", "pushDown", "pushUp"])
         #expect(source.send(key(.keyUp, 40)))
         #expect(!source.send(key(.keyUp, 40)))
+    }
+
+    @Test("a failed first tap starts on permission recheck and delivers the next Fn gesture")
+    func initialFailureRecovers() {
+        let source = Source()
+        source.allowsStart = false
+        let state = LiveState(shortcuts: DictationShortcuts())
+        var calls: [String] = []
+        let monitor = makeMonitor(source: source, state: state) { calls.append($0) }
+        monitor.start()
+        #expect(!source.isRunning && source.startAttempts == 1)
+        #expect(!source.send(flags(.function, at: 1)))
+        #expect(calls.isEmpty)
+
+        source.allowsStart = true
+        monitor.refreshEventSource()
+        #expect(source.isRunning && source.startAttempts == 2)
+        #expect(!source.send(flags(.function, at: 2)))
+        #expect(!source.send(flags([], at: 2.5)))
+        #expect(calls == ["fnDown", "fnUp"])
+    }
+
+    @Test("repeated activation keeps a healthy tap and a held gesture intact")
+    func healthyRefreshIsIdempotent() {
+        let source = Source()
+        let state = LiveState(shortcuts: DictationShortcuts())
+        var calls: [String] = []
+        let monitor = makeMonitor(source: source, state: state) { calls.append($0) }
+        monitor.start()
+        #expect(!source.send(flags(.function, at: 1)))
+        monitor.start()
+        monitor.refreshEventSource()
+        #expect(source.startAttempts == 1 && calls == ["fnDown"])
+        #expect(!source.send(flags([], at: 1.5)))
+        #expect(calls == ["fnDown", "fnUp"])
+    }
+
+    @Test("a lost source resets its held gesture and is recreated on activation")
+    func unavailableSourceRecovers() {
+        let source = Source()
+        let state = LiveState(shortcuts: DictationShortcuts())
+        var calls: [String] = []
+        let monitor = makeMonitor(source: source, state: state) { calls.append($0) }
+        monitor.start()
+        #expect(!source.send(flags(.function, at: 1)))
+        source.stop()
+        monitor.refreshEventSource()
+        #expect(source.isRunning && source.startAttempts == 2)
+        #expect(calls == ["fnDown", "fnUp"])
+        #expect(!source.send(flags(.function, at: 2)))
+        #expect(calls == ["fnDown", "fnUp", "fnDown"])
+    }
+
+    @Test("a dead tap cannot retain key ownership after its key-up was missed")
+    func lostKeyUpDoesNotSwallowTyping() {
+        let source = Source()
+        let state = LiveState(shortcuts: bindings())
+        let monitor = makeMonitor(source: source, state: state) { _ in }
+        monitor.start()
+        #expect(source.send(key(.keyDown, 40, [.control, .option])))
+        source.stop() // The chord's key-up occurred while the source could not receive it.
+        monitor.refreshEventSource()
+        #expect(!source.send(key(.keyDown, 40)))
+        #expect(!source.send(key(.keyUp, 40)))
+        #expect(source.send(key(.keyDown, 40, [.control, .option])))
+        #expect(source.send(key(.keyUp, 40)))
+    }
+
+    @Test("an explicit stop prevents a later activation from resurrecting the failed tap")
+    func stoppedMonitorStaysStopped() {
+        let source = Source()
+        source.allowsStart = false
+        let state = LiveState(shortcuts: DictationShortcuts())
+        let monitor = makeMonitor(source: source, state: state) { _ in }
+        monitor.start()
+        monitor.stop()
+        source.allowsStart = true
+        monitor.refreshEventSource()
+        #expect(!source.isRunning && source.startAttempts == 1)
+        monitor.start()
+        #expect(source.isRunning && source.startAttempts == 2)
     }
 
     private func makeMonitor(source: Source, state: LiveState,
