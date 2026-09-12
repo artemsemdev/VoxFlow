@@ -69,6 +69,15 @@ jobs:
         if: steps.probe.outputs.has_swift == 'true'
         run: brew install xcodegen
 
+      # Resolve dependencies before tracing; source compilation must remain after CodeQL init.
+      - name: Generate project and resolve dependencies
+        if: steps.probe.outputs.has_swift == 'true'
+        run: |
+          set -euo pipefail
+          xcodegen generate
+          xcodebuild -xcconfig Build.xcconfig -scheme VoxFlow -resolvePackageDependencies
+          swift package --package-path VoxFlowKit resolve
+
       - name: Initialize CodeQL
         if: steps.probe.outputs.has_swift == 'true'
         uses: github/codeql-action/init@v3
@@ -79,11 +88,12 @@ jobs:
         if: steps.probe.outputs.has_swift == 'true'
         run: |
           set -euo pipefail
-          xcodegen generate
-          xcodebuild -xcconfig Build.xcconfig -scheme VoxFlow -destination 'platform=macOS,arch=arm64' build 2>&1 | tee codeql-build.log
+          # CodeQL tracing can expose only a Rosetta My Mac destination on an arm64 runner.
+          # Build for generic macOS with one explicit target architecture; no host execution is needed.
+          xcodebuild -xcconfig Build.xcconfig -scheme VoxFlow -destination 'generic/platform=macOS' ARCHS=arm64 build 2>&1 | tee codeql-build.log
           python3 scripts/check_build_logs.py codeql-build.log
           # Build the whole package so CodeQL traces modules outside the app's dependency graph too.
-          swift build --package-path VoxFlowKit 2>&1 | tee codeql-package.log
+          swift build --package-path VoxFlowKit --arch arm64 2>&1 | tee codeql-package.log
           python3 scripts/check_build_logs.py codeql-package.log
 
       - name: Perform CodeQL Analysis
