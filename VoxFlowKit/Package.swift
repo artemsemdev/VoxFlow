@@ -39,8 +39,8 @@ let package = Package(
 
         .binaryTarget(
             name: "whisper",
-            url: "https://github.com/ggml-org/whisper.cpp/releases/download/v1.9.2/whisper-v1.9.2-xcframework.zip",
-            checksum: "af74fed13ea7f2d5ca2a39d9f58ec177713fafd7cab63aef4e27b79f3ceca80b"
+            url: "https://github.com/artemsemdev/VoxFlow/releases/download/whisper-v1.9.2-voxflow.1/whisper-v1.9.2-metal-macos.xcframework.zip",
+            checksum: "fbe2d8e5167c79d6ca31b9de1ad3884ef0c44910f120148ca92de0863cea0427"
         ),
         .binaryTarget(
             name: "llama",

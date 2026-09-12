@@ -47,14 +47,51 @@ public actor WhisperCppEngine: SpeechEngine {
         }
     }
 
-    /// Owns the `whisper_context` pointer and frees it when the engine goes away.
+    /// Owns the native pointer. Cleanup follows all earlier file and dictation work.
     final class ContextBox: @unchecked Sendable {
-        // Safe: the pointer is only dereferenced on WhisperCppEngine.queue while runs are in flight;
-        // deinit runs when the last reference (held by the engine or an in-flight run) goes away,
-        // so nothing can be using it.
+        // Safe: native work is confined to WhisperCppEngine.queue. The lock only arbitrates which
+        // caller claims the single release when explicit unload races the deinit fallback.
+        // Cleanup uses file priority: FIFO within that role keeps it after older file uses,
+        // while dictation uses already run first. The actor clears context before enqueuing
+        // cleanup, so later operations cannot acquire this pointer.
         let pointer: OpaquePointer
-        init(_ pointer: OpaquePointer) { self.pointer = pointer }
-        deinit { whisper_free(pointer) }
+        private let queue: WhisperWorkQueue
+        private let releaseNative: @Sendable (OpaquePointer) -> Void
+        private let lock = NSLock()
+        private var isReleased = false
+
+        init(_ pointer: OpaquePointer, queue: WhisperWorkQueue,
+             releaseNative: @escaping @Sendable (OpaquePointer) -> Void = { whisper_free($0) }) {
+            self.pointer = pointer
+            self.queue = queue
+            self.releaseNative = releaseNative
+        }
+
+        /// Waits until the native context has been freed. Concurrent or repeated calls are no-ops.
+        func release() async {
+            guard let address = claimRelease() else { return }
+            let releaseNative = releaseNative
+            await withCheckedContinuation { continuation in
+                queue.enqueue(priority: .file) {
+                    releaseNative(OpaquePointer(bitPattern: address)!)
+                    continuation.resume()
+                }
+            }
+        }
+
+        deinit {
+            guard let address = claimRelease() else { return }
+            let releaseNative = releaseNative
+            queue.enqueue(priority: .file) { releaseNative(OpaquePointer(bitPattern: address)!) }
+        }
+
+        private func claimRelease() -> UInt? {
+            lock.withLock {
+                guard !isReleased else { return nil }
+                isReleased = true
+                return UInt(bitPattern: pointer)
+            }
+        }
     }
 
     /// State shared with the C callbacks during one `whisper_full` call.
@@ -71,6 +108,7 @@ public actor WhisperCppEngine: SpeechEngine {
 
     public func load(modelAt url: URL) async throws {
         let path = url.path
+        let nativeQueue = queue
         let box: ContextBox = try await onQueue {
             var params = whisper_context_default_params()
             params.use_gpu = true
@@ -78,9 +116,16 @@ public actor WhisperCppEngine: SpeechEngine {
             guard let pointer = whisper_init_from_file_with_params(path, params) else {
                 throw SpeechEngineError.modelLoadFailed(path)
             }
-            return ContextBox(pointer)
+            return ContextBox(pointer, queue: nativeQueue)
         }
         context = box
+    }
+
+    /// Releases the loaded model after all previously submitted native work has completed.
+    public func unload() async {
+        let loadedContext = context
+        context = nil
+        await loadedContext?.release()
     }
 
     public func detectLanguage(in audio: AudioSamples) async throws -> LanguageDetection {

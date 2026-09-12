@@ -56,6 +56,7 @@ struct WhisperCppEngineIntegrationTests {
         #expect(document.transcript.plainText.lowercased().components(separatedBy: "attention").count - 1 == 3,
                 "File: \(document.transcript.plainText); batch: \(batch); dictation: \(dictation.text)")
         #expect(Self.fixtureWords(document.transcript.plainText) == Self.fixtureWords(batch))
+        await engine.unload()
     }
 
     // The fixture pronounces "we're"/"we are" and "why"/"Y" alike; preserve every other word.
@@ -96,6 +97,7 @@ struct WhisperCppEngineIntegrationTests {
         #expect(segments.map(\.start) == segments.map(\.start).sorted())
         #expect(segments.last!.end <= audio.duration + 0.5)
         #expect(segments.allSatisfy { ($0.confidence ?? -1) >= 0 && ($0.confidence ?? 2) <= 1 })
+        await engine.unload()
     }
 
     @Test("consumer cancellation after an event follows the documented stream contract")
@@ -113,6 +115,7 @@ struct WhisperCppEngineIntegrationTests {
             if Task.isCancelled { throw SpeechEngineError.cancelled }
         }
         await #expect(throws: SpeechEngineError.cancelled) { try await task.value }
+        await engine.unload()
     }
 
     @Test("using the engine before load fails")
@@ -134,5 +137,6 @@ struct WhisperCppEngineCancellationTests {
             for try await _ in engine.transcribe(AudioSamples([]), options: TranscriptionOptions()) {}
         }
         await #expect(throws: SpeechEngineError.cancelled) { try await task.value }
+        await engine.unload()
     }
 }

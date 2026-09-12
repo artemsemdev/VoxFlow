@@ -19,5 +19,6 @@ struct WindowedTranscriberIntegrationTests {
                                                                              options: TranscriptionOptions(language: "en")) { _ in }
         #expect(result.wordCount >= 8)
         #expect(result.text.lowercased().contains("attention"))
+        await engine.unload()
     }
 }

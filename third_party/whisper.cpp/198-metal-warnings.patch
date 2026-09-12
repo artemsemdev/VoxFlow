@@ -1,0 +1,56 @@
+diff --git a/ggml/src/ggml-common.h b/ggml/src/ggml-common.h
+index 83f9118..0f3e8e8 100644
+--- a/ggml/src/ggml-common.h
++++ b/ggml/src/ggml-common.h
+@@ -521,6 +521,7 @@ GGML_TABLE_BEGIN(uint8_t, ksigns_iq2xs, 128)
+     240, 113, 114, 243, 116, 245, 246, 119, 120, 249, 250, 123, 252, 125, 126, 255,
+ GGML_TABLE_END()
+ 
++#if !defined(GGML_COMMON_IMPL_METAL)
+ GGML_TABLE_BEGIN(uint64_t, ksigns64, 128)
+     0x0000000000000000, 0xff000000000000ff, 0xff0000000000ff00, 0x000000000000ffff,
+     0xff00000000ff0000, 0x0000000000ff00ff, 0x0000000000ffff00, 0xff00000000ffffff,
+@@ -555,6 +556,7 @@ GGML_TABLE_BEGIN(uint64_t, ksigns64, 128)
+     0x00ffffffff000000, 0xffffffffff0000ff, 0xffffffffff00ff00, 0x00ffffffff00ffff,
+     0xffffffffffff0000, 0x00ffffffffff00ff, 0x00ffffffffffff00, 0xffffffffffffffff,
+ GGML_TABLE_END()
++#endif
+ 
+ 
+ GGML_TABLE_BEGIN(uint64_t, iq2xxs_grid, 256)
+@@ -1117,16 +1119,20 @@ GGML_TABLE_BEGIN(uint32_t, iq3s_grid, 512)
+ GGML_TABLE_END()
+ 
+ // TODO: fix name to kvalues_iq4_nl
++#if !defined(GGML_COMMON_IMPL_METAL)
+ GGML_TABLE_BEGIN(int8_t, kvalues_iq4nl, 16)
+     -127, -104, -83, -65, -49, -35, -22, -10, 1, 13, 25, 38, 53, 69, 89, 113,
+ GGML_TABLE_END()
++#endif
+ 
+ // e2m1 values (doubled), shared by MXFP4 and NVFP4
+ // ref: https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf
++#if !defined(GGML_COMMON_IMPL_METAL)
+ GGML_TABLE_BEGIN(int8_t, kvalues_fp4, 16)
+     0, 1, 2, 3, 4, 6, 8, 12, 0, -1, -2, -3, -4, -6, -8, -12,
+ GGML_TABLE_END()
+ #define kvalues_mxfp4 kvalues_fp4
++#endif
+ 
+ #define NGRID_IQ1S 2048
+ #define IQ1S_DELTA 0.125f
+diff --git a/ggml/src/ggml-metal/ggml-metal.metal b/ggml/src/ggml-metal/ggml-metal.metal
+index 7d12cb0..38c936a 100644
+--- a/ggml/src/ggml-metal/ggml-metal.metal
++++ b/ggml/src/ggml-metal/ggml-metal.metal
+@@ -5569,10 +5569,6 @@ kernel void kernel_upscale_nearest_f32(
+     }
+ }
+ 
+-static inline float bilinear_tri(float x) {
+-    return MAX(0.0f, 1.0f - fabs(x));
+-}
+-
+ kernel void kernel_upscale_bilinear_f32(
+     constant ggml_metal_kargs_upscale & args,
+     device  const char * src0,
