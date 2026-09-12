@@ -1,20 +1,23 @@
 # VoxFlow 2.1.0 — release checklist
 
-Everything on `release/2.1.0` that only a person on a real Mac can verify, gathered from the
-phase 3, 4, 5 and 6 plans and ordered so you can work straight down the list in one sitting.
-Automated tests cover the rest: 477 app tests, 363 package tests, 15 script tests, and a ten-case
-loopback integration suite, all green on this branch.
+Manual acceptance on a real Mac, gathered from the phase 3, 4, 5 and 6 plans.
+Use the installed signed Release build and record its actual version. Current automated evidence
+and remaining gates are in [completion validation](completion-validation-2026-09-12.md);
+the focused issue checks are in [hardware acceptance](HARDWARE-ACCEPTANCE.md).
 
 **Tick as you go. If something fails, stop and note which line — every item maps to code that can
 be fixed without touching the others.**
 
 ## Before you start
 
-- [ ] `git checkout release/2.1.0 && git pull`
-- [ ] `xcodegen generate && xcodebuild -xcconfig Build.xcconfig -scheme VoxFlow -destination 'platform=macOS,arch=arm64' build`
+- [ ] Use the signed Release installed at `/Applications/VoxFlow.app`. If a fresh build or install
+      is needed, follow the [local Release process](delivery/release-process.md); quit the running
+      app before replacing it.
+- [ ] Launch with `open /Applications/VoxFlow.app` and record the installed version/build and
+      source commit with the acceptance results.
 - [ ] Confirm the build is signed with your own certificate, not ad-hoc:
-      `codesign -dvv <path to VoxFlow.app>` prints `Authority=VoxFlow Dev`.
-      (If it does not, see SETUP.md → "Local code signing". Without it macOS re-asks for
+      `codesign -dvv /Applications/VoxFlow.app` prints `Authority=VoxFlow Dev`.
+      (If it does not, see [SETUP.md](../SETUP.md#local-code-signing-once-per-mac). Without it macOS re-asks for
       Microphone and Accessibility on every rebuild.)
 - [ ] Grant Microphone and Accessibility to this build once, if you have not since creating the
       certificate.
@@ -152,10 +155,12 @@ native stdio** if you use that client. Configuration and troubleshooting are in
       Turn the server off, stop `nc` with Ctrl-C, then turn it on again and restore each HTTP client's
       URL to the displayed endpoint.
 
-## When everything is ticked
+## Record acceptance
 
-Tell me and I will: merge `release/2.1.0` into `master`, tag `v2.1.0`, merge back into `develop`,
-publish the GitHub release, and close #110 (phase 3, the last phase issue still open by design).
+Record observed outcomes against the installed build in the validation and hardware checklists.
+Close a linked issue only after its actual acceptance criteria are verified. Keep skipped or
+unavailable checks unchecked with a reason; automated tests do not substitute for physical checks.
 
-Phase 7 (#115, a signed and notarised `.dmg`) is separate and needs a Developer ID certificate
-from a paid Apple Developer account before it can be built.
+The current #115 milestone is the signed local Release build and installation described in the
+[release process](delivery/release-process.md). Public tags/releases, Developer ID signing,
+notarization and DMG distribution are outside that scope and require separate work if requested.
