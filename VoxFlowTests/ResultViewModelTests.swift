@@ -54,6 +54,19 @@ struct ResultViewModelTests {
         #expect(txt != srt)
     }
 
+    @Test("the selected-format preview matches exports until search filters its segments", arguments: OutputFormat.allCases)
+    func previewFollowsFormat(format: OutputFormat) {
+        let vm = Self.makeVM(format: format)
+        #expect(vm.previewText == vm.rendered)
+        vm.searchText = "attention"
+        #expect(vm.previewText.contains("This needs your attention"))
+        #expect(!vm.previewText.contains("Hello there"))
+        #expect(vm.rendered.contains("Hello there"))
+        #expect(vm.usesTimedPreview == (format == .srt || format == .vtt))
+        if format == .json { #expect(vm.previewText.contains("\"segments\"")) }
+        if format == .md { #expect(vm.previewText.contains("# lecture-04")) }
+    }
+
     @Test("copy writes the currently rendered text to the pasteboard")
     func copyWritesRenderedText() {
         let pasteboard = FakePasteboard()

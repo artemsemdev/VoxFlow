@@ -13,6 +13,9 @@ Cleanup first applies deterministic rules. Transcripts of up to 150 total source
 use the installed local style model within one eight-second budget; longer transcripts and model
 failures keep rules. Cleanup preserves the selected segment timestamps and confidence. Preview,
 search, copy, exports and the displayed word count use the currently displayed cleaned document.
+The result preview uses cue columns for SRT/VTT (with the respective comma/period timecodes)
+and the actual rendered file text for TXT, JSON and Markdown. Search filters preview segments;
+Copy and export keep the complete transcript.
 
 ## Text (TXT)
 

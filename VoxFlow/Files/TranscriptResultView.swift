@@ -28,12 +28,12 @@ struct TranscriptResultView: View {
                 .foregroundStyle(.tint)
                 .accessibilityLabel("Back to queue")
             VStack(alignment: .leading, spacing: 2) {
-                Text(resultModel.document.baseName).fontWeight(.semibold)
+                Text(resultModel.document.sourceURL.lastPathComponent).fontWeight(.semibold).lineLimit(1)
                 Text(resultModel.metaLine)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .lineLimit(2)
             }
-            .lineLimit(1)
             Spacer(minLength: 12)
             Picker("Format", selection: $resultModel.format) {
                 ForEach(OutputFormat.allCases, id: \.self) { format in
@@ -51,7 +51,9 @@ struct TranscriptResultView: View {
             }
             .buttonStyle(.borderedProminent)
         }
-        .padding(16)
+        .frame(height: 44)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
     }
 
     private var searchBar: some View {
@@ -79,9 +81,18 @@ struct TranscriptResultView: View {
 
     private var segmentList: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 10) {
-                ForEach(Array(resultModel.visibleIndexedSegments.enumerated()), id: \.offset) { _, indexed in
-                    TranscriptSegmentRow(index: indexed.index, segment: indexed.segment)
+            Group {
+                if resultModel.usesTimedPreview {
+                    LazyVStack(alignment: .leading, spacing: 10) {
+                        ForEach(Array(resultModel.visibleIndexedSegments.enumerated()), id: \.offset) { _, indexed in
+                            TranscriptSegmentRow(index: indexed.index, segment: indexed.segment, format: resultModel.format)
+                        }
+                    }
+                } else {
+                    Text(resultModel.previewText)
+                        .font(.system(.callout, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
             .padding(16)
@@ -170,10 +181,15 @@ struct SegmentLengthPicker: View {
 struct TranscriptSegmentRow: View {
     let index: Int
     let segment: TranscriptSegment
+    var format: OutputFormat = .srt
+
+    private func timecode(_ seconds: TimeInterval) -> String {
+        format == .vtt ? TimeCode.vtt(seconds) : TimeCode.srt(seconds)
+    }
 
     var body: some View {
         HStack(alignment: .top, spacing: 18) {
-            Text("\(index)\n\(TimeCode.srt(segment.start)) → \(TimeCode.srt(segment.end))")
+            Text("\(index)\n\(timecode(segment.start)) → \(timecode(segment.end))")
                 .font(.system(.caption, design: .monospaced))
                 .foregroundStyle(.secondary)
                 .frame(width: 190, alignment: .leading)
