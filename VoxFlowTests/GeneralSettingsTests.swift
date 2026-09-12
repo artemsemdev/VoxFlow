@@ -28,4 +28,25 @@ struct GeneralSettingsTests {
         #expect(reloaded.appearance == .dark)
         #expect(reloaded.flowBarPosition == .topCenter)
     }
+    @Test("window opacity defaults to opaque, persists and clamps invalid values")
+    func windowOpacityPersistence() {
+        let store = InMemoryKeyValueStore()
+        let settings = GeneralSettings(store: store)
+        #expect(settings.windowOpacity == 1)
+        settings.windowOpacity = 0.55
+        #expect(GeneralSettings(store: store).windowOpacity == 0.55)
+        settings.windowOpacity = 0
+        #expect(settings.windowOpacity == 0.2)
+        settings.windowOpacity = 2
+        #expect(settings.windowOpacity == 1)
+        settings.windowOpacity = .nan
+        #expect(settings.windowOpacity == 1)
+        for invalid in ["nan", "inf", "broken"] {
+            store.set(invalid, forKey: GeneralSettings.Keys.windowOpacity)
+            #expect(GeneralSettings(store: store).windowOpacity == 1)
+        }
+        store.set("0.1", forKey: GeneralSettings.Keys.windowOpacity)
+        #expect(GeneralSettings(store: store).windowOpacity == 0.2)
+    }
+
 }

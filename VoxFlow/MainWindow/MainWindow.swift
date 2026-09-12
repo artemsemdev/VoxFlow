@@ -22,6 +22,7 @@ struct MainWindow: View {
             }
         }
         .frame(minWidth: 900, minHeight: 600)
+        .background(WindowOpacityBridge(value: services.generalSettings.windowOpacity))
         .onChange(of: navigation.requestFileImport) { _, requested in
             if requested { navigation.page = .files }
         }

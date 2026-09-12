@@ -17,6 +17,7 @@ final class GeneralSettings {
         static let showInMenuBar = "general.showInMenuBar"
         static let playSounds = "general.playSounds"
         static let appearance = "general.appearance"
+        static let windowOpacity = "general.windowOpacity"
         static let flowBarPosition = "general.flowBarPosition"
     }
 
@@ -26,8 +27,26 @@ final class GeneralSettings {
     var appearance: AppAppearance { didSet { store.set(appearance.rawValue, forKey: Keys.appearance) } }
     var flowBarPosition: FlowBarPosition { didSet { store.set(flowBarPosition.rawValue, forKey: Keys.flowBarPosition) } }
 
+    static let windowOpacityRange = 0.2...1.0
+    private var storedWindowOpacity: Double
+
+    var windowOpacity: Double {
+        get { storedWindowOpacity }
+        set {
+            storedWindowOpacity = Self.normalizedWindowOpacity(newValue)
+            store.set(String(storedWindowOpacity), forKey: Keys.windowOpacity)
+        }
+    }
+
+    private static func normalizedWindowOpacity(_ value: Double) -> Double {
+        guard value.isFinite else { return 1 }
+        return min(windowOpacityRange.upperBound, max(windowOpacityRange.lowerBound, value))
+    }
+
     init(store: any KeyValueStore) {
         self.store = store
+        storedWindowOpacity = Self.normalizedWindowOpacity(
+            store.string(forKey: Keys.windowOpacity).flatMap(Double.init) ?? 1)
         launchAtLogin = store.string(forKey: Keys.launchAtLogin) == "1"                 // default off
         showInMenuBar = store.string(forKey: Keys.showInMenuBar) != "0"                 // default on
         playSounds = store.string(forKey: Keys.playSounds) != "0"                       // default on

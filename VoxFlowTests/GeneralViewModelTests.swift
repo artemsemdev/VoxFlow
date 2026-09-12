@@ -40,6 +40,18 @@ struct GeneralViewModelTests {
         #expect(h.appearance.applied == [.system, .dark])
     }
 
+    @Test("window opacity binds to settings and displays the current whole percentage")
+    func opacityBindsToSettings() {
+        let h = Harness()
+        #expect(h.vm.windowOpacityLabel == "100%")
+        h.vm.windowOpacity = 0.55
+        #expect(h.settings.windowOpacity == 0.55)
+        #expect(h.vm.windowOpacityLabel == "55%")
+        h.settings.windowOpacity = 0.2
+        #expect(h.vm.windowOpacity == 0.2)
+        #expect(h.vm.windowOpacityLabel == "20%")
+    }
+
     @Test("Flow Bar position change persists and applies")
     func positionChangePersistsAndApplies() {
         let h = Harness()

@@ -33,6 +33,13 @@ final class GeneralViewModel {
         }
     }
 
+    var windowOpacity: Double {
+        get { settings.windowOpacity }
+        set { settings.windowOpacity = newValue }
+    }
+
+    var windowOpacityLabel: String { "\(Int((windowOpacity * 100).rounded()))%" }
+
     var flowBarPosition: FlowBarPosition {
         get { settings.flowBarPosition }
         set {
