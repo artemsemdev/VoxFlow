@@ -1,4 +1,5 @@
 import Foundation
+import VoxFlowCore
 import VoxFlowDictation
 
 /// Answers "may we listen right now?" from AppKit facts (design FB-07, FB-08, FB-10, 3e "Secure input").
@@ -7,6 +8,7 @@ struct PreflightBuilder: Sendable {
     let permissions: any PermissionChecking
     let readiness: @Sendable () async -> ModelReadiness
     let settings: DictationSettingsSnapshot
+    var microphoneUse: any MicrophoneUseMonitoring = UnmonitoredMicrophoneUse()
     /// Called last, only when no gate applies — the inserter remembers the focused element (ruling 2).
     /// Takes the already-read `FrontmostApp` (I-5: the inserter must not re-read `NSWorkspace` itself,
     /// which can disagree with the app that passed the exclusion check above if the frontmost app
@@ -35,6 +37,9 @@ struct PreflightBuilder: Sendable {
         if mic == .notDetermined { mic = await permissions.requestMicrophone() }
         guard mic == .granted else {
             return Preflight(excludedApp: nil, secureInput: false, microphone: .denied, model: .loaded)
+        }
+        if case .inUse(let app) = microphoneUse.freshState() {
+            return Preflight(excludedApp: nil, secureInput: false, microphone: .inUse(by: app), model: .loaded)
         }
         let model = await readiness()
         if case .notInstalled = model {

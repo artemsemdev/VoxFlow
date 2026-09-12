@@ -245,6 +245,9 @@ final class AppServices {
         let dictationSettings = DictationSettings(store: settingsStore)
         let permissions = SystemPermissions()
         let frontmost = WorkspaceFrontmostApp()
+        let microphoneUse = CoreAudioMicrophoneUseMonitor { pid in
+            NSRunningApplication(processIdentifier: pid)?.localizedName
+        }
         let inserter = AccessibilityTextInserter(permissions: permissions, pasteboard: SystemPasteboard())
 
         // `HistoryService` owns opening/reopening the store (and its `RetentionRunner`) off the main
@@ -303,6 +306,7 @@ final class AppServices {
             let builder = PreflightBuilder(frontmost: frontmost, permissions: permissions,
                                            readiness: { await modelLoader.readiness() },
                                            settings: dictationSettings.box.current,
+                                           microphoneUse: microphoneUse,
                                            captureFocus: { app in await inserter.captureFocus(app: app) },
                                            onFrontmostCaptured: { app in frontmostBox.set(app) })
             return await builder.preflight()
@@ -319,7 +323,7 @@ final class AppServices {
         let ephemeralScope = EphemeralScope()
         let dictationController = DictationController(
             config: dictationSettings.flowBarConfig,
-            microphone: MeteredMicrophone(base: MicrophoneSource()) { rms in levelSink.report(rms) },
+            microphone: MeteredMicrophone(base: MicrophoneSource(microphoneUse: microphoneUse)) { rms in levelSink.report(rms) },
             transcriber: styledTranscriber,
             inserter: inserter,
             clock: clock,
