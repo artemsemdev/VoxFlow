@@ -19,6 +19,8 @@ any app, style cleanup with a local LLM and an MCP server follow in 2.x (see the
   over four hours, failed rows that never stall the queue, a "2×" badge for duplicate drops.
 - Transcripts saved to `~/Transcripts` in the format you chose — TXT, SRT, VTT, JSON or Markdown —
   and re-exported to any other format instantly, without re-processing. Spec: [docs/formats.md](docs/formats.md).
+- Selected output folders restore through security-scoped bookmarks. Unavailable or stale folders
+  fall back to Transcripts with a visible notice; exports retain access while their files are written.
 - A result view with Sentences / Short / Long segment lengths, search, Copy, Save as… and Reveal in
   Finder. Preview and export share the chosen segmentation without running recognition again.
   Optional cleanup renders rules instantly and improves transcripts up to 150 words with the

@@ -41,11 +41,16 @@ struct FilesToolbar: View {
                     .buttonStyle(.borderedProminent)
                     .disabled(!model.canTranscribe)
             }
+            if let message = settings.outputFolderMessage {
+                Label(message, systemImage: "exclamationmark.triangle")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
         .padding(.horizontal, 16)
         .padding(.bottom, 12)
         .fileImporter(isPresented: $isFolderPickerPresented, allowedContentTypes: [.folder]) { result in
-            if case .success(let url) = result { settings.outputFolder = url }
+            if case .success(let url) = result { settings.selectOutputFolder(url) }
         }
     }
 

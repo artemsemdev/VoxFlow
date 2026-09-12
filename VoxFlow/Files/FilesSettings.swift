@@ -24,6 +24,7 @@ final class OptionsSnapshot: Sendable {
 @Observable @MainActor
 final class FilesSettings {
     private let store: any KeyValueStore
+    private let outputSelection: OutputFolderSelection
     let optionsSnapshot: OptionsSnapshot
 
     var outputFormat: OutputFormat { didSet { store.set(outputFormat.rawValue, forKey: "files.format") } }
@@ -36,17 +37,22 @@ final class FilesSettings {
             optionsSnapshot.update(transcriptionOptions)
         }
     }
-    var outputFolder: URL { didSet { store.set(outputFolder.path, forKey: "files.outputFolder") } }
+    var outputFolder: URL {
+        get { outputSelection.url }
+        set { outputSelection.select(newValue) }
+    }
+    var outputFolderMessage: String? { outputSelection.message }
+    func selectOutputFolder(_ url: URL) { outputSelection.select(url) }
+    func makeExporter() -> TranscriptExporter { outputSelection.exporter() }
 
-    init(store: any KeyValueStore) {
+    init(store: any KeyValueStore, bookmarks: any OutputFolderBookmarking = SystemOutputFolderBookmarks()) {
         self.store = store
+        outputSelection = OutputFolderSelection(store: store, bookmarks: bookmarks)
         outputFormat = store.string(forKey: "files.format").flatMap(OutputFormat.init(rawValue:)) ?? .default
         batchMode = store.string(forKey: "files.batch") != "0"
         timestamps = store.string(forKey: "files.timestamps") != "0"
         let initialLanguage = store.string(forKey: "files.language")
         language = initialLanguage
-        outputFolder = store.string(forKey: "files.outputFolder").map { URL(fileURLWithPath: $0, isDirectory: true) }
-            ?? TranscriptExporter.defaultDirectory
         optionsSnapshot = OptionsSnapshot(TranscriptionOptions(language: initialLanguage))
     }
 
