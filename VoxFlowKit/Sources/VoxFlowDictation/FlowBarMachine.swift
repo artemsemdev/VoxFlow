@@ -387,7 +387,8 @@ public struct FlowBarMachine: Sendable, Equatable {
         switch error {
         case .accessDenied: .denied
         case .noInputDevice: .noDevice
-        case .engineFailed: .inUse(by: nil)
+        case .inUse(let app): .inUse(by: app)
+        case .engineFailed: .granted
         }
     }
 }

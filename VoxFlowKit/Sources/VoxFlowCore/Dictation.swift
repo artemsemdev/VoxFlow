@@ -17,8 +17,28 @@ public struct AudioChunk: Sendable, Equatable {
 public enum MicrophoneError: Error, Equatable, Sendable {
     case accessDenied
     case noInputDevice
+    case inUse(by: String?)
     /// The audio engine could not start or stopped; the other app, when known, is in the string.
     case engineFailed(String)
+}
+
+public enum MicrophoneUseState: Sendable, Equatable {
+    case available
+    case inUse(by: String?)
+    case unknown
+}
+
+public protocol MicrophoneUseMonitoring: Sendable {
+    func currentState() -> MicrophoneUseState
+    func freshState() -> MicrophoneUseState
+    func changes() -> AsyncStream<MicrophoneUseState>
+}
+
+public struct UnmonitoredMicrophoneUse: MicrophoneUseMonitoring {
+    public init() {}
+    public func currentState() -> MicrophoneUseState { .unknown }
+    public func freshState() -> MicrophoneUseState { .unknown }
+    public func changes() -> AsyncStream<MicrophoneUseState> { AsyncStream { $0.finish() } }
 }
 
 public enum MicrophoneEvent: Sendable, Equatable {

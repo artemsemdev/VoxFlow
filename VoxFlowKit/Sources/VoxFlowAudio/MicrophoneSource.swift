@@ -6,12 +6,33 @@ import VoxFlowCore
 /// `AVAudioEngine` input tap → 16 kHz mono chunks with RMS (design §4 `MicrophoneSource`, ST-04n, FB-07).
 public final class MicrophoneSource: MicrophoneCapturing, Sendable {
     private let chunkSeconds: Double
+    private let microphoneUse: any MicrophoneUseMonitoring
 
-    public init(chunkSeconds: Double = 0.1) { self.chunkSeconds = chunkSeconds }
+    public init(chunkSeconds: Double = 0.1, microphoneUse: any MicrophoneUseMonitoring = UnmonitoredMicrophoneUse()) {
+        self.chunkSeconds = chunkSeconds
+        self.microphoneUse = microphoneUse
+    }
+
+    public func classifiedStartError(_ description: String) -> MicrophoneError {
+        Self.classifyStartError(description, microphoneUse: microphoneUse)
+    }
+
+    private static func classifyStartError(
+        _ description: String, microphoneUse: any MicrophoneUseMonitoring
+    ) -> MicrophoneError {
+        if case .inUse(let app) = microphoneUse.freshState() {
+            return .inUse(by: app)
+        }
+        return .engineFailed(description)
+    }
 
     public func start() -> AsyncThrowingStream<MicrophoneEvent, Error> {
         AsyncThrowingStream { continuation in
-            let session = CaptureSession(chunkSeconds: chunkSeconds, continuation: continuation)
+            let classifyStartError: @Sendable (String) -> MicrophoneError = { [microphoneUse] description in
+                Self.classifyStartError(description, microphoneUse: microphoneUse)
+            }
+            let session = CaptureSession(chunkSeconds: chunkSeconds, classifyStartError: classifyStartError,
+                                         continuation: continuation)
             continuation.onTermination = { _ in session.stop() }
             session.start()
         }
@@ -33,13 +54,16 @@ private final class CaptureSession: @unchecked Sendable {
     private let queue = DispatchQueue(label: "dev.artemsem.voxflow.microphone")
     private let engine = AVAudioEngine()
     private let chunkSeconds: Double
+    private let classifyStartError: @Sendable (String) -> MicrophoneError
     private let continuation: AsyncThrowingStream<MicrophoneEvent, Error>.Continuation
     private var observer: NSObjectProtocol?
     private var stopped = false
     private var chunker: AudioChunker
 
-    init(chunkSeconds: Double, continuation: AsyncThrowingStream<MicrophoneEvent, Error>.Continuation) {
+    init(chunkSeconds: Double, classifyStartError: @escaping @Sendable (String) -> MicrophoneError,
+         continuation: AsyncThrowingStream<MicrophoneEvent, Error>.Continuation) {
         self.chunkSeconds = chunkSeconds
+        self.classifyStartError = classifyStartError
         self.continuation = continuation
         self.chunker = AudioChunker(seconds: chunkSeconds)
     }
@@ -87,7 +111,9 @@ private final class CaptureSession: @unchecked Sendable {
             for chunk in chunker.append(samples) { continuation.yield(.chunk(chunk)) }
         }
         engine.prepare()
-        do { try engine.start() } catch { throw MicrophoneError.engineFailed(error.localizedDescription) }
+        do { try engine.start() } catch {
+            throw classifyStartError(error.localizedDescription)
+        }
     }
 
     private func restart() {

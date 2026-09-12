@@ -209,7 +209,7 @@ struct FlowBarMachineTests {
         #expect(m.state == .listening(Listening(mode: .pushToTalk, startedAt: 0, language: LanguageDetection(code: "de", confidence: 0.4))))
         #expect(m.handle(.microphoneFailed(.engineFailed("stopped")), now: 2) ==
                 [.cancelTimer(.cap), .cancelTimer(.silence), .abortCapture, .startTimer(.dismiss, seconds: 4)])
-        #expect(m.state == .micUnavailable(.inUse(by: nil)))
+        #expect(m.state == .micUnavailable(.granted))
     }
 
     @Test("partial text belongs to the dictation from fn-down: recorded while armed, survives to a raw copy on timeout")
