@@ -163,6 +163,52 @@ struct StyleModelLoaderTests {
         #expect(await engine.unloadCount == 1)   // still just the one unload
     }
 
+    @Test("concurrent ready callers cannot queue another generation behind native work", .timeLimit(.minutes(1)))
+    func busyGenerationFallsBackImmediately() async throws {
+        let dir = TemporaryDirectory()
+        try installStyleModelFile(in: dir)
+        let engine = ContendedStyleEngine()
+        let loader = StyleModelLoader(store: store(dir: dir), engine: engine)
+        await loader.warmUp()
+        // Both callers can observe ready before either calls generate; the generate-side claim
+        // must decide ownership atomically, independently of the earlier advisory readiness.
+        #expect(await loader.isReady())
+        #expect(await loader.isReady())
+        let prompt = ChatPrompt(system: "system", user: "we should meet tomorrow")
+        let first = Task { try await loader.generate(prompt, maxNewTokens: 32) }
+        await engine.entered.wait()
+        #expect(await loader.isReady() == false)
+        await #expect(throws: LLMError.backendBusy) {
+            _ = try await loader.generate(prompt, maxNewTokens: 32)
+        }
+        #expect(await engine.calls == 1)
+        await engine.release.open()
+        #expect(try await first.value == "styled text")
+        #expect(await loader.isReady())
+        #expect(try await loader.generate(prompt, maxNewTokens: 32) == "styled text")
+        await engine.failNext()
+        await #expect(throws: LLMError.cancelled) {
+            _ = try await loader.generate(prompt, maxNewTokens: 32)
+        }
+        #expect(await loader.isReady()) // throwing generation must release ownership too
+    }
+
+    private actor ContendedStyleEngine: StyleEngine {
+        let entered = Gate(), release = Gate()
+        private(set) var calls = 0
+        private var fail = false
+        func isReady() async -> Bool { true }
+        func load(modelAt url: URL) async throws {}
+        func unload() async {}
+        func failNext() { fail = true }
+        func generate(_ prompt: ChatPrompt, maxNewTokens: Int) async throws -> String {
+            calls += 1
+            if fail { fail = false; throw LLMError.cancelled }
+            if calls == 1 { await entered.open(); await release.wait() }
+            return "styled text"
+        }
+    }
+
     @Test("generate before a model is loaded throws modelNotLoaded; once loaded it forwards the prompt")
     func generateBeforeAndAfterLoad() async throws {
         let dir = TemporaryDirectory()

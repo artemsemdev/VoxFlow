@@ -32,12 +32,21 @@ struct StyledTranscriber: DictationTranscribing {
 
     func transcribe(_ chunks: AsyncStream<AudioChunk>, options: TranscriptionOptions,
                     onEvent: @Sendable @escaping (DictationEvent) async -> Void) async throws -> DictationResult {
-        let result = try await base.transcribe(chunks, options: options, onEvent: onEvent)
+        try await transcribe(chunks, options: options, processingDeadline: { nil }, onEvent: onEvent)
+    }
+
+    func transcribe(_ chunks: AsyncStream<AudioChunk>, options: TranscriptionOptions,
+                    processingDeadline: @escaping @Sendable () -> TimeInterval?,
+                    onEvent: @Sendable @escaping (DictationEvent) async -> Void) async throws -> DictationResult {
+        let result = try await base.transcribe(chunks, options: options,
+                                              processingDeadline: processingDeadline, onEvent: onEvent)
 
         let app = frontmost.current
         let snapshot = settings.current
         let style = StyleResolver.resolve(default: snapshot.defaultStyle, overrides: content.overridesBox.current, bundleID: app?.bundleID)
-        let stylingOptions = StylingOptions(style: style, removeFillers: snapshot.removeFillers, autoPunctuate: snapshot.autoPunctuate)
+        // Leave one second for snippet expansion, insertion dispatch and the reducer to finish.
+        let stylingOptions = StylingOptions(style: style, removeFillers: snapshot.removeFillers,
+            autoPunctuate: snapshot.autoPunctuate, generationDeadline: processingDeadline().map { $0 - 1 })
         let styled: StyledText
         do {
             styled = try await styler.style(result.rawText, options: stylingOptions)

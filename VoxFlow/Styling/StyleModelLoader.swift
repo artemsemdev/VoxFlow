@@ -11,6 +11,9 @@ actor StyleModelLoader: LLMBackend {
     private let engine: any StyleEngine
     private(set) var loadedModelID: String?
     private var loadTask: Task<Void, Never>?
+    // Do not queue a short-budget dictation behind another native generation: a queued native
+    // continuation cannot observe cancellation until the older operation leaves the serial queue.
+    private var generationInFlight = false
     /// Bumped every time a new load `Task` is created, and captured by that task. Lets
     /// `load(_:generation:)`'s `defer` tell "I am still the current `loadTask`" from "a newer load
     /// has already replaced me" without comparing `Task` values (final review I1) — needed because
@@ -22,7 +25,10 @@ actor StyleModelLoader: LLMBackend {
     init(store: ModelStore, engine: any StyleEngine) { self.store = store; self.engine = engine }
 
     func isReady() async -> Bool {
-        guard let model = await store.defaultModel(role: .style) else {
+        guard !generationInFlight else { return false }
+        let model = await store.defaultModel(role: .style)
+        guard !generationInFlight else { return false }
+        guard let model else {
             await cancelLoadAndUnloadIfNeeded()
             return false
         }
@@ -41,6 +47,9 @@ actor StyleModelLoader: LLMBackend {
 
     func generate(_ prompt: ChatPrompt, maxNewTokens: Int) async throws -> String {
         guard loadedModelID != nil else { throw LLMError.modelNotLoaded }
+        guard !generationInFlight else { throw LLMError.backendBusy }
+        generationInFlight = true
+        defer { generationInFlight = false }
         return try await engine.generate(prompt, maxNewTokens: maxNewTokens)
     }
 

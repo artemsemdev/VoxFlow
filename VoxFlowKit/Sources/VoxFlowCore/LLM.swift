@@ -8,6 +8,7 @@ public struct ChatPrompt: Sendable, Equatable {
 }
 
 public enum LLMError: Error, Equatable, Sendable {
+    case backendBusy
     case modelNotLoaded
     case modelLoadFailed(String)
     case promptTooLong(tokens: Int, limit: Int)
