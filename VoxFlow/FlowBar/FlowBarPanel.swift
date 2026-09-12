@@ -91,7 +91,9 @@ final class FlowBarPanel: NSPanel, FlowBarPanelling, FlowBarPositioning, NSWindo
 
     init(rootView: FlowBarView) {
         hostingController = NSHostingController(rootView: rootView)
-        hostingController.sizingOptions = [.intrinsicContentSize]
+        // The window needs content bounds as well as an ideal size. Intrinsic-only sizing can
+        // leave its frame at the armed width while wider recording/processing content is clipped.
+        hostingController.sizingOptions = .standardBounds
         super.init(contentRect: .zero, styleMask: [.nonactivatingPanel, .borderless, .fullSizeContentView],
                     backing: .buffered, defer: true)
         level = .statusBar
