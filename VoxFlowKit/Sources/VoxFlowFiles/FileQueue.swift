@@ -4,6 +4,7 @@ import VoxFlowCore
 public struct QueueItem: Identifiable, Sendable, Equatable {
     public enum Status: Sendable, Equatable {
         case queued
+        case loadingModel(modelID: String)
         case running(progress: Double)
         case done(TranscriptDocument)
         case failed(FileTranscriptionError)
@@ -141,7 +142,7 @@ public actor FileQueue {
         case .queued:
             items[index].status = .cancelled
             publish(.changed(items[index]))
-        case .running:
+        case .loadingModel, .running:
             guard currentID == id else { return }
             currentJob?.cancel()      // the job's catch marks the row cancelled
         default:
@@ -195,54 +196,67 @@ public actor FileQueue {
     /// Runs one job and applies its terminal status. Progress reports arrive on the transcriber's
     /// callback thread and would otherwise race the `.done`/`.failed` update applied right after
     /// `transcribe` returns (the callback's actor hop can land after the terminal state). To keep
-    /// ordering deterministic, the callback only feeds a per-job `AsyncStream<Double>`; a child task
-    /// drains that stream through `report(_:progress:)` on the actor, and we `finish()` the stream
+    /// ordering deterministic, the callback only feeds a per-job update stream; a child task
+    /// drains that stream through `report(_:update:)` on the actor, and we `finish()` the stream
     /// and `await` that child task *before* applying the terminal status — so every `.changed`
     /// progress event the transcriber reported is guaranteed to have already gone through `report`
     /// (and thus been published, if it passed the coalescing threshold) by the time `.done`,
     /// `.failed`, or `.cancelled` is applied and `.finished` is published.
     private func transcribe(_ item: QueueItem) async {
-        let (progressStream, progressContinuation) = AsyncStream<Double>.makeStream(bufferingPolicy: .unbounded)
-        let progressTask = Task {
-            for await value in progressStream {
-                self.report(item.id, progress: value)
+        let (updateStream, updateContinuation) = AsyncStream<FileTranscriptionUpdate>.makeStream(bufferingPolicy: .unbounded)
+        let updateTask = Task {
+            for await value in updateStream {
+                self.report(item.id, update: value)
             }
         }
         defer { lastPublishedProgress[item.id] = nil }
 
-        func drainProgress() async {
-            progressContinuation.finish()
-            await progressTask.value
+        func drainUpdates() async {
+            updateContinuation.finish()
+            await updateTask.value
         }
 
         do {
-            let document = try await transcriber.transcribe(item.url, options: options()) { progress in
-                progressContinuation.yield(progress)
+            let document = try await transcriber.transcribe(item.url, options: options()) { update in
+                updateContinuation.yield(update)
             }
-            await drainProgress()
+            await drainUpdates()
             update(item.id) { $0.status = .done(document) }
             if let finished = items.first(where: { $0.id == item.id }) { publish(.finished(finished)) }
         } catch FileTranscriptionError.cancelled {
-            await drainProgress()
+            await drainUpdates()
             update(item.id) { $0.status = .cancelled }
         } catch is CancellationError {
-            await drainProgress()
+            await drainUpdates()
             update(item.id) { $0.status = .cancelled }
         } catch let error as FileTranscriptionError {
-            await drainProgress()
+            await drainUpdates()
             update(item.id) { $0.status = .failed(error) }
             if let finished = items.first(where: { $0.id == item.id }) { publish(.finished(finished)) }
         } catch {
-            await drainProgress()
+            await drainUpdates()
             update(item.id) { $0.status = .failed(.engineFailed(String(describing: error))) }
             if let finished = items.first(where: { $0.id == item.id }) { publish(.finished(finished)) }
         }
     }
 
-    private func report(_ id: UUID, progress: Double) {
-        guard let index = items.firstIndex(where: { $0.id == id }), case .running = items[index].status else { return }
+    private func report(_ id: UUID, update: FileTranscriptionUpdate) {
+        guard let index = items.firstIndex(where: { $0.id == id }) else { return }
+        if case .loadingModel(let modelID) = update {
+            guard case .running = items[index].status else { return }
+            items[index].status = .loadingModel(modelID: modelID)
+            publish(.changed(items[index]))
+            return
+        }
+        guard case .progress(let progress) = update else { return }
+        let leavingLoading: Bool
+        switch items[index].status {
+        case .loadingModel: leavingLoading = true
+        case .running: leavingLoading = false
+        default: return
+        }
         let clamped = min(max(progress, 0), 1)
-        guard clamped - (lastPublishedProgress[id] ?? -1) >= 0.01 else { return }
+        guard leavingLoading || clamped - (lastPublishedProgress[id] ?? -1) >= 0.01 else { return }
         lastPublishedProgress[id] = clamped
         items[index].status = .running(progress: clamped)
         publish(.changed(items[index]))

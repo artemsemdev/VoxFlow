@@ -20,7 +20,9 @@ struct FileTranscriberTests {
         let engine = WindowRecordingEngine()
         let transcriber = FileTranscriber(decoder: FakeDecoder(result: .success(AudioSamples(samples))), engine: engine, modelID: "m")
         let progress = Progress()
-        let document = try await transcriber.transcribe(url, options: TranscriptionOptions()) { progress.append($0) }
+        let document = try await transcriber.transcribe(url, options: TranscriptionOptions()) {
+            if case .progress(let value) = $0 { progress.append(value) }
+        }
         #expect(engine.calls.map { $0.audio.duration } == [10, 10, 5])
         #expect(engine.calls.flatMap { $0.audio.samples } == samples)
         #expect(engine.detectionDurations == [25])
@@ -76,7 +78,9 @@ struct FileTranscriberTests {
         let clock = TestClock(start: Date(timeIntervalSince1970: 100), step: 1.5)
         let transcriber = FileTranscriber(decoder: decoder, engine: engine, modelID: "whisper-small", now: clock.now)
         let progress = Progress()
-        let document = try await transcriber.transcribe(url, options: TranscriptionOptions()) { progress.append($0) }
+        let document = try await transcriber.transcribe(url, options: TranscriptionOptions()) {
+            if case .progress(let value) = $0 { progress.append(value) }
+        }
         #expect(document.transcript.language == "de")
         #expect(document.transcript.segments.map(\.text) == ["hello", "world"])
         #expect(document.audioDuration == 4)

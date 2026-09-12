@@ -113,6 +113,8 @@ versioning.
   backend, avoiding unnecessary GPU initialization and Metal compiler warnings in failure-path tests.
 - Long file jobs yield the speech engine between bounded windows, with queued dictation taking
   priority instead of waiting for the entire file to finish.
+- Files and Settings show “Loading into memory…” while the shared speech model prepares for first
+  use, before transcription progress begins; concurrent Files and dictation callers share one load.
 - Settings › General's appearance and Flow Bar position now apply at launch, not only once
   Settings has been opened at least once.
 - The Flow Bar HUD and the menu bar's "Paused until 10:41" now read the same clock instead of two

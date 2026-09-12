@@ -24,11 +24,14 @@ final class ModelsViewModel {
         let model: ModelDescriptor
         var state: ModelState
         var isDefault: Bool
+        var isLoadingIntoMemory = false
         var id: String { model.id }
         // `nonisolated` — `Row` is a plain value type with no isolation of its own, and `gigabytes`
         // touches no actor state, so it stays callable from a nonisolated context like this getter.
         var sizeText: String { ModelsViewModel.gigabytes(model.sizeInBytes) }
         var subtitle: String { "\(sizeText) · \(model.languagesSummary)" }
+        var statusSubtitle: String { isLoadingIntoMemory ? "Loading into memory…" : subtitle }
+        var statusContext: String? { isLoadingIntoMemory ? "first use" : nil }
         var isAvailable: Bool { !model.sha256.isEmpty }   // the Qwen row ships in phase 5
     }
 
@@ -49,6 +52,7 @@ final class ModelsViewModel {
     private(set) var footerText = ""
 
     private let store: ModelStore
+    private let modelLoader: ModelLoader?
     private let catalog: [ModelDescriptor]
     private let settingsOpener: any SystemSettingsOpening
     private var installs: [String: Task<Void, Never>] = [:]
@@ -57,10 +61,11 @@ final class ModelsViewModel {
     /// `ETAEstimator`); cleared whenever a row leaves `.downloading` for any other state.
     private var estimators: [String: ETAEstimator] = [:]
 
-    init(store: ModelStore, catalog: [ModelDescriptor] = ModelCatalog.all,
+    init(store: ModelStore, catalog: [ModelDescriptor] = ModelCatalog.all, modelLoader: ModelLoader? = nil,
          settingsOpener: any SystemSettingsOpening = WorkspaceSystemSettingsOpener(), now: @escaping () -> Date = { Date() }) {
         self.store = store
         self.catalog = catalog
+        self.modelLoader = modelLoader
         self.settingsOpener = settingsOpener
         self.now = now
     }
@@ -92,10 +97,32 @@ final class ModelsViewModel {
         for index in style.indices where installs[style[index].id] != nil {
             if let live = liveStates[style[index].id] { style[index].state = live }
         }
+        // Read this after the suspending store loop so a load that started or finished during the
+        // refresh cannot be overwritten by an earlier snapshot.
+        let loadingModelID = await modelLoader?.loadingModelID
+        for index in speech.indices { speech[index].isLoadingIntoMemory = speech[index].id == loadingModelID }
+        for index in style.indices { style[index].isLoadingIntoMemory = style[index].id == loadingModelID }
         speechRows = speech
         styleRows = style
         let directory = await store.directory   // actor-isolated property: needs its own hop
         footerText = "\(Self.gigabytes(installedBytes)) in \(Self.abbreviate(directory)). Downloads happen only when you press Download — VoxFlow never checks for or fetches anything on its own."
+    }
+
+    func observeModelLoading() async {
+        guard let modelLoader else { return }
+        let events = await modelLoader.subscribe()
+        if let id = await modelLoader.loadingModelID { setLoading(true, modelID: id) }
+        for await event in events {
+            switch event {
+            case .started(let id): setLoading(true, modelID: id)
+            case .finished(let id): setLoading(false, modelID: id)
+            }
+        }
+    }
+
+    private func setLoading(_ loading: Bool, modelID: String) {
+        if let index = speechRows.firstIndex(where: { $0.id == modelID }) { speechRows[index].isLoadingIntoMemory = loading }
+        if let index = styleRows.firstIndex(where: { $0.id == modelID }) { styleRows[index].isLoadingIntoMemory = loading }
     }
 
     /// Runs the install in a detached-from-`self` task: only `store` (a plain, cycle-free reference)

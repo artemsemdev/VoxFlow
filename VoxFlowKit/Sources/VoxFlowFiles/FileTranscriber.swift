@@ -21,7 +21,7 @@ public struct FileTranscriber: FileTranscribing {
     }
 
     public func transcribe(_ url: URL, options: TranscriptionOptions,
-                           progress: @Sendable @escaping (Double) -> Void) async throws -> TranscriptDocument {
+                           update: @Sendable @escaping (FileTranscriptionUpdate) -> Void) async throws -> TranscriptDocument {
         try Task.checkCancellation()
         let started = now()
         let audio: AudioSamples
@@ -34,7 +34,7 @@ public struct FileTranscriber: FileTranscribing {
             case .decodeFailed(let reason): throw FileTranscriptionError.decodeFailed(reason)
             }
         }
-        progress(Self.decodeShare)
+        update(.progress(Self.decodeShare))
 
         var options = options
         do {
@@ -56,13 +56,13 @@ public struct FileTranscriber: FileTranscribing {
                                                           text: segment.text, confidence: segment.confidence)!)
                     case .progress(let value):
                         let fraction = (Double(offset) + min(max(value, 0), 1) * Double(count)) / Double(max(audio.samples.count, 1))
-                        progress(Self.decodeShare + (1 - Self.decodeShare) * fraction)
+                        update(.progress(Self.decodeShare + (1 - Self.decodeShare) * fraction))
                     }
                 }
                 offset += count
             } while offset < audio.samples.count
             try Task.checkCancellation()
-            progress(1)
+            update(.progress(1))
             let finished = now()
             return TranscriptDocument(sourceURL: url, transcript: Transcript(segments: segments, language: options.language),
                                       modelID: modelID, audioDuration: audio.duration,

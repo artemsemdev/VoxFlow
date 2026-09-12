@@ -30,7 +30,7 @@ struct WhisperCppEngineIntegrationTests {
         let file = Task {
             defer { continuation.finish() }
             return try await files.transcribe(fixture, options: TranscriptionOptions(language: "en")) {
-                if $0 > 0.05 && $0 < 1 { continuation.yield(()) }
+                if case .progress(let value) = $0, value > 0.05 && value < 1 { continuation.yield(()) }
             }
         }
         defer { file.cancel() }

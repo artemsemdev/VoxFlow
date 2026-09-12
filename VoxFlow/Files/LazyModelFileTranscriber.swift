@@ -18,11 +18,11 @@ actor LazyModelFileTranscriber: FileTranscribing {
     }
 
     func transcribe(_ url: URL, options: TranscriptionOptions,
-                    progress: @Sendable @escaping (Double) -> Void) async throws -> TranscriptDocument {
+                    update: @Sendable @escaping (FileTranscriptionUpdate) -> Void) async throws -> TranscriptDocument {
         // M-9: use the model `ensureLoaded()` itself ensured, rather than looking the default up a
         // second time — the two could disagree if the default changed between the two calls.
-        let model = try await loader.ensureLoaded()
+        let model = try await loader.ensureLoaded { update(.loadingModel(modelID: $0)) }
         return try await FileTranscriber(decoder: decoder, engine: engine, modelID: model.id)
-            .transcribe(url, options: options, progress: progress)
+            .transcribe(url, options: options, update: update)
     }
 }

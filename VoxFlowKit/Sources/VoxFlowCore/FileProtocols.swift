@@ -26,8 +26,13 @@ public enum FileTranscriptionError: Error, Equatable, Sendable {
     case cancelled
 }
 
-/// Transcribes one file end to end; `progress` is 0…1.
+public enum FileTranscriptionUpdate: Sendable, Equatable {
+    case loadingModel(modelID: String)
+    case progress(Double)
+}
+
+/// Transcribes one file end to end, reporting model loading separately from 0…1 inference progress.
 public protocol FileTranscribing: Sendable {
     func transcribe(_ url: URL, options: TranscriptionOptions,
-                    progress: @Sendable @escaping (Double) -> Void) async throws -> TranscriptDocument
+                    update: @Sendable @escaping (FileTranscriptionUpdate) -> Void) async throws -> TranscriptDocument
 }

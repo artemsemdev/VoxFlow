@@ -34,6 +34,13 @@ final class SequentialClock: Sendable {
 
 @Suite("ModelsViewModel") @MainActor
 struct ModelsViewModelTests {
+    @Test("loading row exposes the ST-03v first-use copy")
+    func loadingRowCopy() {
+        let row = ModelsViewModel.Row(model: Self.big, state: .installed, isDefault: true, isLoadingIntoMemory: true)
+        #expect(row.statusSubtitle == "Loading into memory…")
+        #expect(row.statusContext == "first use")
+    }
+
     static func payload(_ seed: UInt8, count: Int) -> Data { Data((0..<count).map { UInt8(($0 &+ Int(seed)) % 256) }) }
     static let bigPayload = payload(1, count: 300_000)
     static let smallPayload = payload(2, count: 100_000)

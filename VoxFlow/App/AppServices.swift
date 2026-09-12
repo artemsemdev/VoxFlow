@@ -239,7 +239,7 @@ final class AppServices {
                                         exporter: { TranscriptExporter(directory: filesSettings.outputFolder) })
         let filesViewModel = FilesViewModel(queue: queue, settings: filesSettings, modelStore: modelStore,
                                             durations: durations, exports: exports)
-        let modelsViewModel = ModelsViewModel(store: modelStore)
+        let modelsViewModel = ModelsViewModel(store: modelStore, modelLoader: modelLoader)
         let navigation = Navigation()
 
         let dictationSettings = DictationSettings(store: settingsStore)
