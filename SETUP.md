@@ -114,15 +114,22 @@ absent from CI.
 
 ### MCP server
 
-Settings › MCP Server turns on a loopback-only MCP server so Cursor or Claude Desktop can use
-VoxFlow as a tool (`transcribe_file`, `dictate`, `search_history`) over `127.0.0.1` with a token
-from the Keychain. It's off by default and needs no setup beyond turning it on and copying the
-token — connecting a client, approving it, revoking it, and what to do if the port moves are all
-covered in [docs/runbooks/connect-an-mcp-client.md](docs/runbooks/connect-an-mcp-client.md); the
-design is [ADR-008](docs/adr/008-loopback-mcp-server.md).
-`VoxFlowTests`' `MCPServerIntegrationTests` exercises the real server over a real loopback socket
-(as part of `xcodebuild … test`, not a separate step) and skips, with a printed reason, if it can't
-bind a port in 7331–7340 or if no speech model is installed for its `transcribe_file` case.
+VoxFlow exposes `transcribe_file`, `dictate` and optional `search_history` through two transports:
+
+- **HTTP (Codex/Cursor):** enable Settings › MCP Server, then copy its loopback endpoint and
+  Keychain token. The first tool call requests client approval.
+- **Native stdio (Claude Desktop):** configure the installed app executable with `--mcp-stdio`.
+  The client launches a separate process; no Node bridge, HTTP toggle or token is needed. HTTP
+  approvals and token regeneration do not control this process. Remove its client configuration
+  and stop the subprocess to revoke access. Restart it after changing tool settings.
+
+Configuration and troubleshooting are in
+[docs/runbooks/connect-an-mcp-client.md](docs/runbooks/connect-an-mcp-client.md); protocol and
+privacy rules are in [ADR-008](docs/adr/008-loopback-mcp-server.md).
+Real loopback tests are opt-in via `TEST_RUNNER_VOXFLOW_MCP_INTEGRATION=1` (see
+[CONTRIBUTING.md](CONTRIBUTING.md#mcp-transport-integration-tests)); default hosted tests use fakes.
+The integration suite reports a skip if its ports are unavailable or its file-transcription
+case has no installed speech model. Stdio framing tests run in the package without sockets or models.
 
 ### Contacts permission
 

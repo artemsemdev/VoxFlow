@@ -200,7 +200,8 @@ Use this if you think the token leaked, or just want a clean slate for who's con
 | `transcribe_file` says the path is rejected | `PathPolicy` only accepts files inside your home directory, not under `~/Library`, with a supported audio/video extension — see ADR-008. |
 | `dictate` returns "A dictation is already running." | Another dictation (yours, or a previous MCP `dictate` call) is still in progress; wait for it to finish. |
 | `search_history` is absent or returns an error | Enable its tool toggle in Settings › MCP Server, then reload the client's tools. For "History unavailable", also check Settings › Privacy. |
-| Claude Desktop's connector won't start | Validate the JSON, absolute `npx` path and Node directory in `env.PATH`. Inspect `~/Library/Logs/Claude/mcp-server-voxflow.log`; the first download also needs npm connectivity. |
+| Claude Desktop's native server won't start | Validate the JSON, installed app executable path and `--mcp-stdio` argument. Inspect `~/Library/Logs/Claude/mcp-server-voxflow.log`. Restart Claude after installation or tool-setting changes. |
+| Optional HTTP bridge won't start | Validate the absolute `npx` path and Node directory in `env.PATH`; its first download needs npm connectivity. |
 
 Cursor is optional: it can use the same endpoint with an `Authorization: Bearer …` header in its
 MCP configuration. Neither the runbook nor the release checklist requires it.

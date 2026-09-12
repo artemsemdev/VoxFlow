@@ -8,8 +8,6 @@ versioning.
 ### Added
 - Files cleanup optionally improves transcripts up to 150 words with the shared local style model,
   preserving segment timing and updating the displayed word count; rules remain the fallback.
-- Native `--mcp-stdio` transport for client-launched local MCP sessions, with bounded framing,
-  shared tool/privacy policies, protocol-only stdout and capture cleanup on client shutdown.
 - Microphone changes reach dictation and Settings › Audio live. Missing input stops capture;
   switching devices preserves pending audio and transcript timing across the restart gap.
 - Expanded History highlights the actual removed fillers and low-confidence raw words, with
@@ -81,6 +79,8 @@ versioning.
   dictation start/end, appearance (Light/Dark/System), Flow Bar position, dictation language.
 - Settings › MCP Server (UI only this phase — the server itself ships in 2.4): endpoint and access
   token with Copy/Regenerate (a confirmation alert first), which tools are exposed.
+- Native `--mcp-stdio` transport for client-launched local MCP sessions, with bounded framing,
+  shared tool/privacy policies, protocol-only stdout and capture cleanup on client shutdown.
 - Menu bar: a window-style dropdown (status, hands-free toggle, today's stats, quick actions, a
   language picker, a footer) replaces the plain menu; a first-run hint introduces it once, after
   onboarding finishes.
