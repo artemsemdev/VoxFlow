@@ -37,6 +37,9 @@ public actor DictationController {
     private var processingDeadline: CaptureDeadline?
     private var captureTask: Task<Void, Never>?
     private var transcribeTask: Task<Void, Never>?
+    private var insertionTask: Task<Void, Never>?
+    private var liveValidity: CaptureValidity?
+    private var liveContext: LiveInsertionContext?
     private var modelLoadTask: (capture: UInt64, generation: UInt64, task: Task<Void, Never>)?
     private var nextModelLoadGeneration: UInt64 = 0
     /// Bumped by `teardown()` (so also by `startCapture()`, which calls it first): invalidates every
@@ -471,8 +474,16 @@ public actor DictationController {
         case .insert(let text):
             let id = captureID
             let cursorOffset = lastResult?.cursorOffset
-            Task {
-                let result = await self.inserter.insert(text, cursorOffset: cursorOffset)
+            let context = liveContext
+            insertionTask = Task {
+                guard id == self.captureID, !Task.isCancelled else { return }
+                let result: InsertionResult?
+                if let context, let live = self.inserter as? any LiveTextInserting {
+                    result = await live.finishLiveInsertion(text, cursorOffset: cursorOffset, context: context)
+                } else {
+                    result = await self.inserter.insert(text, cursorOffset: cursorOffset)
+                }
+                guard !Task.isCancelled, let result else { return }
                 self.recordInsertion(result, capture: id)
             }
         case .copyToClipboard(let text): copyToClipboard(text)
@@ -512,6 +523,13 @@ public actor DictationController {
         // Evaluated exactly once per capture, alongside `captureID` — see `ephemeral`'s doc comment.
         captureIsEphemeral = ephemeral()
         let id = captureID
+        let live = captureIsEphemeral ? nil : inserter as? any LiveTextInserting
+        if live != nil {
+            let validity = CaptureValidity()
+            liveValidity = validity
+            liveContext = LiveInsertionContext { validity.isActive }
+        }
+        let context = liveContext
         let (stream, continuation) = AsyncStream<AudioChunk>.makeStream(bufferingPolicy: .unbounded)
         feed = continuation
         let deadline = CaptureDeadline()
@@ -533,6 +551,8 @@ public actor DictationController {
         }
         transcribeTask = Task {
             do {
+                if let live, let context { await live.beginLiveInsertion(context) }
+                guard id == self.captureID, !Task.isCancelled else { return }
                 let result = try await self.transcriber.transcribe(stream, options: self.options(),
                     processingDeadline: { deadline.value }) { event in await self.receive(event, capture: id) }
                 self.finished(result, capture: id)
@@ -547,11 +567,15 @@ public actor DictationController {
         guard id == captureID else { return }
         feed?.yield(chunk); handle(.level(rms: chunk.rms))
     }
-    private func receive(_ event: DictationEvent, capture id: UInt64) {
-        guard id == captureID else { return }
+    private func receive(_ event: DictationEvent, capture id: UInt64) async {
+        guard id == captureID, !Task.isCancelled else { return }
         switch event {
         case .language(let d): handle(.languageDetected(d))
-        case .partialText(let t): handle(.partialText(t))
+        case .partialText(let t):
+            handle(.partialText(t))
+            if let context = liveContext, let live = inserter as? any LiveTextInserting {
+                await live.updateLiveInsertion(t, context: context)
+            }
         }
     }
     private func receiveDeviceChange(_ name: String?, capture id: UInt64) {
@@ -591,14 +615,27 @@ public actor DictationController {
     }
 
     private func teardown() {
+        let cancelledContext = liveContext
+        liveValidity?.cancel(); liveValidity = nil; liveContext = nil
+        if let cancelledContext, let live = inserter as? any LiveTextInserting {
+            Task { await live.cancelLiveInsertion(cancelledContext) }
+        }
         captureID &+= 1   // invalidates every callback still in flight from the old capture
         captureIsEphemeral = false
         processingDeadline = nil
         captureTask?.cancel(); captureTask = nil
         transcribeTask?.cancel(); transcribeTask = nil
+        insertionTask?.cancel(); insertionTask = nil
         modelLoadTask?.task.cancel(); modelLoadTask = nil
         feed?.finish(); feed = nil
     }
+}
+
+/// Synchronous invalidation lets an AX adapter reject a stale write after an awaited actor hop.
+private final class CaptureValidity: Sendable {
+    private let active = Mutex(true)
+    var isActive: Bool { active.withLock { $0 } }
+    func cancel() { active.withLock { $0 = false } }
 }
 
 /// One immutable identity per capture; a suspended old transcriber retains only its own deadline.
