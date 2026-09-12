@@ -150,6 +150,7 @@ struct LlamaStylerTests {
 
         let task = Task { try await styler.style(raw, options: opts) }
         await clock.waitForSleepers(1)
+        await backend.waitForFirstPrompt()
         await clock.advance(by: 8)
         let result = try await task.value
 

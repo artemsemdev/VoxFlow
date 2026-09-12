@@ -14,6 +14,7 @@ public actor FakeLLMBackend: StyleEngine {
     public private(set) var unloadCount = 0
     private var waiters: [CheckedContinuation<Void, Never>] = []
     private var released = false
+    private var promptWaiters: [CheckedContinuation<Void, Never>] = []
 
     public init(ready: Bool = true, reply: String = "") { self.ready = ready; self.reply = reply }
 
@@ -25,8 +26,15 @@ public actor FakeLLMBackend: StyleEngine {
 
     public func isReady() async -> Bool { ready }
 
+    /// Observe generation entering before advancing a fake deadline; the timer sibling can start first.
+    public func waitForFirstPrompt() async {
+        guard prompts.isEmpty else { return }
+        await withCheckedContinuation { promptWaiters.append($0) }
+    }
+
     public func generate(_ prompt: ChatPrompt, maxNewTokens: Int) async throws -> String {
         prompts.append(prompt); maxTokens.append(maxNewTokens)
+        promptWaiters.forEach { $0.resume() }; promptWaiters.removeAll()
         if let error { throw error }
         if hangs && !released {
             await withTaskCancellationHandler {
