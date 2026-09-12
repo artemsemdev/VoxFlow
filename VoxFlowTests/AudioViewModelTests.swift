@@ -11,6 +11,7 @@ import VoxFlowTestSupport
 private final class FakeInputDeviceProvider: InputDeviceProviding, @unchecked Sendable {
     private struct State {
         var name: String?
+        var inputs: [AudioInputDevice] = []
         var continuation: AsyncStream<String?>.Continuation?
         var subscriptions = 0
         var terminations = 0
@@ -28,6 +29,11 @@ private final class FakeInputDeviceProvider: InputDeviceProviding, @unchecked Se
         set { state.withLock { $0.name = newValue } }
     }
     var subscriptions: Int { state.withLock { $0.subscriptions } }
+    var inputs: [AudioInputDevice] {
+        get { state.withLock { $0.inputs } }
+        set { state.withLock { $0.inputs = newValue } }
+    }
+    func availableInputs() -> [AudioInputDevice] { inputs }
     var terminations: Int { state.withLock { $0.terminations } }
     var order: [String] { state.withLock { $0.order } }
 
@@ -60,6 +66,59 @@ private final class FakeInputDeviceProvider: InputDeviceProviding, @unchecked Se
 
 @Suite("AudioViewModel") @MainActor
 struct AudioViewModelTests {
+    @Test("explicit input stays selected across disconnect, rename and reconnect without falling back")
+    func explicitInput() {
+        let devices = FakeInputDeviceProvider(name: "Built-in")
+        devices.inputs = [.init(id: "built-in", name: "Built-in"), .init(id: "usb", name: "USB Microphone")]
+        let settings = DictationSettings(store: InMemoryKeyValueStore())
+        var changes = 0
+        let model = AudioViewModel(devices: devices, settings: settings, dictation: makeCoordinator(),
+                                   onInputDeviceChange: { changes += 1 })
+        #expect(model.selectedInputID == "" && model.deviceName == "Built-in")
+        model.selectedInputID = "usb"
+        #expect(model.deviceName == "USB Microphone" && settings.snapshot.inputDeviceUID == "usb")
+        devices.inputs.removeAll { $0.id == "usb" }
+        model.refreshDevice()
+        #expect(!model.hasDevice && model.selectedInputID == "usb")
+        #expect(model.unavailableInputName == "USB Microphone")
+        devices.inputs.append(.init(id: "usb", name: "Renamed USB"))
+        model.refreshDevice()
+        #expect(model.deviceName == "Renamed USB" && model.unavailableInputName == nil)
+        model.selectedInputID = "missing"
+        #expect(model.selectedInputID == "usb" && changes == 1)
+        model.selectedInputID = ""
+        #expect(model.deviceName == "Built-in" && settings.snapshot.inputDeviceUID == nil && changes == 2)
+    }
+
+    @Test("input changes are refused during dictation and microphone testing")
+    func activeCaptureKeepsInput() async {
+        let devices = FakeInputDeviceProvider()
+        devices.inputs = [.init(id: "usb", name: "USB Microphone")]
+        let harness = DictationCoordinatorTests()
+        let (coordinator, _, _, _, _) = harness.make()
+        let settings = DictationSettings(store: InMemoryKeyValueStore())
+        let microphoneTest = MicrophoneTestController(microphone: FakeMicrophone(),
+            player: MicrophoneTestControllerTests.Player(),
+            permissions: FakePermissions(microphone: .granted, requestResult: .granted, accessibility: true),
+            clock: FakeClock(), canStart: { true })
+        let model = AudioViewModel(devices: devices, settings: settings, dictation: coordinator, microphoneTest: microphoneTest)
+        model.selectedInputID = "usb"
+        coordinator.fn(.down)
+        await harness.wait(coordinator) { if case .armed = $0 { true } else { false } }
+        #expect(!model.canChangeInput)
+        model.selectedInputID = ""
+        #expect(settings.inputDeviceUID == "usb")
+        coordinator.escape()
+        await harness.wait(coordinator) { $0 == .discarded }
+        microphoneTest.start()
+        #expect(!model.canChangeInput)
+        model.selectedInputID = ""
+        #expect(settings.inputDeviceUID == "usb")
+        microphoneTest.stop()
+        await microphoneTest.waitUntilFinished()
+        model.selectedInputID = ""
+        #expect(settings.inputDeviceUID == nil)
+    }
     /// Minimal `DictationCoordinator` — `AudioViewModel` only reads `.levels` off it, which starts
     /// at 14 zeros and never changes unless something calls `reportLevel`/`start()`.
     func makeCoordinator() -> DictationCoordinator {

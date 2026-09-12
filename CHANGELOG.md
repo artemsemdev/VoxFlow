@@ -6,6 +6,8 @@ versioning.
 ## Unreleased
 
 ### Added
+- Choose and remember a microphone in Settings → Audio for dictation and microphone tests.
+  System Default follows macOS; an unavailable selected device requires reconnecting or choosing another.
 - Files cleanup optionally improves transcripts up to 150 words with the shared local style model,
   preserving segment timing and updating the displayed word count; rules remain the fallback.
 - Insert cumulative speech previews into the captured field, reconcile final styling without

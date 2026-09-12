@@ -39,6 +39,8 @@ import VoxFlowTestSupport
 struct SettingsRenderTests {
     private struct FakeInputDeviceProvider: InputDeviceProviding {
         let name: String?
+        var inputs: [AudioInputDevice] = []
+        func availableInputs() -> [AudioInputDevice] { inputs }
         func defaultInputName() -> String? { name }
     }
 
@@ -104,6 +106,17 @@ struct SettingsRenderTests {
                                       settings: DictationSettings(store: InMemoryKeyValueStore()), dictation: makeCoordinator(),
                                         microphoneTest: makeMicrophoneTest())
         try Self.render(AudioSettingsView(audio: noDevice), name: "audio-2-no-device", to: directory)
+
+        let inputSettings = DictationSettings(store: InMemoryKeyValueStore())
+        let selectable = AudioViewModel(devices: FakeInputDeviceProvider(name: "MacBook Pro Microphone",
+            inputs: [AudioInputDevice(id: "built-in", name: "MacBook Pro Microphone"),
+                     AudioInputDevice(id: "usb", name: "USB audio CODEC")]),
+            settings: inputSettings, dictation: makeCoordinator())
+        selectable.selectedInputID = "usb"
+        try Self.render(AudioSettingsView(audio: selectable), name: "audio-3-selected", to: directory)
+        let unavailable = AudioViewModel(devices: FakeInputDeviceProvider(name: "MacBook Pro Microphone"),
+            settings: inputSettings, dictation: makeCoordinator())
+        try Self.render(AudioSettingsView(audio: unavailable), name: "audio-4-unavailable", to: directory)
 
         // Privacy (ST-05): the default excluded apps, plus one with an extra app + Keychain subtitle.
         let privacyDefault = makePrivacyModel(dir: TemporaryDirectory())

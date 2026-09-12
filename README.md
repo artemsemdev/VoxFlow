@@ -56,6 +56,8 @@ any app, style cleanup with a local LLM and an MCP server follow in 2.x (see the
 - File decoding reads on demand and checks Stop between read/conversion chunks. Automatic language
   detection retains a 30-second prefix; transcription then uses a rolling 10.2-second lookahead,
   without keeping the full decoded recording in memory or writing a temporary audio copy.
+- Settings › Audio lets you choose and remember a specific microphone for Fn and “Test microphone”,
+  or follow System Default. An unplugged selected microphone never silently switches to another input.
 - Switching microphones keeps captured audio and accounts for the restart gap in transcript
   timing. Losing all input devices stops capture with “No microphone found”; Settings › Audio
   follows the current device even when dictation is idle.

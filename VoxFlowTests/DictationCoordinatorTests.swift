@@ -277,6 +277,14 @@ struct DictationCoordinatorTests {
         denied.openSettingsForCurrentError()
         #expect(perms.openedMicrophoneSettings == 1)
 
+        let (noDevice, _, _, devicePermissions, deviceNavigation) = make(preflight:
+            Preflight(excludedApp: nil, secureInput: false, microphone: .noDevice, model: .loaded))
+        noDevice.fn(.down)
+        await wait(noDevice) { $0 == .micUnavailable(.noDevice) }
+        noDevice.openSettingsForCurrentError()
+        #expect(deviceNavigation.page == .settings && deviceNavigation.settingsTab == .audio && deviceNavigation.requestMainWindow)
+        #expect(devicePermissions.openedMicrophoneSettings == 0)
+
         let (missing, _, _, _, nav) = make(preflight: Preflight(excludedApp: nil, secureInput: false, microphone: .granted, model: .notInstalled(sizeBytes: 1)))
         missing.fn(.down)
         await wait(missing) { $0 == .modelNotInstalled(sizeBytes: 1) }
