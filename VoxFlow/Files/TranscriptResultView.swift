@@ -18,6 +18,7 @@ struct TranscriptResultView: View {
             Divider()
             footer
         }
+        .onDisappear { resultModel.cancelCleanup() }
     }
 
     private var header: some View {
@@ -68,6 +69,9 @@ struct TranscriptResultView: View {
             Toggle(resultModel.cleanupLabel, isOn: $resultModel.applyCleanup)
                 .toggleStyle(.checkbox)
                 .font(.caption)
+            if resultModel.isCleaning {
+                ProgressView().controlSize(.small).accessibilityLabel("Applying local cleanup")
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)

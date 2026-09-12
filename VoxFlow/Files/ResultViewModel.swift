@@ -18,17 +18,21 @@ final class ResultViewModel {
     var format: OutputFormat { didSet { rerender() } }
     var timestamps: Bool { didSet { rerender() } }
     var searchText = ""
-    var segmentLength: SegmentLength = .sentences { didSet { cleanedCache = nil; rerender() } }
-    /// "Apply {Style} cleanup" (design 2f, plan ruling 6) — off by default (the auto-export already
-    /// wrote the raw transcript). Rule-based only: a file transcript can run to thousands of
-    /// segments, and 2f promises "instant, no re-processing" — the LLM never runs here.
-    var applyCleanup = false { didSet { rerender() } }
+    var segmentLength: SegmentLength = .sentences { didSet { cleanedCache = nil; updateCleanup() } }
+    /// Rules render immediately; short transcripts can then improve with the shared local LLM.
+    var applyCleanup = false { didSet { updateCleanup() } }
+    private(set) var isCleaning = false
+    private var cleanupRevision = 0
     private(set) var rendered = ""
     private(set) var savedURL: URL?
     private(set) var exportMessage: String?
 
     private let makeExporter: () -> TranscriptExporter
     private let cleanupStyle: TextStyle
+    private let cleanupStyler: (any TextStyler)?
+    private let cleanupClock: any MonotonicClock
+    @ObservationIgnored private var cleanupTask: Task<Void, Never>?
+    @ObservationIgnored private var cleanupGeneration = 0
     private let cleanupOptions: StylingOptions
     private let pasteboard: any Pasteboard
     private let revealer: any FileRevealing
@@ -41,7 +45,8 @@ final class ResultViewModel {
 
     init(document: TranscriptDocument, format: OutputFormat, timestamps: Bool, autoDetectedLanguage: Bool, modelDisplayName: String,
          savedURL: URL?, exporter: @escaping () -> TranscriptExporter, cleanupStyle: TextStyle, cleanupOptions: StylingOptions,
-         pasteboard: any Pasteboard, revealer: any FileRevealing) {
+         pasteboard: any Pasteboard, revealer: any FileRevealing,
+         cleanupStyler: (any TextStyler)? = nil, cleanupClock: any MonotonicClock = SystemMonotonicClock()) {
         self.document = document
         self.format = format
         self.timestamps = timestamps
@@ -51,6 +56,8 @@ final class ResultViewModel {
         self.makeExporter = exporter
         self.cleanupStyle = cleanupStyle
         self.cleanupOptions = cleanupOptions
+        self.cleanupStyler = cleanupStyler
+        self.cleanupClock = cleanupClock
         self.pasteboard = pasteboard
         self.revealer = revealer
         if let savedURL { exportMessage = "Saved to \(Self.abbreviate(savedURL))" }
@@ -61,11 +68,11 @@ final class ResultViewModel {
     /// because Casual is the default style; a different global default reads its own name here.
     var cleanupLabel: String { "Apply \(cleanupStyle.displayName) cleanup" }
 
-    /// The selected segmentation with every segment's text rewritten by `RuleStyler` (fillers/auto-punctuate per
-    /// the global toggles, then the tone rules) — computed once and cached on first access, not on
-    /// every `applyCleanup` toggle back to `true` (start/end/confidence are unchanged, so cleanup
-    /// re-runs only when the selected segment length changes).
+    /// Rules are cached first; a completed short-file rewrite replaces the cache atomically.
+    /// Segment boundaries and confidence always belong to the selected source segmentation.
     var cleanedDocument: TranscriptDocument {
+        // Async cache replacement must invalidate views observing segments or the word count.
+        _ = cleanupRevision
         // Read the cache key even on a hit so SwiftUI observes the selected length for row refresh.
         if let cleanedCache, cleanedCache.length == segmentLength { return cleanedCache.document }
         let styler = RuleStyler()
@@ -82,6 +89,52 @@ final class ResultViewModel {
                                          processingTime: document.processingTime, createdAt: document.createdAt)
         cleanedCache = (segmentLength, cleaned)
         return cleaned
+    }
+
+    /// Invalidate before cancellation: even a backend that replies late cannot publish stale text.
+    func cancelCleanup() {
+        cleanupGeneration += 1
+        cleanupTask?.cancel()
+        isCleaning = false
+    }
+
+    func waitForCleanup() async { await cleanupTask?.value }
+
+    private func updateCleanup() {
+        cancelCleanup()
+        let limits = StyleLimits()
+        let canImprove = cleanupOptions.style != .verbatim && limits.allowsLLM(words: document.wordCount)
+        // A retry starts from rules, so a newly unavailable model never leaves old LLM output.
+        if applyCleanup, canImprove, cleanupStyler != nil { cleanedCache = nil }
+        rerender()
+        guard applyCleanup, canImprove, let cleanupStyler else { return }
+        let generation = cleanupGeneration, length = segmentLength
+        let source = segmentedDocument
+        let output = cleanedDocument
+        var options = cleanupOptions
+        // One file budget, not eight seconds for each of as many as 150 segments.
+        let deadline = min(options.generationDeadline ?? .infinity, cleanupClock.now() + limits.generationTimeout)
+        options.generationDeadline = deadline
+        let clock = cleanupClock
+        isCleaning = true
+        cleanupTask = Task { [weak self, output, options] in
+            var output = output
+            for (index, segment) in source.transcript.segments.enumerated() {
+                guard !Task.isCancelled, clock.now() < deadline else { break }
+                // LlamaStyler owns readiness, validation, contention and failure fallback.
+                // Keep rules even if another injected styler throws.
+                if let styled = try? await cleanupStyler.style(segment.text, options: options),
+                   !Task.isCancelled, clock.now() < deadline {
+                    output.transcript.segments[index].text = styled.text
+                }
+            }
+            guard let self, !Task.isCancelled, self.cleanupGeneration == generation,
+                  self.applyCleanup, self.segmentLength == length else { return }
+            self.cleanedCache = (length, output)
+            self.cleanupRevision += 1
+            self.isCleaning = false
+            self.rerender()
+        }
     }
 
     private var segmentedDocument: TranscriptDocument {
@@ -112,7 +165,8 @@ final class ResultViewModel {
     /// When the language is unknown (nil) under auto-detect, the language field is just "AUTO" —
     /// not "AUTO (auto)", which the code+suffix would otherwise produce.
     var metaLine: String {
-        let words = Self.wordCountFormatter.string(from: NSNumber(value: document.wordCount)) ?? "\(document.wordCount)"
+        let count = activeDocument.wordCount
+        let words = Self.wordCountFormatter.string(from: NSNumber(value: count)) ?? "\(count)"
         let language: String
         if let code = document.transcript.language {
             language = code.uppercased() + (autoDetectedLanguage ? " (auto)" : "")

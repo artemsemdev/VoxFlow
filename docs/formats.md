@@ -9,6 +9,10 @@ across their original gaps. New internal timestamps are estimates, interpolated 
 inside the source cue, rather than new speech alignment. Confidence is inherited from that source
 cue. Preview, search, Copy, Save as and other-format exports use the selected segmentation, followed
 by optional cleanup; changing it never overwrites the source transcript or its earlier auto-export.
+Cleanup first applies deterministic rules. Transcripts of up to 150 total source words can then
+use the installed local style model within one eight-second budget; longer transcripts and model
+failures keep rules. Cleanup preserves the selected segment timestamps and confidence. Preview,
+search, copy, exports and the displayed word count use the currently displayed cleaned document.
 
 ## Text (TXT)
 

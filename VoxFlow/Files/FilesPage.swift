@@ -3,6 +3,7 @@ import UniformTypeIdentifiers
 import VoxFlowCore
 import VoxFlowFiles
 import VoxFlowModels
+import VoxFlowStyling
 
 /// The Files page (design 1c Files, MW-06): drop zone/queue + toolbar, replaced by the transcript
 /// result view (design 2f) when a row is opened — not a sheet (controller ruling 6).
@@ -45,6 +46,7 @@ struct FilesPage: View {
     }
 
     private func updateResultModel() {
+        resultModel?.cancelCleanup()
         guard let selected = model.selected else {
             resultModel = nil
             return
@@ -54,6 +56,7 @@ struct FilesPage: View {
         // "Apply {Style} cleanup" (design 2f, plan ruling 6) always styles for the *default* tone,
         // not any per-app override — a file transcript has no "frontmost app" to key an override by.
         let styling = services.stylingSettings.snapshot
+        let cleanupClock = SystemMonotonicClock()
         resultModel = ResultViewModel(
             document: selected.document, format: settings.outputFormat, timestamps: settings.timestamps,
             // No per-job record of "was auto-detect requested" survives onto `QueueItem`/
@@ -63,7 +66,8 @@ struct FilesPage: View {
             exporter: { services.exporter },
             cleanupStyle: styling.defaultStyle,
             cleanupOptions: StylingOptions(style: styling.defaultStyle, removeFillers: styling.removeFillers, autoPunctuate: styling.autoPunctuate),
-            pasteboard: SystemPasteboard(), revealer: FinderRevealer())
+            pasteboard: SystemPasteboard(), revealer: FinderRevealer(),
+            cleanupStyler: LlamaStyler(backend: services.styleModelLoader, clock: cleanupClock), cleanupClock: cleanupClock)
     }
 
     private var queueBody: some View {

@@ -1,7 +1,10 @@
 import Foundation
+import Observation
+import Synchronization
 import Testing
 import VoxFlowCore
 import VoxFlowFiles
+import VoxFlowStyling
 import VoxFlowTestSupport
 @testable import VoxFlow
 
@@ -32,11 +35,12 @@ struct ResultViewModelTests {
                        exportDirectory: URL = TemporaryDirectory().url,
                        cleanupStyle: TextStyle = .casual,
                        cleanupOptions: StylingOptions = StylingOptions(style: .casual, removeFillers: false, autoPunctuate: false),
+                       cleanupStyler: (any TextStyler)? = nil, cleanupClock: any MonotonicClock = SystemMonotonicClock(),
                        pasteboard: any Pasteboard = FakePasteboard(), revealer: any FileRevealing = FakeRevealer()) -> ResultViewModel {
         ResultViewModel(document: document, format: format, timestamps: timestamps, autoDetectedLanguage: autoDetectedLanguage,
                         modelDisplayName: modelDisplayName, savedURL: savedURL,
                         exporter: { TranscriptExporter(directory: exportDirectory) }, cleanupStyle: cleanupStyle, cleanupOptions: cleanupOptions,
-                        pasteboard: pasteboard, revealer: revealer)
+                        pasteboard: pasteboard, revealer: revealer, cleanupStyler: cleanupStyler, cleanupClock: cleanupClock)
     }
 
     @Test("rendered text changes with the selected format")
@@ -235,5 +239,132 @@ struct ResultViewModelTests {
             _ = vm.visibleSegments.count
         }
         #expect(elapsed < .seconds(1))
+    }
+}
+
+@Suite("Short file LLM cleanup") @MainActor
+struct ShortFileCleanupTests {
+    @Test("Short cleanup uses the LLM and preserves segment timing, confidence and displayed word count")
+    func shortCleanup() async throws {
+        let backend = FakeLLMBackend(reply: "A polished result.")
+        let clock = SystemMonotonicClock()
+        let vm = ResultViewModelTests.makeVM(cleanupStyler: LlamaStyler(backend: backend, clock: clock), cleanupClock: clock)
+        let original = vm.activeDocument
+        vm.applyCleanup = true
+        #expect(vm.isCleaning)
+        let refreshed = Mutex(false)
+        withObservationTracking { _ = vm.metaLine } onChange: { refreshed.withLock { $0 = true } }
+        await vm.waitForCleanup()
+        #expect(refreshed.withLock { $0 })
+        #expect(!vm.isCleaning)
+        #expect(vm.visibleSegments.map(\.text) == Array(repeating: "A polished result.", count: 3))
+        #expect(vm.visibleSegments.map(\.start) == original.transcript.segments.map(\.start))
+        #expect(vm.visibleSegments.map(\.end) == original.transcript.segments.map(\.end))
+        #expect(vm.visibleSegments.map(\.confidence) == original.transcript.segments.map(\.confidence))
+        #expect(vm.metaLine.contains("9 words"))
+        let exported = try vm.exportAlso(.srt)
+        #expect(try String(contentsOf: exported, encoding: .utf8).contains("A polished result."))
+        vm.applyCleanup = false
+        #expect(vm.activeDocument == original)
+        #expect(vm.metaLine.contains("8 words"))
+    }
+
+    @Test("The total transcript limit applies across segments, including the 150-word boundary", arguments: [150, 151])
+    func totalWordLimit(words: Int) async {
+        var document = ResultViewModelTests.smallDoc()
+        document.transcript.segments = (0..<words).map { TranscriptSegment(start: Double($0), end: Double($0 + 1), text: "word")! }
+        let backend = FakeLLMBackend(reply: "Rewritten.")
+        let clock = SystemMonotonicClock()
+        let vm = ResultViewModelTests.makeVM(document: document, cleanupStyler: LlamaStyler(backend: backend, clock: clock), cleanupClock: clock)
+        vm.applyCleanup = true
+        await vm.waitForCleanup()
+        #expect(await backend.prompts.count == (words == 150 ? 150 : 0))
+    }
+
+    @Test("Missing model and generation errors keep deterministic rule cleanup", arguments: [false, true])
+    func fallback(fails: Bool) async {
+        let backend = FakeLLMBackend(ready: fails)
+        if fails { await backend.set(error: .cancelled) }
+        let clock = SystemMonotonicClock()
+        let options = StylingOptions(style: .formal, removeFillers: true, autoPunctuate: true)
+        let vm = ResultViewModelTests.makeVM(cleanupOptions: options, cleanupStyler: LlamaStyler(backend: backend, clock: clock), cleanupClock: clock)
+        vm.applyCleanup = true
+        let rules = vm.activeDocument
+        await vm.waitForCleanup()
+        #expect(vm.activeDocument == rules)
+        #expect(!vm.isCleaning)
+    }
+
+    @Test("Re-enabling cleanup after model removal restores deterministic rules")
+    func retryWithoutModel() async {
+        let backend = FakeLLMBackend(reply: "A polished result.")
+        let clock = SystemMonotonicClock()
+        let vm = ResultViewModelTests.makeVM(cleanupStyler: LlamaStyler(backend: backend, clock: clock), cleanupClock: clock)
+        vm.applyCleanup = true
+        let rules = vm.activeDocument
+        await vm.waitForCleanup()
+        #expect(vm.activeDocument != rules)
+        vm.applyCleanup = false
+        await backend.set(ready: false)
+        vm.applyCleanup = true
+        await vm.waitForCleanup()
+        #expect(vm.activeDocument == rules)
+    }
+
+    @Test("One file deadline rejects late segment replies and skips remaining segments")
+    func sharedDeadline() async {
+        let clock = FakeClock()
+        let styler = GatedFileStyler()
+        let vm = ResultViewModelTests.makeVM(cleanupStyler: styler, cleanupClock: clock)
+        vm.applyCleanup = true
+        let rules = vm.activeDocument
+        await styler.waitUntilStarted()
+        await clock.advance(by: 9)
+        await styler.release()
+        await vm.waitForCleanup()
+        #expect(vm.activeDocument == rules)
+        #expect(await styler.calls == 1)
+        #expect(await styler.deadlines == [8])
+        #expect(!vm.isCleaning)
+    }
+
+    @Test("Cancelled work cannot replace a newer segmentation or a disabled cleanup", arguments: [false, true])
+    func staleReply(changesSegmentation: Bool) async {
+        let styler = GatedFileStyler()
+        let vm = ResultViewModelTests.makeVM(cleanupStyler: styler)
+        vm.applyCleanup = true
+        await styler.waitUntilStarted()
+        if changesSegmentation { vm.segmentLength = .short } else { vm.applyCleanup = false }
+        let expected = vm.activeDocument
+        vm.cancelCleanup()
+        await styler.release()
+        await vm.waitForCleanup()
+        #expect(vm.activeDocument == expected)
+        #expect(!vm.isCleaning)
+    }
+}
+
+private actor GatedFileStyler: TextStyler {
+    private(set) var calls = 0
+    private(set) var deadlines: [Double?] = []
+    private var started = false
+    private var released = false
+    private var starters: [CheckedContinuation<Void, Never>] = []
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    func waitUntilStarted() async {
+        if started { return }
+        await withCheckedContinuation { starters.append($0) }
+    }
+    func release() {
+        released = true
+        waiters.forEach { $0.resume() }; waiters.removeAll()
+    }
+    func style(_ raw: String, options: StylingOptions) async throws -> StyledText {
+        calls += 1
+        deadlines.append(options.generationDeadline)
+        started = true
+        starters.forEach { $0.resume() }; starters.removeAll()
+        if !released { await withCheckedContinuation { waiters.append($0) } }
+        return StyledText(text: "Late replacement", fillersRemoved: 0)
     }
 }
