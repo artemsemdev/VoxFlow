@@ -212,6 +212,20 @@ struct FlowBarMachineTests {
         #expect(m.state == .micUnavailable(.inUse(by: nil)))
     }
 
+    @Test("a named device switch keeps listening; losing the device aborts capture as no-device")
+    func deviceChanged() {
+        var m = FlowBarMachine.listening(.handsFree, at: 4)
+        let listening = m.state
+
+        #expect(m.handle(.deviceChanged(name: "Studio Display Microphone"), now: 5).isEmpty)
+        #expect(m.state == listening)
+        #expect(m.handle(.deviceChanged(name: nil), now: 6) == [
+            .cancelTimer(.cap), .cancelTimer(.silence), .abortCapture,
+            .startTimer(.dismiss, seconds: 4),
+        ])
+        #expect(m.state == .micUnavailable(.noDevice))
+    }
+
     @Test("partial text belongs to the dictation from fn-down: recorded while armed, survives to a raw copy on timeout")
     func partialTextBeforeListening() {
         var m = FlowBarMachine()

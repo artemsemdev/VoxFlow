@@ -108,6 +108,33 @@ struct DictationControllerTests {
         #expect(await h.next() == .idle)
     }
 
+    @Test("device changes are forwarded while captured audio remains continuous")
+    func deviceChanged() async {
+        let h = await Harness()
+        await h.controller.shortcutDown(.pushToTalk)
+        #expect(await h.next() == .listening(Listening(mode: .pushToTalk, startedAt: 0, language: nil)))
+        await h.mic.waitUntilCapturing()
+
+        h.mic.emit(rms: 0.3, seconds: 1)
+        await h.transcriber.waitUntilReceived(1)
+        h.mic.changeDevice(to: "External Microphone")
+        h.mic.emit(rms: 0.3, seconds: 2)
+        await h.transcriber.waitUntilReceived(2)
+        #expect(await h.controller.state == .listening(Listening(mode: .pushToTalk, startedAt: 0, language: nil)))
+        #expect(h.transcriber.receivedSeconds == 3)
+
+        h.mic.changeDevice(to: nil)
+        // Terminates the fake stream so the old implementation also produces a state instead of
+        // leaving this assertion suspended: it reports `.inUse`, while forwarding nil reports
+        // `.noDevice` first and invalidates this later failure with the capture generation.
+        h.mic.fail(.engineFailed("after device change"))
+        #expect(await h.next() == .micUnavailable(.noDevice))
+        await h.mic.waitUntilStopped()
+        await h.transcriber.waitUntilCancelled()
+        #expect(h.inserter.insertedTexts.isEmpty)
+        #expect(h.saved.items.isEmpty)
+    }
+
     @Test("the snippet caret request reaches the inserter with its matching final text", arguments: [nil, 6] as [Int?])
     func snippetCaret(offset: Int?) async {
         let text = "Best,\n\nArtem"

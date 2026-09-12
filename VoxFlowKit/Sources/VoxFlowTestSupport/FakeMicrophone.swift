@@ -49,6 +49,10 @@ public final class FakeMicrophone: MicrophoneCapturing, Sendable {
         let count = Int(seconds * AudioSamples.sampleRate)
         emit(AudioChunk(samples: Array(repeating: rms, count: count)))
     }
+    public func changeDevice(to name: String?) {
+        let continuation = state.withLock { $0.continuation }
+        _ = continuation?.yield(.deviceChanged(name: name))
+    }
     public func fail(_ error: MicrophoneError) {
         // `finish(throwing:)` synchronously invokes `onTermination`, which itself takes `state`'s
         // lock — so the continuation must be extracted and finished *outside* `withLock`, or the

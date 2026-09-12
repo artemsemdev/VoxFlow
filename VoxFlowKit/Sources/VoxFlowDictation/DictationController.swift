@@ -296,7 +296,10 @@ public actor DictationController {
             do {
                 for try await event in self.microphone.start() {
                     guard !Task.isCancelled, self.captureID == id else { break }
-                    if case .chunk(let chunk) = event { self.receive(chunk, capture: id) }
+                    switch event {
+                    case .chunk(let chunk): self.receive(chunk, capture: id)
+                    case .deviceChanged(let name): self.receiveDeviceChange(name, capture: id)
+                    }
                 }
             } catch let error as MicrophoneError {
                 self.microphoneFailed(error, capture: id)
@@ -325,6 +328,10 @@ public actor DictationController {
         case .language(let d): handle(.languageDetected(d))
         case .partialText(let t): handle(.partialText(t))
         }
+    }
+    private func receiveDeviceChange(_ name: String?, capture id: UInt64) {
+        guard id == captureID else { return }
+        handle(.deviceChanged(name: name))
     }
     private func finished(_ result: DictationResult, capture id: UInt64) {
         guard id == captureID else { return }

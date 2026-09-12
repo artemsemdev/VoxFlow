@@ -40,6 +40,8 @@ public enum FlowBarEvent: Sendable, Equatable {
     case transcriptReady(text: String, lowConfidence: Bool)
     case transcriptionFailed(String)
     case microphoneFailed(MicrophoneError)
+    /// A named replacement keeps the capture alive; nil means no input device remains.
+    case deviceChanged(name: String?)
     case insertionFinished(InsertionResult)
     case copyRawRequested
     case reinsertionFinished(text: String, result: InsertionResult), reinsertionBlocked(String)
@@ -296,6 +298,10 @@ public struct FlowBarMachine: Sendable, Equatable {
             return [.cancelTimer(.hold), .cancelTimer(.doubleTap), .abortCapture, .startTimer(.dismiss, seconds: config.dismissDiscarded)]
         case (.listening, .microphoneFailed(let e)), (.armed, .microphoneFailed(let e)), (.loadingModel, .microphoneFailed(let e)), (.tapped, .microphoneFailed(let e)):
             state = .micUnavailable(Self.access(for: e))
+            return [.cancelTimer(.cap), .cancelTimer(.silence), .abortCapture, .startTimer(.dismiss, seconds: config.dismissError)]
+        case (.listening, .deviceChanged(name: nil)), (.armed, .deviceChanged(name: nil)),
+             (.loadingModel, .deviceChanged(name: nil)), (.tapped, .deviceChanged(name: nil)):
+            state = .micUnavailable(.noDevice)
             return [.cancelTimer(.cap), .cancelTimer(.silence), .abortCapture, .startTimer(.dismiss, seconds: config.dismissError)]
 
         // ── partial text belongs to the current dictation from the moment capture starts ──
