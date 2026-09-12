@@ -89,6 +89,11 @@ struct SnippetsRenderTests {
         let host = NativeRenderHost(view, size: NSSize(width: 900, height: 640))
         defer { host.close() }
         try host.capture(to: directory.appendingPathComponent("Snippets-\(name).png"))
+        for dark in [false, true] {
+            let narrow = NativeRenderHost(view, size: NSSize(width: 640, height: 640), dark: dark)
+            defer { narrow.close() }
+            try narrow.capture(to: directory.appendingPathComponent("Layout-Snippets-\(name)-640-\(dark).png"))
+        }
     }
 
     private static func rendersDirectory() -> URL {

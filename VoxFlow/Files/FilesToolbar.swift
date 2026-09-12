@@ -25,21 +25,27 @@ struct FilesToolbar: View {
     var body: some View {
         VStack(spacing: 10) {
             Divider()
-            HStack(alignment: .bottom, spacing: 20) {
-                formatPicker
-                batchToggle
-                Toggle("Timestamps", isOn: $settings.timestamps)
-                    .disabled(!settings.outputFormat.supportsTimestampToggle)
-                    .help(settings.outputFormat.supportsTimestampToggle ? "" : "SRT, VTT and JSON always include timestamps")
-                Spacer()
+            Grid(alignment: .leading, horizontalSpacing: 24, verticalSpacing: 12) {
+                GridRow(alignment: .top) {
+                    formatPicker
+                    languagePicker
+                }
+                GridRow(alignment: .firstTextBaseline) {
+                    batchToggle
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Toggle("Timestamps", isOn: $settings.timestamps)
+                        .disabled(!settings.outputFormat.supportsTimestampToggle)
+                        .help(settings.outputFormat.supportsTimestampToggle ? "" : "SRT, VTT and JSON always include timestamps")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
-            HStack(alignment: .bottom, spacing: 20) {
-                languagePicker
+            HStack(alignment: .center, spacing: 16) {
                 saveFolderButton
-                Spacer()
+                Spacer(minLength: 12)
                 Button(model.transcribeButtonTitle) { Task { await model.transcribeAll() } }
                     .buttonStyle(.borderedProminent)
                     .disabled(!model.canTranscribe)
+                    .fixedSize()
             }
             if let message = settings.outputFolderMessage {
                 Label(message, systemImage: "exclamationmark.triangle")
@@ -71,8 +77,9 @@ struct FilesToolbar: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .frame(width: 260)
+            .frame(maxWidth: 260)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var batchToggle: some View {
@@ -97,9 +104,11 @@ struct FilesToolbar: View {
                     Text(language.name).tag(language.code)
                 }
             }
+            .pickerStyle(.menu)
             .labelsHidden()
-            .frame(width: 180)
+            .fixedSize(horizontal: true, vertical: false)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var saveFolderButton: some View {
@@ -112,6 +121,6 @@ struct FilesToolbar: View {
         .lineLimit(1)
         .truncationMode(.middle)
         .help(settings.outputFolder.path)
-        .frame(maxWidth: 260, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

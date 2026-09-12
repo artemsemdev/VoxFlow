@@ -71,7 +71,8 @@ struct SnippetsHeader: View {
 /// `DictionaryList`'s doc comment describes).
 struct SnippetsGrid: View {
     let viewModel: SnippetsViewModel
-    private let columns = [GridItem(.flexible(), spacing: 16), GridItem(.flexible(), spacing: 16)]
+    private let columns = [GridItem(.flexible(), spacing: 16, alignment: .top),
+                           GridItem(.flexible(), spacing: 16, alignment: .top)]
 
     var body: some View {
         LazyVGrid(columns: columns, spacing: 16) {

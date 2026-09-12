@@ -106,8 +106,9 @@ struct PrivacySettingsBody: View {
                     Text(choice.label).tag(choice.days)
                 }
             }
+            .pickerStyle(.menu)
             .labelsHidden()
-            .frame(maxWidth: 140)
+            .frame(maxWidth: 140, alignment: .trailing)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)

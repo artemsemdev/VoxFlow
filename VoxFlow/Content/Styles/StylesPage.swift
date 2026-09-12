@@ -46,6 +46,7 @@ struct StylesPageBody: View {
                 }
             }
         }
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     private var sheetBinding: Binding<Bool> {
@@ -126,7 +127,7 @@ struct StyleCardView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .strokeBorder(isSelected ? Color.accentColor : Color.secondary.opacity(0.12), lineWidth: isSelected ? 2 : 1))

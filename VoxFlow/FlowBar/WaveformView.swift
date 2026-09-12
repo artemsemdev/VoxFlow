@@ -12,12 +12,13 @@ struct WaveformView: View {
     private static let maxHeight: CGFloat = 12
 
     let levels: [Float]
+    var color: Color = .white
 
     var body: some View {
         HStack(alignment: .center, spacing: Self.barGap) {
             ForEach(levels.indices, id: \.self) { index in
                 Capsule()
-                    .fill(Color.white.opacity(0.7))
+                    .fill(color.opacity(0.7))
                     .frame(width: Self.barWidth, height: height(for: levels[index]))
             }
         }

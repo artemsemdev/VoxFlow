@@ -139,6 +139,25 @@ struct FilesModelsAuditRenderTests {
         withExtendedLifetime(fixture.dir) {}
     }
 
+    @Test("renders constrained Files controls and result overflow states")
+    func constrainedLayouts() async throws {
+        let fixture = try await FilesViewModelTests.Harness(preSeed: [FilesViewModelTests.a])
+        await fixture.settle()
+        let result = ResultViewModelTests.makeVM(modelDisplayName: "Whisper large-v3-turbo")
+        for width in [640, 900] {
+            for dark in [false, true] {
+                try await captureSettled(FilesToolbar(model: fixture.viewModel, settings: fixture.settings),
+                    name: "Layout-Files-toolbar-\(width)", size: NSSize(width: width, height: 220), dark: dark)
+                try await captureSettled(TranscriptResultView(resultModel: result, onBack: {}),
+                    name: "Layout-Files-result-\(width)", size: NSSize(width: width, height: 600), dark: dark)
+                result.report(error: CocoaError(.fileWriteNoPermission))
+                try await captureSettled(TranscriptResultView(resultModel: result, onBack: {}),
+                    name: "Layout-Files-error-\(width)", size: NSSize(width: width, height: 600), dark: dark)
+            }
+        }
+        withExtendedLifetime(fixture.dir) {}
+    }
+
     private func captureSettled(_ view: some View, name: String, size: NSSize, dark: Bool = false) async throws {
         let host = NativeRenderHost(view, size: size, dark: dark)
         // Let SwiftUI reconcile each state and finish native layout on the run loop.

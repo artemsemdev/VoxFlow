@@ -26,9 +26,15 @@ struct HomePage: View {
 /// `HomeContentView` directly instead.
 struct HomePageBody: View {
     let viewModel: HomeViewModel
+    @State private var compactFirstRun = true
 
     var body: some View {
-        ScrollView { HomeContentView(viewModel: viewModel) }
+        ScrollView { HomeContentView(viewModel: viewModel, compactFirstRun: compactFirstRun) }
+            .onGeometryChange(for: Bool.self) { geometry in
+                // Measure the viewport: wide content's minimum size must not prevent shrinking.
+                // 420-point setup + 20-point gap + 280-point scratchpad + 40-point page padding.
+                geometry.size.width < 760
+            } action: { compactFirstRun = $0 }
     }
 }
 
@@ -38,6 +44,7 @@ struct HomePageBody: View {
 /// Recent/This-week/"Everything stays on your Mac").
 struct HomeContentView: View {
     let viewModel: HomeViewModel
+    let compactFirstRun: Bool
     /// The Setup card's share of the first-run row's width (canvas page 3: Setup left ≈ 45%, "Try it
     /// here" fills the rest) — a fixed point width rather than a `GeometryReader` fraction, since the
     /// two cards' natural heights differ and a `GeometryReader` would have to be pinned to one.
@@ -47,10 +54,12 @@ struct HomeContentView: View {
         VStack(alignment: .leading, spacing: 20) {
             HomeHeaderView(title: viewModel.headerTitle, subtitle: viewModel.headerSubtitle, modeChip: viewModel.modeChip)
             if viewModel.isFirstRun {
-                HStack(alignment: .top, spacing: 20) {
+                firstRunLayout {
                     SetupCard(rows: viewModel.setupRows, perform: viewModel.perform)
-                        .frame(width: Self.firstRunSetupCardWidth, alignment: .top)
+                        .frame(width: compactFirstRun ? nil : Self.firstRunSetupCardWidth, alignment: .top)
                     TryItCard(onAppear: viewModel.enterScratchpad, onDisappear: viewModel.leaveScratchpad)
+                        // The viewport breakpoint reserves 280 points without imposing a native
+                        // window minimum that would prevent resizing back into the compact layout.
                         .frame(maxWidth: .infinity, alignment: .top)
                 }
                 StatCardsRow(cards: viewModel.statCards)
@@ -72,6 +81,13 @@ struct HomeContentView: View {
             }
         }
         .padding(20)
+    }
+
+    private var firstRunLayout: AnyLayout {
+        // Changing layout preserves the scratchpad's native editor, text and ephemeral lifetime.
+        compactFirstRun
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 20))
+            : AnyLayout(HStackLayout(alignment: .top, spacing: 20))
     }
 }
 

@@ -13,6 +13,9 @@ any app, style cleanup with a local LLM and an MCP server follow in 2.x (see the
 
 ## What works today (2.0.0)
 
+- Files and settings controls share consistent alignment; Home adapts to narrow windows and card
+  rows stay aligned. See the [visual alignment audit](docs/validation/alignment-2026-09-12/README.md).
+
 - Quitting during file transcription or dictation asks whether to finish and save first, quit immediately, or cancel.
 
 - Drop audio or video files on the window or the Dock icon, use Finder's Open With, or File › Open.
