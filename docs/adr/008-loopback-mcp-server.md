@@ -147,8 +147,8 @@ whole stack over a real socket, and records the resulting design as this ADR.
   has no folder-grant UI, so there is none in this policy either.
 - **No outbound network, ever.** The server only ever accepts loopback connections and answers
   them; it never itself opens a connection anywhere. A test asserts `VoxFlowMCP` contains no
-  `URLSession`/`NWConnection(to:)` use, keeping the privacy footer's "0 bytes sent since install"
-  true with the server running.
+  `URLSession`/`NWConnection(to:)` use. Local MCP replies are excluded from the privacy footer's
+  measured model-download request bytes, which are tracked separately by the downloader.
 
 ## Consequences
 

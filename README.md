@@ -53,6 +53,10 @@ any app, style cleanup with a local LLM and an MCP server follow in 2.x (see the
   “Can't type here · Open Settings” to open the Accessibility pane.
 - VoxFlow's own window is frontmost at launch, so click into the text field you want to dictate
   into (e.g. TextEdit) before the first fn press, or the dictation lands on the clipboard instead.
+- The sidebar measures HTTP request bytes sent for model downloads and persists the total locally.
+  Tracking starts with the first launch of this version, not the original install; hover the count
+  for its start date. Redirects/retries and failed attempts count when URLSession reports completed
+  task metrics. Received model data, local MCP traffic and TLS overhead are excluded.
 - History page: browse local calendar-day groups, search past dictations and filter by app or date,
   expand a row for the full
   transcript, Edit, Copy, Delete with Undo; right-click an inserted word to add it to Dictionary.
