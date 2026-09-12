@@ -128,6 +128,8 @@ versioning.
   [docs/runbooks/connect-an-mcp-client.md](docs/runbooks/connect-an-mcp-client.md).
 
 ### Fixed
+- Wait for local style-model context and model cleanup before unload or replacement completes,
+  preventing native teardown from crashing the process after generation finishes.
 
 - Confirm quitting during file transcription or dictation; “Finish, then quit” waits for exports and dictation history to finish saving.
 - Files previews follow the selected output format, retain the source filename extension, and keep
