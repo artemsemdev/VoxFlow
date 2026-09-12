@@ -73,7 +73,16 @@ struct ModelsSettingsView: View {
         }
     }
 
+    @ViewBuilder
     private func rowView(_ row: ModelsViewModel.Row) -> some View {
+        if let failureReason = row.failureReason {
+            failedRow(row, reason: failureReason)
+        } else {
+            standardRow(row)
+        }
+    }
+
+    private func standardRow(_ row: ModelsViewModel.Row) -> some View {
         HStack(spacing: 14) {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 8) {
@@ -101,6 +110,28 @@ struct ModelsSettingsView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
+    }
+
+    private func failedRow(_ row: ModelsViewModel.Row, reason: String) -> some View {
+        HStack(spacing: 14) {
+            Circle()
+                .fill(Color.red)
+                .frame(width: 18, height: 18)
+                .overlay(Text("!").font(.caption2.weight(.heavy)).foregroundStyle(.white))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(row.model.displayName).fontWeight(.medium)
+                Text(reason).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("Retry download") { Task { await model.retry(row.model) } }
+                .buttonStyle(.borderedProminent)
+                .tint(.accentColor)
+                .controlSize(.small)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(Color.red.opacity(0.05))
     }
 
     @ViewBuilder

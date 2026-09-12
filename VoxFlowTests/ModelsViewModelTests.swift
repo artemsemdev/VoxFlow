@@ -198,7 +198,7 @@ struct ModelsViewModelTests {
 
     // MARK: 4. checksumMismatch
 
-    @Test("a checksum mismatch reports downloadFailed and leaves the row not installed")
+    @Test("a checksum mismatch stays inline and Retry installs the replacement download")
     func checksumMismatch() async throws {
         let h = Harness()
         await h.downloader.serve(Self.smallPayload, at: Self.big.downloadURL)   // wrong bytes for "big"
@@ -206,8 +206,15 @@ struct ModelsViewModelTests {
 
         await model.download(Self.big)
 
-        #expect(model.alert == .downloadFailed(Self.big, reason: "The download didn't verify (checksum mismatch). Nothing was installed and the file was deleted."))
-        #expect(model.speechRows.first { $0.id == "big" }?.state == .notInstalled)
+        #expect(model.alert == nil)
+        #expect(model.speechRows.first { $0.id == "big" }?.failureReason
+                == ModelsViewModel.checksumFailureMessage)
+
+        await h.downloader.serve(Self.bigPayload, at: Self.big.downloadURL)
+        await model.retry(Self.big)
+
+        #expect(model.speechRows.first { $0.id == "big" }?.state == .installed)
+        #expect(model.speechRows.first { $0.id == "big" }?.failureReason == nil)
     }
 
     // MARK: 5. offlineThenResume
