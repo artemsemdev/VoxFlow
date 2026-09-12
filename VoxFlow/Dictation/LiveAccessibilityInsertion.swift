@@ -18,6 +18,7 @@ final class LiveAccessibilityInsertion {
     private let initialSelection: NSRange?
     private var hasWritten = false
     private var blocked: CopyReason?
+    private var finalOnly: Bool { target?.supportsLiveInsertion == false }
 
     init(context: LiveInsertionContext, target: (any AccessibilityTextTarget)?, appName: String?,
          initialText: String?, initialSelection: NSRange?,
@@ -33,15 +34,28 @@ final class LiveAccessibilityInsertion {
         guard context.isActive, blocked == nil else { return false }
         guard permissions.accessibilityTrusted(prompt: false) else { blocked = .accessibilityDenied; return false }
         guard let target, target.isEditable else { blocked = .noTextField; return false }
-        guard let focused = focusTarget(), target.isSameTarget(as: focused),
-              let expectedText, let actual = target.textValue,
+        guard let focused = focusTarget(), target.isSameTarget(as: focused) else {
+            blocked = .insertionFailed; return false
+        }
+        if finalOnly {
+            // Chromium exposes a virtual input buffer, not the document. Validate whatever
+            // anchor it provides, but never use its offsets for cumulative replacements.
+            if let expectedText, target.textValue != expectedText {
+                blocked = .insertionFailed; return false
+            }
+            if let expectedSelection, target.selectedRange != expectedSelection {
+                blocked = .insertionFailed; return false
+            }
+            return context.isActive
+        }
+        guard let expectedText, let actual = target.textValue,
               actual.utf16.elementsEqual(expectedText.utf16), let expectedSelection,
               target.selectedRange == expectedSelection else { blocked = .insertionFailed; return false }
         return context.isActive
     }
 
     func update(_ text: String) {
-        guard ownsTarget(), let target, let expectedText, let initialSelection else { return }
+        guard ownsTarget(), !finalOnly, let target, let expectedText, let initialSelection else { return }
         let plan = planner.plan(for: text)
         let relative: NSRange
         let replacement: String
@@ -77,17 +91,27 @@ final class LiveAccessibilityInsertion {
 
     func finish(_ text: String, cursorOffset: Int?) -> InsertionResult? {
         guard context.isActive else { return nil }
+        if finalOnly {
+            guard ownsTarget(), let target else { return copyFinal(text) }
+            guard target.insertFinalText(text, isActive: { context.isActive }) else { return copyFinal(text) }
+            guard context.isActive else { return nil }
+            return .inserted(appName: appName)
+        }
         update(text)
         guard context.isActive else { return nil }
         guard ownsTarget() else {
-            guard context.isActive else { return nil }
-            pasteboard.setString(text)
-            return .copiedToClipboard(reason: blocked ?? .insertionFailed)
+            return copyFinal(text)
         }
         if let offset = cursorOffset, offset >= 0, offset <= text.count,
            let start = initialSelection?.location, context.isActive {
             _ = target?.setSelectedRange(NSRange(location: start + text.prefix(offset).utf16.count, length: 0))
         }
         return .inserted(appName: appName)
+    }
+
+    private func copyFinal(_ text: String) -> InsertionResult? {
+        guard context.isActive else { return nil }
+        pasteboard.setString(text)
+        return .copiedToClipboard(reason: blocked ?? .insertionFailed)
     }
 }

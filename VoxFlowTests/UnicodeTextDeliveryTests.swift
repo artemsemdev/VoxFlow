@@ -27,10 +27,12 @@ struct UnicodeTextDeliveryTests {
     @Test("a failed second event pair prevents every write")
     func constructionFailure() {
         var builds = 0, posts = 0
-        let sent = UnicodeTextDelivery.send(String(repeating: "a", count: 21), isValid: { true }) { _ in
+        let factory: UnicodeTextDelivery.PairFactory = { _ in
             builds += 1
-            return builds == 2 ? nil : { posts += 1 }
+            if builds == 2 { return nil }
+            return { posts += 1 }
         }
+        let sent = UnicodeTextDelivery.send(String(repeating: "a", count: 21), isValid: { true }, makePair: factory)
         #expect(!sent && builds == 2 && posts == 0)
     }
 

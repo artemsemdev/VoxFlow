@@ -12,6 +12,18 @@ struct AccessibilityLiveInsertionTests {
         var textValue: String? = "prefix: old suffix"
         var selectedRange: NSRange? = NSRange(location: 8, length: 3)
         var writes: [String] = []
+        var supportsLiveInsertion = true
+        var finalWrites: [String] = []
+        var finalDeliverySucceeds = true
+        var beforeFinalDelivery: (() -> Void)?
+        func insertFinalText(_ text: String, isActive: () -> Bool) -> Bool {
+            guard isActive() else { return false }
+            if supportsLiveInsertion { return replaceSelectedText(text) }
+            beforeFinalDelivery?()
+            guard isActive(), finalDeliverySucceeds else { return false }
+            finalWrites.append(text)
+            return true
+        }
         func replaceSelectedText(_ text: String) -> Bool {
             guard let value = textValue, let range = selectedRange else { return false }
             textValue = (value as NSString).replacingCharacters(in: range, with: text)
@@ -129,5 +141,42 @@ struct AccessibilityLiveInsertionTests {
         await h.inserter.cancelLiveInsertion(h.context)
         #expect(await h.inserter.finishLiveInsertion(" again", cursorOffset: nil, context: next) == .inserted(appName: "TextEdit"))
         #expect(h.target.textValue == "prefix: hello again suffix")
+    }
+
+    @Test("virtual editor buffers receive one final input with no AX previews or caret reconstruction",
+          arguments: [false, true])
+    func finalOnlyEditor(unreadable: Bool) async {
+        let h = Harness()
+        h.target.supportsLiveInsertion = false
+        h.target.textValue = unreadable ? nil : ""
+        h.target.selectedRange = unreadable ? nil : NSRange(location: 0, length: 0)
+        await h.begin()
+        await h.update("hello"); await h.update("hello world")
+        #expect(h.target.writes.isEmpty && h.target.finalWrites.isEmpty && h.clipboard.strings.isEmpty)
+        #expect(await h.finish("Hello, world!", cursor: 6) == .inserted(appName: "TextEdit"))
+        #expect(h.target.finalWrites == ["Hello, world!"])
+        #expect(h.target.writes.isEmpty && h.clipboard.strings.isEmpty)
+        #expect(h.target.selectedRange == (unreadable ? nil : NSRange(location: 0, length: 0)))
+        #expect(await h.finish("Hello, world!") == nil)
+    }
+
+    @Test("final-only input refuses focus loss, changed anchors, failure, or cancellation",
+          arguments: ["focus", "text", "selection", "failure", "cancel"])
+    func finalOnlyOwnership(change: String) async {
+        let h = Harness(); h.target.supportsLiveInsertion = false
+        await h.begin()
+        switch change {
+        case "focus": h.current = h.other
+        case "text": h.target.textValue = "changed"
+        case "selection": h.target.selectedRange = NSRange(location: 0, length: 0)
+        case "failure": h.target.finalDeliverySucceeds = false
+        default: h.target.beforeFinalDelivery = { h.active.cancel() }
+        }
+        await h.update("preview")
+        if change == "focus" { h.current = h.target }
+        let result = await h.finish("Final")
+        #expect(result == (change == "cancel" ? nil : .copiedToClipboard(reason: .insertionFailed)))
+        #expect(h.target.writes.isEmpty && h.target.finalWrites.isEmpty && h.other.writes.isEmpty)
+        #expect(h.clipboard.strings == (change == "cancel" ? [] : ["Final"]))
     }
 }

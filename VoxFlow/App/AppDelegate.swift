@@ -72,6 +72,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task(priority: .utility) { await AppServices.shared.styleModelLoader.warmUp() }
             AppServices.shared.flowBar.bind(to: AppServices.shared.dictation)
             AppServices.shared.fnMonitor.start()
+            // Electron enables its Accessibility tree asynchronously. Prepare it when the user
+            // switches apps, before a later Fn capture needs the focused editor. One observer
+            // lasts for the application lifetime; test hosts never register it.
+            _ = NSWorkspace.shared.notificationCenter.addObserver(
+                forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
+            ) { _ in
+                Task { @MainActor in AXTextTarget.prepareFocusedApplication() }
+            }
+            AXTextTarget.prepareFocusedApplication()
             // MB-03/MB-04 (ruling 8): never starts under XCTest, same reasoning as everything else
             // in this block — a test run must not touch the real Notification Center either.
             AppServices.shared.notifications.start()
