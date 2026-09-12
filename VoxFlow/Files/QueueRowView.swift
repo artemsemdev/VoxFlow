@@ -44,13 +44,18 @@ struct QueueRowView: View {
     private var durationText: String { item.duration.map(TimeCode.short) ?? "--:--" }
 
     private var queuedRow: some View {
-        HStack {
-            nameLine
-            Spacer()
-            Text("\(durationText) · queued")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                nameLine
+                Spacer()
+                Text("\(durationText) · queued")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+            RoundedRectangle(cornerRadius: 3)
+                .fill(Color.secondary.opacity(0.1))
+                .frame(height: 5)
         }
     }
 
@@ -96,6 +101,9 @@ struct QueueRowView: View {
             if let error = model.exportError(for: item) {
                 Text(error).font(.caption).foregroundStyle(.orange)
             }
+            RoundedRectangle(cornerRadius: 3)
+                .fill(Color.green)
+                .frame(height: 5)
         }
     }
 

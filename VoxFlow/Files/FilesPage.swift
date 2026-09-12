@@ -92,7 +92,7 @@ struct FilesPage: View {
         // when dropping more files onto an already-populated queue (design MW-06g applies either
         // way). `allowsHitTesting(false)` keeps it from stealing the drop itself.
         .overlay {
-            if model.isDragOver { dragOverOverlay }
+            if model.isDragOver { FilesDragOverOverlay(dragCount: model.dragCount) }
         }
     }
 
@@ -102,12 +102,20 @@ struct FilesPage: View {
         Binding(get: { navigation.requestFileImport }, set: { navigation.requestFileImport = $0 })
     }
 
-    private var dragOverOverlay: some View {
+}
+
+/// The live MW-06g overlay used while files are held over the Files page.
+struct FilesDragOverOverlay: View {
+    let dragCount: Int
+
+    var body: some View {
         VStack(spacing: 8) {
-            Image(systemName: "arrow.down.circle")
-                .font(.system(size: 32, weight: .medium))
-                .foregroundStyle(Color.accentColor)
-            Text("Release to add \(model.dragCount) \(model.dragCount == 1 ? "file" : "files")").font(.headline)
+            Image(systemName: "arrow.down")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 40, height: 40)
+                .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 11))
+            Text("Release to add \(dragCount) \(dragCount == 1 ? "file" : "files")").font(.headline)
             Text("processed on this Mac").font(.caption).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -119,6 +127,10 @@ struct FilesPage: View {
         .padding(8)
         .allowsHitTesting(false)
     }
+
+}
+
+private extension FilesPage {
 
     // MARK: Alerts (design MW-06c stop confirmation, 3e long-audio confirmation)
 
