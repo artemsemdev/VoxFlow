@@ -131,6 +131,8 @@ versioning.
 - Deliver final dictation through guarded Unicode input in Chromium/Electron editors whose Accessibility setter silently ignores text; keep native live previews and clipboard fallback on lost focus.
 - Recover Fn and custom shortcuts when returning from permission settings after a failed keyboard
   listener start. Home refreshes permission status and identifies the permission still required.
+- Recheck excluded apps and secure input after dictation preparation, and keep insertion bound
+  to the original app process if focus changes while preparation is suspended.
 - Wait for local style-model context and model cleanup before unload or replacement completes,
   preventing native teardown from crashing the process after generation finishes.
 

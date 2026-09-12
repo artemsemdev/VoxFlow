@@ -45,6 +45,15 @@ struct PreflightBuilder: Sendable {
         if case .notInstalled = model {
             return Preflight(excludedApp: nil, secureInput: false, microphone: .granted, model: model)
         }
+        // Permissions/readiness may suspend while focus or secure input changes. Recheck privacy,
+        // but keep the original fn-down identity: the inserter refuses a different process's field.
+        let current = frontmost.frontmostApp()
+        if let id = current.bundleID, settings.excludedBundleIDs.contains(id) {
+            return Preflight(excludedApp: current.name ?? id, secureInput: false, microphone: .granted, model: model)
+        }
+        if frontmost.secureInputEnabled() {
+            return Preflight(excludedApp: nil, secureInput: true, microphone: .granted, model: model)
+        }
         await captureFocus(app)
         onFrontmostCaptured(app)
         return Preflight(excludedApp: nil, secureInput: false, microphone: .granted, model: model)

@@ -42,6 +42,16 @@ final class AXTextTarget: AccessibilityTextTarget {
         return !ChromiumAppFrameworks.containsSupportedFramework(in: app)
     }
 
+    /// Validate the native element against the app preflight approved, even if focus changed
+    /// during the hop to MainActor. PID identity also distinguishes multiple instances of one app.
+    func belongs(to app: FrontmostApp) -> Bool {
+        guard let pid = processID else { return false }
+        if let expected = app.processID { return pid == expected }
+        // Older explicit callers have only a bundle ID; an unknown identity must fail closed.
+        guard let bundleID = app.bundleID else { return false }
+        return NSRunningApplication(processIdentifier: pid)?.bundleIdentifier == bundleID
+    }
+
     var textValue: String? {
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, kAXValueAttribute as CFString, &value) == .success else { return nil }
