@@ -10,6 +10,11 @@ protocol OutputFolderBookmarking: Sendable {
     func startAccessing(_ url: URL) -> Bool
     func stopAccessing(_ url: URL)
     func isWritableDirectory(_ url: URL) -> Bool
+    func isInAppContainer(_ url: URL) -> Bool
+}
+
+extension OutputFolderBookmarking {
+    func isInAppContainer(_ url: URL) -> Bool { false }
 }
 
 struct SystemOutputFolderBookmarks: OutputFolderBookmarking {
@@ -21,6 +26,19 @@ struct SystemOutputFolderBookmarks: OutputFolderBookmarking {
     }
     func startAccessing(_ url: URL) -> Bool { url.startAccessingSecurityScopedResource() }
     func stopAccessing(_ url: URL) { url.stopAccessingSecurityScopedResource() }
+    func isInAppContainer(_ url: URL) -> Bool {
+        Self.isInAppContainer(url, home: FileManager.default.homeDirectoryForCurrentUser,
+                              bundleID: Bundle.main.bundleIdentifier)
+    }
+    /// Foundation remaps home to this app's Data container under App Sandbox. Resolve symlinks
+    /// before comparing components; an external writable path never substitutes for a scope.
+    static func isInAppContainer(_ url: URL, home: URL, bundleID: String?) -> Bool {
+        guard url.isFileURL, let bundleID else { return false }
+        let root = home.resolvingSymlinksInPath().standardizedFileURL.pathComponents
+        guard Array(root.suffix(4)) == ["Library", "Containers", bundleID, "Data"] else { return false }
+        let path = url.resolvingSymlinksInPath().standardizedFileURL.pathComponents
+        return path.starts(with: root)
+    }
     func isWritableDirectory(_ url: URL) -> Bool {
         url.isFileURL && (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
             && FileManager.default.isWritableFile(atPath: url.path)
@@ -86,12 +104,14 @@ final class OutputFolderSelection {
     }
 
     private func acquire(_ url: URL) throws -> OutputFolderAccess {
-        guard url.isFileURL, bookmarks.startAccessing(url) else { throw CocoaError(.fileReadNoPermission) }
+        guard url.isFileURL else { throw CocoaError(.fileReadNoPermission) }
+        let scoped = bookmarks.startAccessing(url)
+        guard scoped || bookmarks.isInAppContainer(url) else { throw CocoaError(.fileReadNoPermission) }
         guard bookmarks.isWritableDirectory(url) else {
-            bookmarks.stopAccessing(url)
+            if scoped { bookmarks.stopAccessing(url) }
             throw CocoaError(.fileWriteNoPermission)
         }
-        return OutputFolderAccess(directory: url, bookmarks: bookmarks)
+        return OutputFolderAccess(directory: url, bookmarks: bookmarks, scoped: scoped)
     }
 
     private func fallback() {
@@ -106,6 +126,9 @@ final class OutputFolderSelection {
 private final class OutputFolderAccess: ExportDirectoryAccess {
     let directory: URL
     private let bookmarks: any OutputFolderBookmarking
-    init(directory: URL, bookmarks: any OutputFolderBookmarking) { self.directory = directory; self.bookmarks = bookmarks }
-    deinit { bookmarks.stopAccessing(directory) }
+    private let scoped: Bool
+    init(directory: URL, bookmarks: any OutputFolderBookmarking, scoped: Bool) {
+        self.directory = directory; self.bookmarks = bookmarks; self.scoped = scoped
+    }
+    deinit { if scoped { bookmarks.stopAccessing(directory) } }
 }

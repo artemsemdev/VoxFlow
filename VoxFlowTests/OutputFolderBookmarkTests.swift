@@ -8,9 +8,9 @@ import VoxFlowTestSupport
 
 final class FakeOutputFolderBookmarks: OutputFolderBookmarking, Sendable {
     let starts = Mutex<[URL]>([]), stops = Mutex<[URL]>([])
-    let stale: Bool, accessible: Bool, writable: Bool, creationFails: Bool
-    init(stale: Bool = false, accessible: Bool = true, writable: Bool = true, creationFails: Bool = false) {
-        self.stale = stale; self.accessible = accessible; self.writable = writable; self.creationFails = creationFails
+    let stale: Bool, accessible: Bool, writable: Bool, creationFails: Bool, container: Bool
+    init(stale: Bool = false, accessible: Bool = true, writable: Bool = true, creationFails: Bool = false, container: Bool = false) {
+        self.stale = stale; self.accessible = accessible; self.writable = writable; self.creationFails = creationFails; self.container = container
     }
     func create(_ url: URL) throws -> Data {
         if creationFails { throw CocoaError(.fileWriteNoPermission) }
@@ -23,6 +23,7 @@ final class FakeOutputFolderBookmarks: OutputFolderBookmarking, Sendable {
     func startAccessing(_ url: URL) -> Bool { starts.withLock { $0.append(url) }; return accessible }
     func stopAccessing(_ url: URL) { stops.withLock { $0.append(url) } }
     func isWritableDirectory(_ url: URL) -> Bool { writable }
+    func isInAppContainer(_ url: URL) -> Bool { container }
 }
 
 @Suite("Output-folder bookmarks") @MainActor
@@ -52,6 +53,32 @@ struct OutputFolderBookmarkTests {
         #expect(store.string(forKey: "files.outputFolder") == nil)
         #expect(OutputFolderSelection(store: store, bookmarks: bookmarks).message != nil)
     }
+    @Test("an already-authorized container folder needs no scoped lease, external folders still do", arguments: [false, true])
+    func containerAccess(isContainer: Bool) {
+        let bookmarks = FakeOutputFolderBookmarks(accessible: false, container: isContainer)
+        let selection = OutputFolderSelection(store: InMemoryKeyValueStore(), bookmarks: bookmarks)
+        selection.select(folder)
+        #expect((selection.message == nil) == isContainer)
+        #expect(bookmarks.stops.withLock { $0 }.isEmpty)
+    }
+
+    @Test("container fallback rejects external paths, sibling prefixes, symlink escapes and ordinary homes")
+    func containerBoundary() throws {
+        let directory = TemporaryDirectory()
+        let home = directory.url.appendingPathComponent("Library/Containers/test.bundle/Data")
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        let inside = home.appendingPathComponent("output")
+        #expect(SystemOutputFolderBookmarks.isInAppContainer(inside, home: home, bundleID: "test.bundle"))
+        for outside in [directory.url, home.appendingPathComponent("../Data-other"),
+                        home.appendingPathComponent("../../other.bundle/Data")] {
+            #expect(!SystemOutputFolderBookmarks.isInAppContainer(outside, home: home, bundleID: "test.bundle"))
+        }
+        let link = home.appendingPathComponent("escape")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: directory.url)
+        #expect(!SystemOutputFolderBookmarks.isInAppContainer(link, home: home, bundleID: "test.bundle"))
+        #expect(!SystemOutputFolderBookmarks.isInAppContainer(inside, home: directory.url, bundleID: "test.bundle"))
+    }
+
     @Test("a legacy path is migrated only after access and bookmark creation succeed", arguments: [false, true])
     func migration(fails: Bool) {
         let store = InMemoryKeyValueStore(), bookmarks = FakeOutputFolderBookmarks(creationFails: fails)
