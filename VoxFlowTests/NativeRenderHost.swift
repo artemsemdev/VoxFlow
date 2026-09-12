@@ -49,13 +49,18 @@ final class NativeRenderHost {
 
     /// Settle content without ordering a window; only actual sheets need an ordered parent.
     func captureSettled(to url: URL) async throws {
-        await onMainRunLoop { self.layout() }
-        await nextRunLoopCycle()
+        await prepareContent()
         let result: Result<Void, Error> = await onMainRunLoop {
             Result { try self.capture(to: url) }
         }
         await closeSettled()
         try result.get()
+    }
+
+    /// Trigger appearance/layout before fixture configuration without creating a sheet parent.
+    func prepareContent() async {
+        await onMainRunLoop { self.layout() }
+        await nextRunLoopCycle()
     }
 
     /// Capture the real SwiftUI-presented NSAlert, including its native buttons and text.

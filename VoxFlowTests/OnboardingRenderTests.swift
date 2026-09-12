@@ -143,7 +143,7 @@ struct OnboardingRenderTests {
                 let host = NativeRenderHost(RenderChrome(content: content), size: NSSize(width: 700, height: 520), dark: dark)
                 // NativeRenderHost is lazy: prepare the real view so TryIt's production onAppear
                 // arms observation and history suppression before sending any dictation commands.
-                await host.prepareForAlert()
+                await host.prepareContent()
                 do {
                     if testCase.step == .tryIt { try #require(bundle.ephemeralScope.isActive) }
                     await testCase.configure(bundle)
