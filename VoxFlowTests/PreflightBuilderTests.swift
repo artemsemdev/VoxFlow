@@ -64,6 +64,37 @@ struct PreflightBuilderTests {
         #expect(capD.withLock { $0 } == 0)
     }
 
+    @Test("privacy is rechecked after suspended readiness without retargeting the original app",
+          arguments: ["unchanged", "allowed", "excluded", "secure"])
+    func focusChangesDuringReadiness(change: String) async {
+        let original = FrontmostApp(name: "Mail", bundleID: "com.apple.mail")
+        let current = MutablePreflightFocus(original)
+        let entered = Gate(), resume = Gate()
+        let captured = CapturedApps(), metadata = CapturedApps()
+        let builder = PreflightBuilder(frontmost: current,
+            permissions: FakePermissions(microphone: .granted, requestResult: .granted, accessibility: true),
+            readiness: { await entered.open(); await resume.wait(); return .loaded },
+            settings: DictationSettingsSnapshot(excludedBundleIDs: ["excluded.app"], keepHistory: true,
+                                                options: TranscriptionOptions()),
+            captureFocus: { app in captured.withLock { $0.append(app) } },
+            onFrontmostCaptured: { app in metadata.withLock { $0.append(app) } })
+        let pending = Task { await builder.preflight() }
+        await entered.wait()
+        switch change {
+        case "allowed": current.set(FrontmostApp(name: "Notes", bundleID: "com.apple.Notes"))
+        case "excluded": current.set(FrontmostApp(name: "Secret", bundleID: "excluded.app"))
+        case "secure": current.set(original, secure: true)
+        default: break
+        }
+        await resume.open()
+        let result = await pending.value
+        let blocked = change == "excluded" || change == "secure"
+        #expect(result.excludedApp == (change == "excluded" ? "Secret" : nil))
+        #expect(result.secureInput == (change == "secure"))
+        #expect(captured.withLock { $0 } == (blocked ? [] : [original]))
+        #expect(metadata.withLock { $0 } == (blocked ? [] : [original]))
+    }
+
     @Test("model readiness is passed through")
     func model() async {
         let (b, _, cap, _, _) = await builder(readiness: .notInstalled(sizeBytes: 1_624_555_275))
@@ -97,4 +128,12 @@ final class Counter: Sendable {
 final class CapturedApps: Sendable {
     private let box = Mutex<[FrontmostApp]>([])
     func withLock<T>(_ body: (inout [FrontmostApp]) throws -> sending T) rethrows -> sending T { try box.withLock(body) }
+}
+
+private final class MutablePreflightFocus: FrontmostAppProviding {
+    private let value: Mutex<(FrontmostApp, Bool)>
+    init(_ app: FrontmostApp) { value = Mutex((app, false)) }
+    func set(_ app: FrontmostApp, secure: Bool = false) { value.withLock { $0 = (app, secure) } }
+    func frontmostApp() -> FrontmostApp { value.withLock { $0.0 } }
+    func secureInputEnabled() -> Bool { value.withLock { $0.1 } }
 }

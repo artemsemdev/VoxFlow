@@ -48,7 +48,10 @@ final class AccessibilityTextInserter: LiveTextInserting {
         let trusted = permissions.accessibilityTrusted(prompt: prompt)
         if prompt { hasPrompted = true }
         guard trusted else { return }
-        target = focusTarget()
+        let focused = focusTarget()
+        // Real AX elements must belong to the approved app. Injected test targets have no OS PID.
+        if let native = focused as? AXTextTarget, !native.belongs(to: app) { return }
+        target = focused
         liveAnchor = (target?.textValue, target?.selectedRange)
     }
 
