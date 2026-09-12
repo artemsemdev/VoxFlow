@@ -72,6 +72,7 @@ public struct LlamaStyler: TextStyler, Sendable {
             Self.logger.notice("styling: LLM output failed validation, falling back to rules")
             return fallback
         }
-        return StyledText(text: cleaned, fillersRemoved: prepass.fillersRemoved, cursorOffset: nil)
+        return StyledText(text: cleaned, fillersRemoved: prepass.fillersRemoved,
+                          removedFillerSpans: prepass.removedFillerSpans, cursorOffset: nil)
     }
 }

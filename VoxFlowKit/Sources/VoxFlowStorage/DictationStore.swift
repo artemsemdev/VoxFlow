@@ -1,5 +1,6 @@
 import Foundation
 import GRDB
+import VoxFlowCore
 
 /// Home page stats (design MW-01, ruling 1): `count`/`words`/`duration` of dictations since a cutoff.
 public struct DictationStats: Sendable, Equatable {
@@ -76,13 +77,16 @@ public final class DictationStore: Sendable {
     public func insert(_ draft: DictationDraft) throws -> DictationRecord {
         let words = DictationRecord.wordCount(draft.text)
         let text = try encode(draft.text), raw = try encode(draft.rawText)
+        let annotations = try encodeAnnotations(draft.annotations, rawText: draft.rawText)
         let id: Int64 = try queue.write { db in
-            try db.execute(sql: "INSERT INTO dictations (created_at, app_name, style, language, duration, words, encrypted, text, raw_text) VALUES (?,?,?,?,?,?,?,?,?)",
-                           arguments: [draft.createdAt.timeIntervalSince1970, draft.appName, draft.style, draft.language, draft.duration, words, cipher != nil, text, raw])
+            try db.execute(sql: "INSERT INTO dictations (created_at, app_name, style, language, duration, words, encrypted, text, raw_text, annotations) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                           arguments: [draft.createdAt.timeIntervalSince1970, draft.appName, draft.style, draft.language,
+                                       draft.duration, words, cipher != nil, text, raw, annotations])
             return db.lastInsertedRowID
         }
         return DictationRecord(id: id, text: draft.text, rawText: draft.rawText, appName: draft.appName, style: draft.style,
-                               language: draft.language, duration: draft.duration, words: words, createdAt: draft.createdAt)
+                               language: draft.language, duration: draft.duration, words: words, createdAt: draft.createdAt,
+                               annotations: draft.annotations)
     }
 
     /// Never throws because of a single row: a row that can't be decoded comes back with
@@ -162,11 +166,16 @@ public final class DictationStore: Sendable {
 
     /// Inline correction: preserve style and the original transcript while recomputing word count.
     public func updateText(id: Int64, text: String) throws -> DictationRecord? {
-        try update(id: id, text: text, style: nil)
+        try update(id: id, text: text, style: nil, removedFillerSpans: nil)
     }
 
     public func updateStyled(id: Int64, text: String, style: String) throws -> DictationRecord? {
-        try update(id: id, text: text, style: style)
+        try update(id: id, text: text, style: style, removedFillerSpans: nil)
+    }
+
+    public func updateStyled(id: Int64, text: String, style: String,
+                             removedFillerSpans: [RawTextSpan]) throws -> DictationRecord? {
+        try update(id: id, text: text, style: style, removedFillerSpans: removedFillerSpans)
     }
 
     /// Replaces inserted text and optionally its style, recomputing `words`; `raw_text` and
@@ -178,16 +187,22 @@ public final class DictationStore: Sendable {
     /// row no longer exists, or exists but this store can't currently decode it (encrypted with no
     /// cipher available): re-styling a row we can't read would silently destroy it rather than
     /// update it, so this leaves it byte-for-byte untouched instead.
-    private func update(id: Int64, text: String, style: String?) throws -> DictationRecord? {
+    private func update(id: Int64, text: String, style: String?,
+                        removedFillerSpans: [RawTextSpan]?) throws -> DictationRecord? {
         let words = DictationRecord.wordCount(text)
         return try queue.write { db in
             guard let row = try Row.fetchOne(db, sql: "SELECT * FROM dictations WHERE id = ?", arguments: [id]) else { return nil }
             let existing = self.record(from: row)
             guard !existing.isUnreadable else { return nil }
+            let annotations = DictationAnnotations(removedFillerSpans: removedFillerSpans,
+                                                   wordConfidences: existing.annotations?.wordConfidences)
+            guard annotations.validated(for: existing.rawText) != nil else { throw StorageError.corruptRow }
             let encodedText = try self.encode(text)
             let encodedRaw = try self.encode(existing.rawText)
-            try db.execute(sql: "UPDATE dictations SET text = ?, raw_text = ?, style = ?, words = ?, encrypted = ? WHERE id = ?",
-                           arguments: [encodedText, encodedRaw, style ?? existing.style, words, self.cipher != nil, id])
+            let encodedAnnotations = try self.encodeAnnotations(annotations, rawText: existing.rawText)
+            try db.execute(sql: "UPDATE dictations SET text = ?, raw_text = ?, style = ?, words = ?, encrypted = ?, annotations = ? WHERE id = ?",
+                           arguments: [encodedText, encodedRaw, style ?? existing.style, words, self.cipher != nil,
+                                       encodedAnnotations, id])
             return try Row.fetchOne(db, sql: "SELECT * FROM dictations WHERE id = ?", arguments: [id]).map(self.record(from:))
         }
     }
@@ -209,6 +224,13 @@ public final class DictationStore: Sendable {
 
     private func encode(_ text: String) throws -> Data { try cipher?.seal(text) ?? Data(text.utf8) }
 
+    private func encodeAnnotations(_ annotations: DictationAnnotations?, rawText: String) throws -> Data? {
+        guard let annotations else { return nil }
+        guard annotations.validated(for: rawText) != nil else { throw StorageError.corruptRow }
+        guard annotations.removedFillerSpans != nil || annotations.wordConfidences != nil else { return nil }
+        return try JSONEncoder().encode(annotations)
+    }
+
     /// Per-row, never throwing: an encrypted row with no cipher available, or one whose `cipher.open`
     /// fails, comes back with empty text and `isUnreadable = true` rather than taking down the whole
     /// `fetch`/`search` call (C1) — the ordinary result of switching "Encrypt history at rest" off, or
@@ -225,8 +247,17 @@ public final class DictationStore: Sendable {
         }
         let text = decode("text"), rawText = decode("raw_text")
         let readable = text != nil && rawText != nil
+        let annotationData: Data? = row["annotations"]
+        let annotations: DictationAnnotations?
+        if readable, let annotationData,
+           let decoded = try? JSONDecoder().decode(DictationAnnotations.self, from: annotationData) {
+            annotations = decoded.validated(for: rawText!)
+        } else {
+            annotations = nil
+        }
         return DictationRecord(id: row["id"], text: readable ? text! : "", rawText: readable ? rawText! : "", appName: row["app_name"],
                                style: row["style"], language: row["language"], duration: row["duration"], words: row["words"],
-                               createdAt: Date(timeIntervalSince1970: row["created_at"]), isUnreadable: !readable)
+                               createdAt: Date(timeIntervalSince1970: row["created_at"]), isUnreadable: !readable,
+                               annotations: annotations)
     }
 }

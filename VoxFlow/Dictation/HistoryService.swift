@@ -198,7 +198,8 @@ final class HistoryService {
         await openTask?.value
         guard let store else { return nil }
         let draft = DictationDraft(text: record.text, rawText: record.rawText, appName: record.appName, style: record.style,
-                                   language: record.language, duration: record.duration, createdAt: record.createdAt)
+                                   language: record.language, duration: record.duration, createdAt: record.createdAt,
+                                   annotations: record.annotations)
         let log = Self.log
         let inserted: DictationRecord? = await Task.detached(priority: .userInitiated) { () -> DictationRecord? in
             do { return try store.insert(draft) }

@@ -3,6 +3,29 @@ import Testing
 
 @Suite("FillerWords")
 struct FillerWordsTests {
+    @Test("cleanup reports exact original UTF-16 spans for simple, contextual and multiword fillers")
+    func reportsOriginalSpans() throws {
+        let raw = "🙂 Um, I mean, this is, like, useful"
+        let result = FillerWords.stripWithSpans(raw)
+        #expect(result.text == "🙂 , this is, useful")
+        #expect(result.removed == 3)
+        let spans = try #require(result.removedFillerSpans)
+        let removed = try spans.map { span in
+            String(raw[try #require(span.range(in: raw))])
+        }
+        #expect(removed == ["Um", "I mean", "like"])
+    }
+
+    @Test("provenance follows the same sequential pass when one removal exposes contextual like")
+    func sequentialRemovalProvenance() throws {
+        let raw = "um like, go"
+        let result = FillerWords.stripWithSpans(raw)
+        #expect(result.text == "go")
+        #expect(result.removed == 2)
+        let spans = try #require(result.removedFillerSpans)
+        #expect(try spans.map { String(raw[try #require($0.range(in: raw))]) } == ["um", "like"])
+    }
+
     @Test("every simple filler pattern is removed", arguments: [
         "um", "uh", "erm", "hmm", "you know", "I mean", "sort of", "kind of",
     ])

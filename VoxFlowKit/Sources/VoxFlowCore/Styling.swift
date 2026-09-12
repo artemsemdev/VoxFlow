@@ -21,11 +21,14 @@ public struct StylingOptions: Sendable, Equatable {
 public struct StyledText: Sendable, Equatable {
     public var text: String
     public var fillersRemoved: Int
+    /// Occurrence ranges in the unchanged raw input, produced by the same removal pass as `text`.
+    public var removedFillerSpans: [RawTextSpan]?
     public var cursorOffset: Int?
 
-    public init(text: String, fillersRemoved: Int, cursorOffset: Int? = nil) {
+    public init(text: String, fillersRemoved: Int, removedFillerSpans: [RawTextSpan]? = nil, cursorOffset: Int? = nil) {
         self.text = text
         self.fillersRemoved = fillersRemoved
+        self.removedFillerSpans = removedFillerSpans
         self.cursorOffset = cursorOffset
     }
 }

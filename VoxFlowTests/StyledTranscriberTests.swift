@@ -34,6 +34,9 @@ struct StyledTranscriberTests {
         #expect(result.rawText == "um so can we push the meeting to thursday")
         #expect(result.style == "casual")
         #expect(result.fillersRemoved == 1)
+        #expect(result.annotations?.fillersRemoved == 1)
+        let span = try #require(result.annotations?.removedFillerSpans?.first)
+        #expect(String(result.rawText[try #require(span.range(in: result.rawText))]) == "um")
     }
 
     @Test("a per-app override for the captured frontmost app wins over the default style")

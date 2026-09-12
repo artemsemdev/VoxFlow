@@ -40,6 +40,10 @@ struct VoxFlowDatabaseTests {
         #expect(tableNames.contains("dictionary"))
         #expect(tableNames.contains("snippets"))
         #expect(tableNames.contains("app_style_overrides"))
+        let annotationColumn: Int = try database.queue.read { db in
+            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM pragma_table_info('dictations') WHERE name = 'annotations'") ?? 0
+        }
+        #expect(annotationColumn == 1)
     }
 
     @Test("inMemory creates a fresh database with all tables")

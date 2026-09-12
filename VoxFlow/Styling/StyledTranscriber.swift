@@ -57,8 +57,11 @@ struct StyledTranscriber: DictationTranscribing {
         // words/phrases (I3) itself.
         content.noteUses(styled.text, expanded.used)
 
+        let annotations = DictationAnnotations(removedFillerSpans: styled.removedFillerSpans,
+                                              wordConfidences: result.annotations?.wordConfidences)
         return DictationResult(text: expanded.text, rawText: result.rawText, segments: result.segments,
                                language: result.language, duration: result.duration, lowConfidence: result.lowConfidence,
-                               style: style.rawValue, cursorOffset: expanded.cursorOffset, fillersRemoved: styled.fillersRemoved)
+                               style: style.rawValue, cursorOffset: expanded.cursorOffset, fillersRemoved: styled.fillersRemoved,
+                               annotations: annotations)
     }
 }
