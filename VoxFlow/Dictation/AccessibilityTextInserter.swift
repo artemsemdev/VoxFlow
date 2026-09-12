@@ -85,9 +85,14 @@ final class AccessibilityTextInserter: LiveTextInserting {
             return copy(text, reason: .accessibilityDenied)
         }
         if let target, target.isEditable {
+            if !target.supportsLiveInsertion {
+                guard let focused = focusTarget(), target.isSameTarget(as: focused) else {
+                    return copy(text, reason: .insertionFailed)
+                }
+            }
             // Read the replacement's start before writing: most targets move selection to its end.
-            let selection = cursorOffset == nil ? nil : target.selectedRange
-            if target.replaceSelectedText(text) {
+            let selection = cursorOffset == nil || !target.supportsLiveInsertion ? nil : target.selectedRange
+            if target.insertFinalText(text, isActive: { true }) {
                 if let offset = cursorOffset, offset >= 0, offset <= text.count,
                    let start = selection?.location, start >= 0, start != NSNotFound {
                     let (position, overflow) = start.addingReportingOverflow(text.prefix(offset).utf16.count)

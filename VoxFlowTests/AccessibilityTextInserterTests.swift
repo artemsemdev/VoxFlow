@@ -14,6 +14,14 @@ struct AccessibilityTextInserterTests {
         var acceptsSelection = true
         var texts: [String] = []
         var selections: [NSRange] = []
+        var supportsLiveInsertion = true
+        var finalTexts: [String] = []
+        func insertFinalText(_ text: String, isActive: () -> Bool) -> Bool {
+            guard isActive(), acceptsText else { return false }
+            if supportsLiveInsertion { return replaceSelectedText(text) }
+            finalTexts.append(text)
+            return true
+        }
         func replaceSelectedText(_ text: String) -> Bool {
             guard acceptsText else { return false }
             texts.append(text)
@@ -111,5 +119,28 @@ struct AccessibilityTextInserterTests {
         #expect(await inserter.insert("Best,\n\nArtem", cursorOffset: 6) == .copiedToClipboard(reason: .insertionFailed))
         #expect(clipboard.strings == ["Best,\n\nArtem"])
         #expect(target.selections.isEmpty)
+    }
+
+    @Test("final-only external targets use normal input once and reject a moved focus", arguments: [false, true])
+    func finalOnlyTarget(focusChanged: Bool) async {
+        let target = Target(), other = Target(), clipboard = FakePasteboard()
+        target.supportsLiveInsertion = false
+        let focus = Focus(target)
+        let inserter = AccessibilityTextInserter(
+            permissions: FakePermissions(microphone: .granted, requestResult: .granted, accessibility: true),
+            pasteboard: clipboard, focusTarget: { focus.target })
+        await inserter.captureFocus(app: FrontmostApp(name: "Code", bundleID: "com.microsoft.VSCode"))
+        if focusChanged { focus.target = other }
+        let result = await inserter.insert("Hello 👋", cursorOffset: 2)
+        #expect(result == (focusChanged ? .copiedToClipboard(reason: .insertionFailed) : .inserted(appName: "Code")))
+        #expect(target.finalTexts == (focusChanged ? [] : ["Hello 👋"]))
+        #expect(target.texts.isEmpty && target.selections.isEmpty && other.finalTexts.isEmpty)
+        #expect(clipboard.strings == (focusChanged ? ["Hello 👋"] : []))
+    }
+
+    @MainActor
+    private final class Focus {
+        var target: Target
+        init(_ target: Target) { self.target = target }
     }
 }
