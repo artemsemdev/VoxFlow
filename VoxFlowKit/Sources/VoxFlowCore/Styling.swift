@@ -8,11 +8,14 @@ public struct StylingOptions: Sendable, Equatable {
     public var style: TextStyle
     public var removeFillers: Bool
     public var autoPunctuate: Bool
+    /// Absolute time in the styler clock; nil retains the normal generation ceiling.
+    public var generationDeadline: Double?
 
-    public init(style: TextStyle, removeFillers: Bool, autoPunctuate: Bool) {
+    public init(style: TextStyle, removeFillers: Bool, autoPunctuate: Bool, generationDeadline: Double? = nil) {
         self.style = style
         self.removeFillers = removeFillers
         self.autoPunctuate = autoPunctuate
+        self.generationDeadline = generationDeadline
     }
 }
 

@@ -49,4 +49,17 @@ public enum DictationError: Error, Equatable, Sendable {
 public protocol DictationTranscribing: Sendable {
     func transcribe(_ chunks: AsyncStream<AudioChunk>, options: TranscriptionOptions,
                     onEvent: @Sendable @escaping (DictationEvent) async -> Void) async throws -> DictationResult
+    /// The controller stamps this capture-local deadline when recording stops, before ending the
+    /// feed. Absolute seconds share the controller/styler MonotonicClock origin; nil while recording.
+    func transcribe(_ chunks: AsyncStream<AudioChunk>, options: TranscriptionOptions,
+                    processingDeadline: @escaping @Sendable () -> TimeInterval?,
+                    onEvent: @Sendable @escaping (DictationEvent) async -> Void) async throws -> DictationResult
+}
+
+public extension DictationTranscribing {
+    func transcribe(_ chunks: AsyncStream<AudioChunk>, options: TranscriptionOptions,
+                    processingDeadline: @escaping @Sendable () -> TimeInterval?,
+                    onEvent: @Sendable @escaping (DictationEvent) async -> Void) async throws -> DictationResult {
+        try await transcribe(chunks, options: options, onEvent: onEvent)
+    }
 }

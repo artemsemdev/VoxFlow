@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import VoxFlowCore
 
 /// Insertion needs a fresh, privacy-checked target, without microphone or model preflight.
@@ -31,6 +32,7 @@ public actor DictationController {
     private let ephemeral: @Sendable () -> Bool
 
     private var feed: AsyncStream<AudioChunk>.Continuation?
+    private var processingDeadline: CaptureDeadline?
     private var captureTask: Task<Void, Never>?
     private var transcribeTask: Task<Void, Never>?
     /// Bumped by `teardown()` (so also by `startCapture()`, which calls it first): invalidates every
@@ -230,7 +232,9 @@ public actor DictationController {
     private func run(_ effect: FlowBarEffect) {
         switch effect {
         case .startCapture: startCapture()
-        case .finishCapture: captureTask?.cancel(); captureTask = nil; feed?.finish(); feed = nil
+        case .finishCapture:
+            processingDeadline?.set(clock.now() + machine.config.processingTimeout)
+            captureTask?.cancel(); captureTask = nil; feed?.finish(); feed = nil
         case .abortCapture: teardown(); lastResult = nil
         case .loadModel:
             Task {
@@ -292,6 +296,8 @@ public actor DictationController {
         let id = captureID
         let (stream, continuation) = AsyncStream<AudioChunk>.makeStream(bufferingPolicy: .unbounded)
         feed = continuation
+        let deadline = CaptureDeadline()
+        processingDeadline = deadline
         captureTask = Task {
             do {
                 for try await event in self.microphone.start() {
@@ -306,7 +312,8 @@ public actor DictationController {
         }
         transcribeTask = Task {
             do {
-                let result = try await self.transcriber.transcribe(stream, options: self.options()) { event in await self.receive(event, capture: id) }
+                let result = try await self.transcriber.transcribe(stream, options: self.options(),
+                    processingDeadline: { deadline.value }) { event in await self.receive(event, capture: id) }
                 self.finished(result, capture: id)
             } catch DictationError.cancelled {
             } catch {
@@ -343,8 +350,16 @@ public actor DictationController {
     private func teardown() {
         captureID &+= 1   // invalidates every callback still in flight from the old capture
         captureIsEphemeral = false
+        processingDeadline = nil
         captureTask?.cancel(); captureTask = nil
         transcribeTask?.cancel(); transcribeTask = nil
         feed?.finish(); feed = nil
     }
+}
+
+/// One immutable identity per capture; a suspended old transcriber retains only its own deadline.
+private final class CaptureDeadline: Sendable {
+    private let storage = Mutex<TimeInterval?>(nil)
+    var value: TimeInterval? { storage.withLock { $0 } }
+    func set(_ value: TimeInterval) { storage.withLock { $0 = value } }
 }
