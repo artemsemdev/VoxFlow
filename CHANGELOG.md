@@ -104,6 +104,8 @@ versioning.
 ### Fixed
 - File decoding reports progress and responds to Stop between read/conversion chunks instead of
   finishing the entire decode before observing cancellation.
+- Long files decode on demand with bounded detection/window buffers; full recordings no longer
+  accumulate as PCM in memory, and no temporary audio file is written.
 - MCP startup and stop races: concurrent first callers share initialization, and an older operation
   cannot restart a disabled server or overwrite a newer endpoint and setting.
 - Stopping the MCP listener cancels pending binding; old waiting callers cannot restart it or

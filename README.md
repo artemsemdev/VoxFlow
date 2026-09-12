@@ -34,8 +34,9 @@ any app, style cleanup with a local LLM and an MCP server follow in 2.x (see the
   history unless the Privacy toggle turns that off.
 - File transcription yields the shared speech engine between ten-second windows; pending
   dictation takes priority over the next file window. One model remains loaded for both paths.
-- Audio decoding reports progress during preparation and checks Stop between read/conversion
-  chunks. Decoded samples still accumulate in memory; bounded file decoding remains tracked in #129.
+- File decoding reads on demand and checks Stop between read/conversion chunks. Automatic language
+  detection retains a 30-second prefix; transcription then uses a rolling 10.2-second lookahead,
+  without keeping the full decoded recording in memory or writing a temporary audio copy.
 - Needs Microphone and Accessibility permission, and Contacts (optional — only prompted if you turn
   on "Learn names from Contacts" on the Dictionary page). First launch walks a five-step onboarding
   window (welcome, permissions, hotkey mode, model, try it) with buttons to grant each permission
