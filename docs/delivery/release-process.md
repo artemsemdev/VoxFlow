@@ -39,7 +39,9 @@ Use semantic `MAJOR.MINOR.PATCH` release versions and a monotonically increasing
 integer build number. Change `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` in
 `project.yml`; XcodeGen applies them to `CFBundleShortVersionString` and
 `CFBundleVersion`. `AppServices.appVersion` reads the bundle version for the MCP
-server identity. There is no separately versioned v2 CLI. Keep release notes and
+server identity. Keep `VoxFlowVersion.string` in
+`VoxFlowKit/Sources/VoxFlowCore/Version.swift` aligned as well; JSON exports use it
+in their generator metadata. There is no separately versioned v2 CLI. Keep release notes and
 the README status aligned with the version actually published.
 
 ## Future public distribution
