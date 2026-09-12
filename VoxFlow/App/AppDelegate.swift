@@ -28,7 +28,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return QuitActivity(queueRunning: running, fileName: item?.url.lastPathComponent,
                                     progress: progress, dictation: await services.dictationController.state,
                                     pendingDictationWork: pendingDictation,
-                                    hasUnsavedTranscript: items.contains { services.exports.error(for: $0.id) != nil })
+                                    hasUnsavedTranscript: items.contains { services.exports.error(for: $0.id) != nil },
+                                    etaText: item.flatMap { services.filesViewModel.etaText(for: $0) })
             }, present: QuitCoordinator.present, finish: {
                 // Keep the app's menu bar and event loop alive until all current work is durable.
                 async let dictation: Void = services.dictationController.finishForTermination()

@@ -20,10 +20,10 @@ struct QuitCoordinatorTests {
     @Test("cancel retains work, quit anyway skips finishing, finish waits before quitting", arguments: QuitCoordinator.Choice.allCases)
     func choice(choice: QuitCoordinator.Choice) async {
         var events: [String] = []
-        let coordinator = QuitCoordinator(snapshot: { QuitActivity(queueRunning: true, fileName: "interview.m4a", progress: 0.72, dictation: .idle) },
+        let coordinator = QuitCoordinator(snapshot: { QuitActivity(queueRunning: true, fileName: "interview.m4a", progress: 0.72, dictation: .idle, etaText: "about 3 min left") },
             present: { activity in
                 #expect(activity.title == "A file is still transcribing")
-                #expect(activity.message.contains("72%"))
+                #expect(activity.message.contains("72% done (about 3 min left)"))
                 events.append("prompt"); return choice
             }, finish: { events.append("finish"); return true }, quit: { events.append("quit") })
         await coordinator.request()

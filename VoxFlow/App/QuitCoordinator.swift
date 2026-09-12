@@ -8,6 +8,7 @@ struct QuitActivity {
     let dictation: FlowBarState
     var pendingDictationWork = false
     var hasUnsavedTranscript = false
+    var etaText: String? = nil
 
     var isBusy: Bool { queueRunning || dictation.hasUnfinishedCapture || pendingDictationWork || hasUnsavedTranscript }
     var title: String {
@@ -21,7 +22,8 @@ struct QuitActivity {
         if queueRunning {
             let detail = progress.map { " is \(Int((min(1, max(0, $0)) * 100).rounded()))% done" } ?? " is preparing to transcribe"
             let file = fileName ?? "The file queue"
-            return "\(file)\(detail). Quitting now discards that progress."
+            let eta = etaText.map { " (\($0))" } ?? ""
+            return "\(file)\(detail)\(eta). Quitting now discards that progress."
         }
         return "Quitting now discards this dictation. Finish it first to keep your transcript."
     }
