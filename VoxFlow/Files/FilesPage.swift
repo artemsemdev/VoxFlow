@@ -27,11 +27,7 @@ struct FilesPage: View {
         .navigationTitle("Files")
         .task { await model.refreshModelState() }
         .onChange(of: model.selected?.item.id, initial: true) { _, _ in updateResultModel() }
-        .alert(alertTitle, isPresented: alertIsPresented, presenting: model.confirmation) { confirmation in
-            alertButtons(confirmation)
-        } message: { confirmation in
-            Text(alertMessage(confirmation))
-        }
+        .modifier(FilesAlerts(model: model))
         // At the outermost container (not scoped to `queueBody`) so File › Open
         // (`Navigation.requestFileImport`) always has somewhere to present from, even when it fires
         // while the result view is showing — the command itself closes the result first, but the two
@@ -134,7 +130,17 @@ struct FilesDragOverOverlay: View {
 
 }
 
-private extension FilesPage {
+/// Shared production alert presentation; native fixtures exercise the same buttons and copy.
+struct FilesAlerts: ViewModifier {
+    let model: FilesViewModel
+
+    func body(content: Content) -> some View {
+        content.alert(alertTitle, isPresented: alertIsPresented, presenting: model.confirmation) { confirmation in
+            alertButtons(confirmation)
+        } message: { confirmation in
+            Text(alertMessage(confirmation))
+        }
+    }
 
     // MARK: Alerts (design MW-06c stop confirmation, 3e long-audio confirmation)
 
