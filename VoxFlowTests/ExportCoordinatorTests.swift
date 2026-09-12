@@ -39,6 +39,37 @@ struct ExportCoordinatorTests {
         }
     }
 
+    @Test("quit retains a failed export and tolerates removal after its queue snapshot")
+    func quitFailureAndRemoval() async throws {
+        let directory = TemporaryDirectory()
+        let blocked = directory.file("not-a-folder")
+        try Data().write(to: blocked)
+        let h = Harness(exportDirectory: blocked)
+        await h.transcriber.script(Self.a, .document(Self.doc(Self.a)))
+        await h.queue.add([Self.a])
+        await h.queue.start()
+        await h.settle()
+        let items = await h.queue.items
+        #expect(await h.exports.waitForExports(of: items) == false)
+        await h.queue.remove(id: try #require(items.first).id)
+        await h.settle()
+        #expect(await h.exports.waitForExports(of: items))
+    }
+
+    @Test("quit barrier returns only after the last completed file is exported")
+    func quitWaitsForExport() async throws {
+        let h = Harness()
+        await h.transcriber.script(Self.a, .document(Self.doc(Self.a)))
+        await h.queue.add([Self.a])
+        await h.queue.start()
+        await h.queue.waitUntilIdle()
+        let items = await h.queue.items
+        #expect(await h.exports.waitForExports(of: items))
+        let item = try #require(items.first)
+        let url = try #require(h.exports.url(for: item.id))
+        #expect(FileManager.default.fileExists(atPath: url.path))
+    }
+
     @Test("a finished job is exported in the configured format — no Files view model involved")
     func exportsOnFinished() async throws {
         let h = Harness()

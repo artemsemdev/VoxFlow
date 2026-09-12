@@ -48,6 +48,9 @@ public actor FileQueue {
     public private(set) var items: [QueueItem] = []
     public private(set) var isRunning = false
 
+    private var terminationPending = false
+    public func setTerminationPending(_ pending: Bool) { terminationPending = pending }
+
     private let transcriber: any FileTranscribing
     private let durations: any AudioDurationProviding
     private let supportedExtensions: Set<String>
@@ -162,7 +165,7 @@ public actor FileQueue {
     }
 
     public func start() {
-        guard !isRunning else { return }
+        guard !isRunning, !terminationPending else { return }
         isRunning = true
         worker = Task { await self.runLoop() }
     }

@@ -128,6 +128,8 @@ versioning.
   [docs/runbooks/connect-an-mcp-client.md](docs/runbooks/connect-an-mcp-client.md).
 
 ### Fixed
+
+- Confirm quitting during file transcription or dictation; “Finish, then quit” waits for exports and dictation history to finish saving.
 - Files previews follow the selected output format, retain the source filename extension, and keep
   a compact header. Searching the preview leaves the complete copy/export transcript intact.
 - Live dictation limits model readiness and styling to the remaining processing time, falling back
