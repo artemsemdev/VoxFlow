@@ -20,8 +20,8 @@ that rewrites every segment of a finished file transcript).
 
 - **Seam change (ruling 1).** `TextStyler.style(_:options:)` becomes `async throws` so
   the LLM path can await generation without blocking. `RuleStyler` keeps a synchronous
-  body (`styleSync`) behind the now-`async` signature — it is still the only implementation
-  Files uses, and the fallback every other caller falls back to. `StyledTranscriber` awaits
+  body (`styleSync`) behind the now-`async` signature — it supplies instant Files cleanup
+  and the deterministic fallback for every caller. `StyledTranscriber` awaits
   the call; no other layer in the ADR-005 pipeline (storage, History, `SnippetExpander`,
   `StyleResolver`) changes shape.
 - **Rule pre-pass, then LLM tone rewrite (ruling 2).** The LLM never sees raw dictation.
@@ -61,11 +61,16 @@ that rewrites every segment of a finished file transcript).
   new text to the pasteboard, and refreshes the list — `rawText` and `createdAt` are
   untouched, and snippets are **not** re-expanded (the stored `rawText` is what the engine
   heard; a Re-style rewrites the raw transcript, not the already-expanded snippet bodies).
-- **Files stays rules-only (2f).** "Apply {defaultStyle.displayName} cleanup" runs every
-  segment through `RuleStyler` only, never the LLM — a finished file transcript can run to
-  thousands of segments, and 2f's promise ("instant, no re-processing") only holds for a
-  deterministic, millisecond-scale rewrite. LLM cleanup for file transcripts is deferred
-  scope, tracked as a follow-up issue rather than folded in here.
+- **Files cleanup (2f, updated by #154).** The existing optional "Apply {Style} cleanup"
+  checkbox first renders rules immediately. Transcripts of 1–150 total source words then
+  rewrite the selected segments sequentially through `LlamaStyler` and the shared
+  `StyleModelLoader`, with one eight-second budget for the entire file. Longer files and
+  Verbatim remain rules-only. Segment timing and confidence never change; preview, search,
+  export and displayed word count share the cleaned document. Unavailable models, contention,
+  errors and timeouts retain rule results for affected segments. Unchecking cleanup, changing
+  segmentation or leaving the result cancels generation; stale replies cannot update the result.
+  The original transcript and its auto-export remain untouched.
+
 
 ## Consequences
 
@@ -95,11 +100,9 @@ that rewrites every segment of a finished file transcript).
   row, and a Re-style after a snippet had already expanded into `text` discards that
   expansion along with the rest of the old styled text (raw dictation, not the expanded
   snippet body, is what gets re-rewritten).
-- Because Files cleanup never calls the LLM, its output is bound by the same limits ADR-005
-  already documented for `RuleStyler` — Formal only expands a fixed contraction table, it
-  does not restructure sentences the way the phase-5 LLM does for dictation and Re-style.
-  This divergence between "Apply Casual cleanup" and dictation's Casual output is expected,
-  not a bug: 2f is deliberately deterministic and instant.
+- Long-file cleanup remains deterministic and instant. Short-file cleanup can differ from
+  a whole-dictation rewrite because each selected segment retains its original time boundaries
+  and receives its own tone rewrite within the shared file budget.
 
 ## Related
 

@@ -21,6 +21,8 @@ any app, style cleanup with a local LLM and an MCP server follow in 2.x (see the
   and re-exported to any other format instantly, without re-processing. Spec: [docs/formats.md](docs/formats.md).
 - A result view with Sentences / Short / Long segment lengths, search, Copy, Save as… and Reveal in
   Finder. Preview and export share the chosen segmentation without running recognition again.
+  Optional cleanup renders rules instantly and improves transcripts up to 150 words with the
+  installed local style model; timing is preserved and the displayed word count follows cleanup.
 - Settings › Models: download Whisper large-v3-turbo (default, 1.6 GB) or Whisper small (480 MB),
   pause and resume, checksum verification before a model counts as installed, remove.
 - Everything on this Mac: audio is processed in memory and discarded; the only network action is a
