@@ -1,69 +1,34 @@
-import AVFoundation
-import CoreAudio
-import Synchronization
+import VoxFlowAudio
+import VoxFlowCore
 
-/// The system's current default audio-input device (design ST-04 "Input device"). A protocol so
-/// `AudioViewModel` can be tested against a fake instead of the real hardware/`AVCaptureDevice`.
+/// Read-only system input discovery, separate from the input selected for VoxFlow captures.
 protocol InputDeviceProviding: Sendable {
-    /// The default input device's display name, or nil when nothing is available (ST-04n).
+    func availableInputs() -> [AudioInputDevice]
     func defaultInputName() -> String?
-    /// Default-input changes while Settings is open, including connect/disconnect transitions.
+    /// Device-list and default-input changes; the payload preserves existing default-name callers.
     func changes() -> AsyncStream<String?>
 }
 
 extension InputDeviceProviding {
+    func availableInputs() -> [AudioInputDevice] { [] }
     func changes() -> AsyncStream<String?> { AsyncStream { $0.finish() } }
 }
 
 struct AVCaptureInputDeviceProvider: InputDeviceProviding {
-    func defaultInputName() -> String? { AVCaptureDevice.default(for: .audio)?.localizedName }
+    func availableInputs() -> [AudioInputDevice] { AudioInputDevices.available() }
+    func defaultInputName() -> String? { AudioInputDevices.defaultDevice()?.name }
 
     func changes() -> AsyncStream<String?> {
-        AsyncStream { continuation in
-            let listener = DefaultInputListener(continuation: continuation)
-            guard listener.start() else {
+        AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
+            let changes = AudioInputDevices.changes()
+            let task = Task {
+                for await _ in changes {
+                    guard !Task.isCancelled else { break }
+                    continuation.yield(AudioInputDevices.defaultDevice()?.name)
+                }
                 continuation.finish()
-                return
             }
-            continuation.onTermination = { [listener] _ in listener.stop() }
+            continuation.onTermination = { _ in task.cancel() }
         }
     }
-}
-
-/// CoreAudio's imported listener block lacks `Sendable`; this token confines it to one private
-/// queue and synchronizes its only cross-thread operation, once-only removal on stream termination.
-private final class DefaultInputListener: @unchecked Sendable {
-    private let system = AudioObjectID(kAudioObjectSystemObject)
-    private let address = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDefaultInputDevice,
-                                                     mScope: kAudioObjectPropertyScopeGlobal,
-                                                     mElement: kAudioObjectPropertyElementMain)
-    private let queue = DispatchQueue(label: "dev.artemsem.voxflow.default-input")
-    private let listener: AudioObjectPropertyListenerBlock
-    private let registered = Mutex(false)
-
-    init(continuation: AsyncStream<String?>.Continuation) {
-        listener = { _, _ in
-            continuation.yield(AVCaptureDevice.default(for: .audio)?.localizedName)
-        }
-    }
-
-    func start() -> Bool {
-        var address = address
-        let succeeded = AudioObjectAddPropertyListenerBlock(system, &address, queue, listener) == noErr
-        if succeeded { registered.withLock { $0 = true } }
-        return succeeded
-    }
-
-    func stop() {
-        let shouldRemove = registered.withLock { value -> Bool in
-            guard value else { return false }
-            value = false
-            return true
-        }
-        guard shouldRemove else { return }
-        var address = address
-        AudioObjectRemovePropertyListenerBlock(system, &address, queue, listener)
-    }
-
-    deinit { stop() }
 }
