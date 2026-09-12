@@ -111,8 +111,8 @@ Needs the 2.1 GB Qwen model.
 
 ## 6. The MCP server (phase 6)
 
-Use **Codex** for the full pass below; also check Claude Desktop's bridge if you use that client.
-Both setups, including token configuration and troubleshooting, are in
+Use **Codex over HTTP** for the approval/token checks below; also check **Claude Desktop over
+native stdio** if you use that client. Configuration and troubleshooting are in
 [docs/runbooks/connect-an-mcp-client.md](runbooks/connect-an-mcp-client.md).
 
 - [ ] Settings › MCP Server: turn on "Enable MCP server".
@@ -137,14 +137,19 @@ Both setups, including token configuration and troubleshooting, are in
 - [ ] Regenerate the token. Connected clients is empty and a request with the old token fails
       authentication. Update Codex's environment variable or static header, restart the client,
       then invoke a tool: approval is requested again, including after the session denial above.
-- [ ] Claude Desktop, if used: follow runbook §3 with the current token and endpoint, restart it,
-      and transcribe the same short file. Approve the bridge's actual process (often `node`) after
-      checking its path; do not expect the dialog to say "Claude Desktop". Record the result or
-      mark this client check not applicable.
+- [ ] Claude Desktop, if used: follow runbook §3 with the installed executable and `--mcp-stdio`,
+      restart it, and transcribe the same short file. No HTTP approval dialog or Connected clients
+      row appears. Confirm it works with the HTTP server off; token regeneration does not revoke
+      stdio access. Remove the client configuration and stop its subprocess to revoke it. Record
+      the result or mark this client check not applicable.
+- [ ] Native stdio lifecycle: keep stdin open while awaiting `initialize`, `tools/list` and `ping`
+      responses; stdout contains only JSON-RPC lines. Closing stdin ends the process. A malformed
+      JSON line returns `-32700`; a valid JSON value with an invalid request envelope returns
+      `-32600`. An incomplete line exceeding 1 MiB fails and exits without writing protocol noise.
 - [ ] Turn the server **off**, then occupy its default port with `nc -l 127.0.0.1 7331` in a
       terminal. Turn it on: the endpoint moves to the first free port in 7332–7340 and shows the
-      re-copy note. Update the URL in each configured client and confirm another tool call works.
-      Turn the server off, stop `nc` with Ctrl-C, then turn it on again and restore each client's
+      re-copy note. Update the URL in each configured HTTP client and confirm another tool call works.
+      Turn the server off, stop `nc` with Ctrl-C, then turn it on again and restore each HTTP client's
       URL to the displayed endpoint.
 
 ## When everything is ticked

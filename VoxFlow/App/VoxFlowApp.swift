@@ -5,6 +5,8 @@ enum VoxFlowEntryPoint {
     @MainActor static func main() {
         if LaunchEnvironment.isRunningTests() {
             VoxFlowTestHost.main()
+        } else if CommandLine.arguments.dropFirst().contains("--mcp-stdio") {
+            MCPStdioHost.main()
         } else {
             VoxFlowApp.main()
         }

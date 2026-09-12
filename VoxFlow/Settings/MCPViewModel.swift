@@ -38,11 +38,11 @@ final class MCPViewModel {
     ]
 
     static let defaultPort: UInt16 = 7331
-    static let connectedClientsEmptyText = "No clients yet — connect Claude Desktop or Cursor with the token above."
+    static let connectedClientsEmptyText = "No HTTP clients yet — connect Codex with the token above. Native stdio clients are managed by their launcher."
 
     static let regenerateTitle = "Regenerate the access token?"
     static let regenerateMessage =
-        "Claude Desktop and Cursor will be disconnected until you paste the new token into them. Approved clients are cleared."
+        "HTTP clients will be disconnected until you paste the new token into them. Approved HTTP clients are cleared. Native stdio clients are unaffected."
 
     static let portBusyNote = "Port 7331 was busy — update your client with the Copy button."
     static let startFailureMessage = "Couldn't start the server — ports 7331–7340 are all in use."

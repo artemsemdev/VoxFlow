@@ -1,9 +1,9 @@
 # Connect an MCP client to VoxFlow
 
-Connect **Codex directly over HTTP**, or **Claude Desktop through the `mcp-remote` bridge**, to
-use `transcribe_file`, `dictate` and `search_history` (off by default). Keep VoxFlow running with
-its MCP server enabled. The endpoint accepts only loopback connections; every request needs the
-access token. Protocol and policy: [ADR-008](../adr/008-loopback-mcp-server.md).
+Connect **Codex directly over HTTP**, or **Claude Desktop through native stdio**, to use
+`transcribe_file`, `dictate` and `search_history` (off by default). HTTP requires the running
+app's MCP server and bearer token. Native stdio runs a client-owned subprocess with no socket,
+token or Node dependency. Protocol and policy: [ADR-008](../adr/008-loopback-mcp-server.md).
 
 VoxFlow processes audio locally. Tool results are handed to the client you approve, which may send
 them to its model provider. Use non-sensitive recordings for the release checks.
@@ -58,8 +58,37 @@ The first **tool invocation**, rather than discovery, triggers §4's approval di
 
 ## 3. Connect Claude Desktop
 
+After installing the signed app, merge this entry into the existing `mcpServers` object in
+`~/Library/Application Support/Claude/claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "voxflow": {
+      "command": "/Applications/VoxFlow.app/Contents/MacOS/VoxFlow",
+      "args": ["--mcp-stdio"]
+    }
+  }
+}
+```
+
+Restart Claude Desktop. Its launcher/approval settings control this subprocess; VoxFlow's
+HTTP approval dialog, Connected clients, Revoke and Regenerate do not apply to stdio. Remove
+the client configuration and stop its subprocess to revoke access. The HTTP server toggle can
+remain off. Tool choices are loaded from VoxFlow Settings when the process starts; restart the
+client after changing them. History remains off by default. File path checks and microphone,
+Accessibility and dictation privacy checks are shared with the HTTP tools.
+
+The client owns one separate process/model instance. Closing stdin cancels outstanding requests
+and stops capture. Stdout contains only newline-delimited JSON-RPC; diagnostics use stderr.
+Input lines are capped at 1 MiB, responses at 8 MiB and outstanding requests at eight. Keep stdin
+open while waiting for responses; EOF means shutdown. These rules follow the
+[MCP stdio transport](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports#stdio).
+
+### Optional HTTP bridge
+
 Use Claude Desktop's **local** MCP configuration. Its launched command speaks stdio, so the
-current HTTP-only VoxFlow build needs Node and `mcp-remote`. A cloud-hosted connector cannot reach
+HTTP bridge option needs Node and `mcp-remote`. A cloud-hosted connector cannot reach
 this Mac's `127.0.0.1`. See the [local server setup guide](https://modelcontextprotocol.io/docs/develop/connect-local-servers).
 
 Check `node --version` and `command -v npx`. In
@@ -97,6 +126,8 @@ executable also covers other processes using that executable and the same token.
 avoids persistence, but still grants that identity access for the VoxFlow session.
 
 ## 4. Approve the client
+
+This section and §§5–7 apply to HTTP connections only, including the optional Node bridge.
 
 The **first tool invocation** from a client you haven't approved yet suspends that call and shows a floating
 panel — it appears even if VoxFlow's main window is closed:
@@ -169,7 +200,8 @@ Use this if you think the token leaked, or just want a clean slate for who's con
 | `transcribe_file` says the path is rejected | `PathPolicy` only accepts files inside your home directory, not under `~/Library`, with a supported audio/video extension — see ADR-008. |
 | `dictate` returns "A dictation is already running." | Another dictation (yours, or a previous MCP `dictate` call) is still in progress; wait for it to finish. |
 | `search_history` is absent or returns an error | Enable its tool toggle in Settings › MCP Server, then reload the client's tools. For "History unavailable", also check Settings › Privacy. |
-| Claude Desktop's connector won't start | Validate the JSON, absolute `npx` path and Node directory in `env.PATH`. Inspect `~/Library/Logs/Claude/mcp-server-voxflow.log`; the first download also needs npm connectivity. |
+| Claude Desktop's native server won't start | Validate the JSON, installed app executable path and `--mcp-stdio` argument. Inspect `~/Library/Logs/Claude/mcp-server-voxflow.log`. Restart Claude after installation or tool-setting changes. |
+| Optional HTTP bridge won't start | Validate the absolute `npx` path and Node directory in `env.PATH`; its first download needs npm connectivity. |
 
 Cursor is optional: it can use the same endpoint with an `Authorization: Bearer …` header in its
 MCP configuration. Neither the runbook nor the release checklist requires it.

@@ -82,6 +82,33 @@ final class MCPServerService: MCPServerControlling, MCPClientStoreProviding {
 
     private(set) var boundPort: UInt16?
 
+    /// A client-launched subprocess has no network peer and does not create HTTP approvals.
+    /// Handshakes stay independent of the database/Keychain; tools reuse the existing runner.
+    func handleStdio(_ request: JSONRPCRequest) async -> Data? {
+        guard let id = request.id else { return nil }
+        if let version = request.params?["_meta"]?[MCPMetaKey.protocolVersion]?.stringValue,
+           !MCPProtocolVersion.supported.contains(version) {
+            return try? JSONEncoder().encode(JSONRPCResponse(id: id,
+                error: MCPError.unsupportedProtocolVersion(supported: MCPProtocolVersion.supported).jsonRPCError()))
+        }
+        var enabled: Set<MCPToolID> = []
+        if settings.toolTranscribeFile { enabled.insert(.transcribeFile) }
+        if settings.toolDictate { enabled.insert(.dictate) }
+        if settings.toolSearchHistory { enabled.insert(.searchHistory) }
+        let context = MCPRequestContext(enabledTools: enabled, serverVersion: serverVersion)
+        let response: JSONRPCResponse
+        switch MCPRouter().route(request, context: context) {
+        case .accepted: return nil
+        case .result(let value): response = JSONRPCResponse(id: id, result: value)
+        case .failure(let error, _): response = JSONRPCResponse(id: id, error: error.jsonRPCError())
+        case .callTool(let tool, let arguments, _):
+            let runner = await resolvedRunner()
+            guard !Task.isCancelled else { return nil }
+            return await runner.executeStdioTool(tool, arguments: arguments, id: id)
+        }
+        return try? JSONEncoder().encode(response)
+    }
+
     init(settings: MCPSettings, coordinator: DictationCoordinator, controller: DictationController,
          historyService: HistoryService, fileTranscribing: any FileTranscribing, pathPolicy: PathPolicy,
          clock: any MonotonicClock, approvalPresenter: any MCPApprovalPresenting, serverVersion: String,
