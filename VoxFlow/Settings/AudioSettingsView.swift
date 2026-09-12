@@ -10,7 +10,7 @@ struct AudioSettingsView: View {
     var body: some View {
         ScrollView { AudioSettingsBody(audio: audio) }
             .frame(maxWidth: .infinity)
-            .task { audio.refreshDevice() }
+            .task { await audio.observeDeviceChanges() }
     }
 }
 

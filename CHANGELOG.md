@@ -6,6 +6,8 @@ versioning.
 ## Unreleased
 
 ### Added
+- Microphone changes reach dictation and Settings › Audio live. Missing input stops capture;
+  switching devices preserves pending audio and transcript timing across the restart gap.
 - Right-click an inserted History transcript word to add it to Dictionary, with the same validation
   and case/diacritic-insensitive duplicate handling as the Dictionary page.
 - Record Push-to-talk, Hands-free, Cancel and Re-insert last shortcuts in Settings, with saved

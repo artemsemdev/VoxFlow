@@ -111,6 +111,7 @@ struct DictationControllerTests {
     @Test("device changes are forwarded while captured audio remains continuous")
     func deviceChanged() async {
         let h = await Harness()
+        var deviceChanges = await h.controller.deviceChanges().makeAsyncIterator()
         await h.controller.shortcutDown(.pushToTalk)
         #expect(await h.next() == .listening(Listening(mode: .pushToTalk, startedAt: 0, language: nil)))
         await h.mic.waitUntilCapturing()
@@ -118,12 +119,15 @@ struct DictationControllerTests {
         h.mic.emit(rms: 0.3, seconds: 1)
         await h.transcriber.waitUntilReceived(1)
         h.mic.changeDevice(to: "External Microphone")
+        #expect(await deviceChanges.next() == "External Microphone")
         h.mic.emit(rms: 0.3, seconds: 2)
         await h.transcriber.waitUntilReceived(2)
         #expect(await h.controller.state == .listening(Listening(mode: .pushToTalk, startedAt: 0, language: nil)))
         #expect(h.transcriber.receivedSeconds == 3)
 
         h.mic.changeDevice(to: nil)
+        let missing = await deviceChanges.next()
+        #expect(missing != nil && missing! == nil)
         // Terminates the fake stream so the old implementation also produces a state instead of
         // leaving this assertion suspended: it reports `.inUse`, while forwarding nil reports
         // `.noDevice` first and invalidates this later failure with the capture generation.

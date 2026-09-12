@@ -45,6 +45,7 @@ public actor DictationController {
     private var subscribers: [UUID: AsyncStream<FlowBarState>.Continuation] = [:]
     /// Multi-subscriber fan-out for `results()`, same shape as `subscribers` above.
     private var resultSubscribers: [UUID: AsyncStream<DictationResult>.Continuation] = [:]
+    private var deviceSubscribers: [UUID: AsyncStream<String?>.Continuation] = [:]
     public private(set) var lastResult: DictationResult?
     /// Session-only cache, independent of the history toggle and of a later aborted capture.
     private var lastCompletedResult: DictationResult?
@@ -157,6 +158,17 @@ public actor DictationController {
         return stream
     }
     private func removeResultSubscriber(_ id: UUID) { resultSubscribers[id] = nil }
+
+    public func deviceChanges() -> AsyncStream<String?> {
+        let id = UUID()
+        let (stream, continuation) = AsyncStream<String?>.makeStream(bufferingPolicy: .unbounded)
+        deviceSubscribers[id] = continuation
+        continuation.onTermination = { [weak self] _ in
+            Task { await self?.removeDeviceSubscriber(id) }
+        }
+        return stream
+    }
+    private func removeDeviceSubscriber(_ id: UUID) { deviceSubscribers[id] = nil }
 
     public func fnDown() async { await activate(mode: nil) }
     public func fnUp() { handle(.fnUp) }
@@ -331,6 +343,7 @@ public actor DictationController {
     }
     private func receiveDeviceChange(_ name: String?, capture id: UInt64) {
         guard id == captureID else { return }
+        for continuation in deviceSubscribers.values { continuation.yield(name) }
         handle(.deviceChanged(name: name))
     }
     private func finished(_ result: DictationResult, capture id: UInt64) {

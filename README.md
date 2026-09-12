@@ -34,6 +34,9 @@ any app, style cleanup with a local LLM and an MCP server follow in 2.x (see the
   history unless the Privacy toggle turns that off.
 - File transcription yields the shared speech engine between ten-second windows; pending
   dictation takes priority over the next file window. One model remains loaded for both paths.
+- Switching microphones keeps captured audio and accounts for the restart gap in transcript
+  timing. Losing all input devices stops capture with “No microphone found”; Settings › Audio
+  follows the current device even when dictation is idle.
 - Needs Microphone and Accessibility permission, and Contacts (optional — only prompted if you turn
   on "Learn names from Contacts" on the Dictionary page). First launch walks a five-step onboarding
   window (welcome, permissions, hotkey mode, model, try it) with buttons to grant each permission
