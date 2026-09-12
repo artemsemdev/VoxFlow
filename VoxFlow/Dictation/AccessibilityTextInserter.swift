@@ -11,12 +11,14 @@ enum EditableRole {
 
 /// Writes dictated text into the field that had focus at fn-down (rulings 2–3); clipboard otherwise (FB-04b).
 @MainActor
-final class AccessibilityTextInserter: TextInserting {
+final class AccessibilityTextInserter: LiveTextInserting {
     private let permissions: any PermissionChecking
     private let pasteboard: any Pasteboard
     private var target: (any AccessibilityTextTarget)?
     private let focusTarget: @MainActor () -> (any AccessibilityTextTarget)?
     private var appName: String?
+    private var live: LiveAccessibilityInsertion?
+    private var liveAnchor: (text: String?, selection: NSRange?)?
     /// M-1: macOS does not reliably one-shot the Accessibility prompt per process, so without this
     /// `capture()` would ask again on *every* fn-down — including the ones the machine ignores
     /// (`.armed`/`.loadingModel` fn-downs). Prompt once per launch; every later capture uses
@@ -38,6 +40,8 @@ final class AccessibilityTextInserter: TextInserting {
     nonisolated func captureFocus(app: FrontmostApp) async { await capture(app: app) }
 
     private func capture(app: FrontmostApp) {
+        live = nil
+        liveAnchor = nil
         target = nil
         appName = app.name
         let prompt = !hasPrompted
@@ -45,6 +49,30 @@ final class AccessibilityTextInserter: TextInserting {
         if prompt { hasPrompted = true }
         guard trusted else { return }
         target = focusTarget()
+        liveAnchor = (target?.textValue, target?.selectedRange)
+    }
+
+    func beginLiveInsertion(_ context: LiveInsertionContext) async {
+        guard context.isActive else { return }
+        live = LiveAccessibilityInsertion(context: context, target: target, appName: appName,
+            initialText: liveAnchor?.text, initialSelection: liveAnchor?.selection,
+            permissions: permissions, pasteboard: pasteboard, focusTarget: focusTarget)
+    }
+
+    func updateLiveInsertion(_ text: String, context: LiveInsertionContext) async {
+        guard live?.context.id == context.id else { return }
+        live?.update(text)
+    }
+
+    func cancelLiveInsertion(_ context: LiveInsertionContext) async {
+        guard live?.context.id == context.id else { return }
+        live = nil; target = nil; liveAnchor = nil
+    }
+
+    func finishLiveInsertion(_ text: String, cursorOffset: Int?, context: LiveInsertionContext) async -> InsertionResult? {
+        guard context.isActive, let live, live.context.id == context.id else { return nil }
+        defer { self.live = nil; target = nil; liveAnchor = nil }
+        return live.finish(text, cursorOffset: cursorOffset)
     }
 
     nonisolated func insert(_ text: String, cursorOffset: Int?) async -> InsertionResult {
@@ -52,7 +80,7 @@ final class AccessibilityTextInserter: TextInserting {
     }
 
     private func performInsert(_ text: String, cursorOffset: Int?) -> InsertionResult {
-        defer { target = nil }
+        defer { target = nil; liveAnchor = nil }
         guard permissions.accessibilityTrusted(prompt: false) else {
             return copy(text, reason: .accessibilityDenied)
         }

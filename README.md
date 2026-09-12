@@ -40,6 +40,10 @@ any app, style cleanup with a local LLM and an MCP server follow in 2.x (see the
   processing and the result. Recognized text is inserted into the focused field via Accessibility,
   or copied to the clipboard when there isn't a text field; finished dictations save to encrypted
   history unless the Privacy toggle turns that off.
+- Recognized windows appear in the focused text field while speaking. Final cleanup updates only
+  that capture's text; moving focus, editing the field or moving its caret stops further writes and
+  copies the full final result once. Escape stops capture and keeps text already inserted.
+  Onboarding and History scratchpads retain final-only insertion.
 - The Flow Bar names an app holding exclusive access to the microphone when macOS reports its
   owner. When that app releases the device, a still-active dictation gesture retries with fresh
   permission and target checks. Releasing push-to-talk, cancelling, or re-inserting the last

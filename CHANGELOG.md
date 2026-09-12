@@ -8,6 +8,9 @@ versioning.
 ### Added
 - Files cleanup optionally improves transcripts up to 150 words with the shared local style model,
   preserving segment timing and updating the displayed word count; rules remain the fallback.
+- Insert cumulative speech previews into the captured field, reconcile final styling without
+  duplicate text, and copy the full final result if focus, text or selection changes. Escape keeps
+  previews already inserted; ephemeral scratchpad captures still insert only their final result.
 - Microphone changes reach dictation and Settings › Audio live. Missing input stops capture;
   switching devices preserves pending audio and transcript timing across the restart gap.
 - Settings → Audio offers optional noise suppression with honest minimum/standard/maximum audio
