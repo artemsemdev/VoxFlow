@@ -38,6 +38,8 @@ struct GeneralSettingsBody: View {
             VStack(spacing: 0) {
                 appearanceRow
                 Divider().padding(.leading, 16)
+                windowOpacityRow
+                Divider().padding(.leading, 16)
                 flowBarPositionRow
                 Divider().padding(.leading, 16)
                 languageRow
@@ -98,6 +100,31 @@ struct GeneralSettingsBody: View {
             .pickerStyle(.menu)
             .labelsHidden()
             .frame(maxWidth: 140, alignment: .trailing)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+    }
+
+    private var windowOpacityRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 12) {
+                Text("Window opacity")
+                Spacer()
+                Slider(value: Binding(get: { general.windowOpacity },
+                                      set: { general.windowOpacity = $0 }),
+                       in: GeneralSettings.windowOpacityRange) {
+                    Text("Window opacity")
+                }
+                .labelsHidden()
+                .accessibilityValue(general.windowOpacityLabel)
+                .frame(width: 160)
+                Text(general.windowOpacityLabel)
+                    .monospacedDigit()
+                    .frame(width: 40, alignment: .trailing)
+            }
+            Text("Main window only. 100% is fully opaque.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)

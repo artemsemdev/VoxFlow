@@ -145,6 +145,26 @@ struct SettingsRenderTests {
         try Self.render(ModelsBaselinePreview(model: modelsVM), name: "Models-baseline", to: directory)
     }
 
+    @Test("renders the opacity control at its bounds in narrow light and dark settings")
+    func opacityControl() async throws {
+        let directory = Self.rendersDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let settings = GeneralSettings(store: InMemoryKeyValueStore())
+        let vm = GeneralViewModel(settings: settings,
+                                  dictationSettings: DictationSettings(store: InMemoryKeyValueStore()),
+                                  loginItem: FakeLoginItem(), appearanceApplier: FakeAppearanceApplying(),
+                                  flowBarPositioning: FakeFlowBarPositioning())
+        for value in [0.2, 1.0] {
+            settings.windowOpacity = value
+            for dark in [false, true] {
+                let host = NativeRenderHost(GeneralSettingsBody(general: vm),
+                                            size: NSSize(width: 640, height: 640), dark: dark)
+                try await host.captureSettled(to: directory.appendingPathComponent(
+                    "Settings-opacity-\(Int(value * 100))-\(dark).png"))
+            }
+        }
+    }
+
     private static func render(_ view: some View, name: String, to directory: URL) throws {
         let host = NativeRenderHost(view, size: NSSize(width: 900, height: 600))
         defer { host.close() }
