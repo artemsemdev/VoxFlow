@@ -11,14 +11,16 @@ actor StyleModelLoader: LLMBackend {
     private let engine: any StyleEngine
     private(set) var loadedModelID: String?
     private var loadTask: Task<Void, Never>?
+    private(set) var loadingModelID: String?
+    /// Serializes native loads and unloads without making readiness checks wait for either one.
+    /// In particular, a replacement load must start only after a cancelled predecessor has been
+    /// unloaded, otherwise the predecessor's cleanup can unload the replacement model.
+    private var lifecycleTask: Task<Void, Never>?
     // Do not queue a short-budget dictation behind another native generation: a queued native
     // continuation cannot observe cancellation until the older operation leaves the serial queue.
     private var generationInFlight = false
-    /// Bumped every time a new load `Task` is created, and captured by that task. Lets
-    /// `load(_:generation:)`'s `defer` tell "I am still the current `loadTask`" from "a newer load
-    /// has already replaced me" without comparing `Task` values (final review I1) — needed because
-    /// `cancelLoadAndUnloadIfNeeded()` now forgets `loadTask` immediately, without awaiting it, so a
-    /// cancelled load can still be running when a fresh one starts.
+    /// Captured by each load. Cancellation advances it immediately, so stale completions cannot
+    /// clear or publish ownership while their cleanup and replacement remain queued.
     private var loadGeneration = 0
     private static let log = Logger(subsystem: "dev.artemsem.voxflow", category: "style-model")
 
@@ -29,11 +31,11 @@ actor StyleModelLoader: LLMBackend {
         let model = await store.defaultModel(role: .style)
         guard !generationInFlight else { return false }
         guard let model else {
-            await cancelLoadAndUnloadIfNeeded()
+            scheduleUnloadIfNeeded()
             return false
         }
         if loadedModelID == model.id { return true }
-        if loadTask == nil { startLoad(model) }
+        ensureLoad(of: model)
         return false
     }
 
@@ -41,7 +43,7 @@ actor StyleModelLoader: LLMBackend {
     /// use the LLM once the Metal shaders and weights are in memory.
     func warmUp() async {
         guard let model = await store.defaultModel(role: .style), loadedModelID != model.id else { return }
-        if loadTask == nil { startLoad(model) }
+        ensureLoad(of: model)
         await loadTask?.value
     }
 
@@ -53,47 +55,72 @@ actor StyleModelLoader: LLMBackend {
         return try await engine.generate(prompt, maxNewTokens: maxNewTokens)
     }
 
+    private func ensureLoad(of model: ModelDescriptor) {
+        guard loadingModelID != model.id else { return }
+        scheduleUnloadIfNeeded()
+        startLoad(model)
+    }
+
     private func startLoad(_ model: ModelDescriptor) {
         loadGeneration += 1
         let generation = loadGeneration
-        loadTask = Task { await self.load(model, generation: generation) }
+        let predecessor = lifecycleTask
+        let task = Task {
+            await predecessor?.value
+            guard !Task.isCancelled else { return }
+            await self.load(model, generation: generation)
+        }
+        loadTask = task
+        loadingModelID = model.id
+        lifecycleTask = task
     }
 
     private func load(_ model: ModelDescriptor, generation: Int) async {
-        // Only clear `loadTask` if a newer load hasn't since replaced it — `cancelLoadAndUnloadIfNeeded()`
+        // Only clear `loadTask` if a newer load hasn't since replaced it — lifecycle cancellation
         // may already have forgotten this task (without waiting for it) by the time it resumes here.
-        defer { if loadGeneration == generation { loadTask = nil } }
+        defer {
+            if loadGeneration == generation {
+                loadTask = nil
+                loadingModelID = nil
+            }
+        }
         do {
             try await engine.load(modelAt: store.directory.appendingPathComponent(model.fileName))
-            // The wrapping `Task` may have been cancelled (the model was removed, or `isReady()`
-            // found a different default) while `engine.load` was in flight — `engine.load` itself
-            // isn't cancellation-aware, so it can still succeed after that. Undo it rather than
-            // publish a model that's no longer the one to serve.
-            guard !Task.isCancelled else {
+            // A cancelled, non-cancellation-aware native load may still finish. Clean it up inside
+            // this lifecycle operation, before the chained replacement is allowed to start.
+            guard !Task.isCancelled, loadGeneration == generation else {
                 await engine.unload()
-                loadedModelID = nil
                 return
             }
             loadedModelID = model.id
         } catch {
+            guard loadGeneration == generation else { return }
             Self.log.error("style model load failed: \(String(describing: error))")
             loadedModelID = nil
         }
     }
 
-    /// Non-blocking (final review I1): cancels any in-flight load and forgets it immediately,
-    /// *without* awaiting it — `LlamaEngine.load` isn't cancellation-aware, so awaiting it here could
-    /// stall a dictation's `isReady()` check for an entire first-run model load (~20 s). If nothing
-    /// is loaded yet, there is nothing to unload and this returns right away. If a model was already
-    /// loaded, that `engine.unload()` call is on an already-resident model — measured fast, so it's
-    /// still safe to await. A load that's still in flight when cancelled is unloaded by
-    /// `load(_:generation:)`'s own cancelled branch above, once the (non-cancellation-aware)
-    /// `engine.load` call eventually returns on its own.
-    private func cancelLoadAndUnloadIfNeeded() async {
+    /// Cancels logical ownership immediately while native cleanup stays on the lifecycle chain.
+    /// `isReady()` must never await native load or unload work.
+    private func scheduleUnloadIfNeeded() {
+        let cancelledLoad = loadTask != nil
+        let loadedModel = loadedModelID != nil
+        guard cancelledLoad || loadedModel else { return }
+        loadGeneration += 1
         loadTask?.cancel()
         loadTask = nil
-        guard loadedModelID != nil else { return }
-        loadedModelID = nil   // clear *before* the suspension: a second caller resuming here sees nothing left to unload
-        await engine.unload()
+        loadingModelID = nil
+        loadedModelID = nil
+
+        // An in-flight load owns its cleanup inside `load`. A task cancelled before entering the
+        // engine touched no native state, so it needs no extra unload either.
+        guard !cancelledLoad, loadedModel else { return }
+
+        let predecessor = lifecycleTask
+        let task = Task {
+            await predecessor?.value
+            await self.engine.unload()
+        }
+        lifecycleTask = task
     }
 }

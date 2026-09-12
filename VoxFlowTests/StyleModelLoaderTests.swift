@@ -45,7 +45,8 @@ struct StyleModelLoaderTests {
     func installThenRemoveModelFile() async throws {
         let dir = TemporaryDirectory()
         try installStyleModelFile(in: dir)
-        let engine = FakeLLMBackend()
+        let engine = HangingLoadEngine()
+        await engine.release()
         let modelStore = store(dir: dir)
         let loader = StyleModelLoader(store: modelStore, engine: engine)
 
@@ -64,6 +65,7 @@ struct StyleModelLoaderTests {
 
         let readyAfterRemoval = await loader.isReady()
         #expect(readyAfterRemoval == false)
+        await engine.waitForUnload()
         #expect(await engine.unloadCount == 1)
         #expect(await engine.loadedURLs.count == 1)   // no model to reload — removal never starts a second load
 
@@ -161,6 +163,142 @@ struct StyleModelLoaderTests {
         #expect(await engine.loadedURLs.count == 1)   // the cancelled load's own unload never resurrects loadedModelID or starts a second load
         #expect(await loader.isReady() == false)
         #expect(await engine.unloadCount == 1)   // still just the one unload
+    }
+
+    private actor HangingUnloadEngine: StyleEngine {
+        let unloadEntered = Gate()
+        let releaseUnload = Gate()
+        private(set) var ready = false
+
+        func isReady() async -> Bool { ready }
+        func generate(_ prompt: ChatPrompt, maxNewTokens: Int) async throws -> String { "" }
+        func load(modelAt url: URL) async throws { ready = true }
+        func unload() async {
+            await unloadEntered.open()
+            await releaseUnload.wait()
+            ready = false
+        }
+    }
+
+    @Test("isReady returns while native unload is still in flight")
+    func removalNeverAwaitsNativeUnload() async throws {
+        let dir = TemporaryDirectory()
+        try installStyleModelFile(in: dir)
+        let engine = HangingUnloadEngine()
+        let loader = StyleModelLoader(store: store(dir: dir), engine: engine)
+        await loader.warmUp()
+        try FileManager.default.removeItem(at: dir.url.appendingPathComponent(Self.styleModel.fileName))
+
+        let readiness = Task { await loader.isReady() }
+        await engine.unloadEntered.wait()
+        let returnedBeforeUnload = await withTaskGroup(of: Bool.self) { group in
+            group.addTask { _ = await readiness.value; return true }
+            group.addTask { try? await Task.sleep(for: .milliseconds(250)); return false }
+            let first = await group.next()!
+            await engine.releaseUnload.open()
+            group.cancelAll()
+            return first
+        }
+
+        #expect(returnedBeforeUnload)
+        #expect(await readiness.value == false)
+    }
+
+    private actor RestartedLoadEngine: StyleEngine {
+        let firstLoadEntered = Gate()
+        let secondLoadEntered = Gate()
+        let releaseFirstLoad = Gate()
+        private(set) var ready = false
+        private(set) var loadCount = 0
+        private(set) var unloadCount = 0
+        private(set) var loadedURLs: [URL] = []
+
+        func isReady() async -> Bool { ready }
+        func generate(_ prompt: ChatPrompt, maxNewTokens: Int) async throws -> String { "" }
+        func load(modelAt url: URL) async throws {
+            loadCount += 1
+            loadedURLs.append(url)
+            let ordinal = loadCount
+            if ordinal == 1 {
+                await firstLoadEntered.open()
+                await releaseFirstLoad.wait()
+            } else {
+                await secondLoadEntered.open()
+            }
+            ready = true
+        }
+        func unload() async { unloadCount += 1; ready = false }
+    }
+
+    @Test("a cancelled load cleans up before its replacement takes ownership")
+    func staleLoadCannotUnloadReplacement() async throws {
+        let dir = TemporaryDirectory()
+        try installStyleModelFile(in: dir)
+        let engine = RestartedLoadEngine()
+        let loader = StyleModelLoader(store: store(dir: dir), engine: engine)
+        #expect(await loader.isReady() == false)
+        await engine.firstLoadEntered.wait()
+
+        let modelURL = dir.url.appendingPathComponent(Self.styleModel.fileName)
+        try FileManager.default.removeItem(at: modelURL)
+        #expect(await loader.isReady() == false)
+        try installStyleModelFile(in: dir)
+        #expect(await loader.isReady() == false)
+
+        // The old implementation starts the replacement immediately. The fixed implementation
+        // waits for the stale load and its unload, but this bounded probe releases both paths.
+        let replacementStartedEarly = await withTaskGroup(of: Bool.self) { group in
+            group.addTask { await engine.secondLoadEntered.wait(); return true }
+            group.addTask { try? await Task.sleep(for: .milliseconds(250)); return false }
+            let first = await group.next()!
+            await engine.releaseFirstLoad.open()
+            group.cancelAll()
+            return first
+        }
+        await loader.warmUp()
+
+        #expect(replacementStartedEarly == false)
+        #expect(await engine.loadCount == 2)
+        #expect(await engine.unloadCount == 1)
+        #expect(await engine.ready)
+        #expect(await loader.isReady())
+    }
+
+    @Test("changing the default during a held load replaces that load before warm-up returns")
+    func changedDefaultReplacesHeldLoad() async throws {
+        let first = ModelDescriptor(
+            id: "style-a", displayName: "A", role: .style,
+            downloadURL: URL(string: "https://example.invalid/a.gguf")!, sizeInBytes: 1,
+            sha256: "a", languagesSummary: "", isDefault: true
+        )
+        let second = ModelDescriptor(
+            id: "style-b", displayName: "B", role: .style,
+            downloadURL: URL(string: "https://example.invalid/b.gguf")!, sizeInBytes: 1,
+            sha256: "b", languagesSummary: "", isDefault: false
+        )
+        let dir = TemporaryDirectory()
+        try Data([0]).write(to: dir.url.appendingPathComponent(first.fileName))
+        try Data([0]).write(to: dir.url.appendingPathComponent(second.fileName))
+        let modelStore = ModelStore(
+            directory: dir.url, catalog: [first, second], downloader: FakeModelDownloader(),
+            freeSpace: FakeFreeSpace(available: 10_000), settings: InMemoryKeyValueStore()
+        )
+        let engine = RestartedLoadEngine()
+        let loader = StyleModelLoader(store: modelStore, engine: engine)
+
+        #expect(await loader.isReady() == false)
+        await engine.firstLoadEntered.wait()
+        try await modelStore.setDefault(id: second.id)
+
+        #expect(await loader.isReady() == false)
+        #expect(await loader.loadingModelID == second.id)
+        await engine.releaseFirstLoad.open()
+        await loader.warmUp()
+
+        #expect(await engine.loadedURLs.map(\.lastPathComponent) == [first.fileName, second.fileName])
+        #expect(await engine.unloadCount == 1)
+        #expect(await engine.ready)
+        #expect(await loader.loadedModelID == second.id)
     }
 
     @Test("concurrent ready callers cannot queue another generation behind native work", .timeLimit(.minutes(1)))
