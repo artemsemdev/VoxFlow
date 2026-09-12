@@ -90,12 +90,14 @@ struct FlowBarPanelSizingTests {
                 }
                 let deadline = ContinuousClock.now + .seconds(3)
                 var frameWidth: CGFloat = 0
+                var minimumWidth: CGFloat = 0
                 repeat {
                     // Reading the actual frame must not force live SwiftUI layout and heal the bug.
-                    frameWidth = await onRunLoop { panel.frame.width }
-                } while (panel.suppressReflow || frameWidth < expectedWidth - 2) && ContinuousClock.now < deadline
+                    (frameWidth, minimumWidth) = await onRunLoop { (panel.frame.width, panel.contentMinSize.width) }
+                } while (panel.suppressReflow || frameWidth < expectedWidth - 2 || minimumWidth < expectedWidth - 2) && ContinuousClock.now < deadline
                 print("Visible Flow Bar cycle \(cycle), second \(second): expected=\(expectedWidth), frame=\(frameWidth)")
                 #expect(frameWidth >= expectedWidth - 2)
+                #expect(minimumWidth >= expectedWidth - 2, "The window must prevent clipping its listening content")
                 #expect(panel.isVisible)
             }
             coordinator.fn(.up)
@@ -105,6 +107,29 @@ struct FlowBarPanelSizingTests {
             #expect(panel.isVisible) // Keep the production six-second grace; never manually hide.
         }
         scheduler.cancel()
+        await onRunLoop { panel.close() }
+    }
+
+    @Test("processing sets a native minimum width that fits its full status")
+    func processingMinimumWidth() async throws {
+        let content = FlowBarContent.make(state: .processing(Processing(startedAt: 0,
+            takingLonger: false, limitReached: false, partialText: "")), elapsed: 1, mode: .pushToTalk)
+        var createdPanel: FlowBarPanel?
+        let expectedWidth = await onRunLoop {
+            let root = FlowBarView(content: content, levels: Array(repeating: 0, count: 14))
+            let reference = NSHostingView(rootView: root)
+            reference.layoutSubtreeIfNeeded()
+            createdPanel = FlowBarPanel(rootView: root)
+            createdPanel?.show()
+            return reference.fittingSize.width
+        }
+        let panel = try #require(createdPanel)
+        let deadline = ContinuousClock.now + .seconds(3)
+        var minimumWidth: CGFloat = 0
+        repeat {
+            minimumWidth = await onRunLoop { panel.contentMinSize.width }
+        } while (panel.suppressReflow || minimumWidth < expectedWidth - 2) && ContinuousClock.now < deadline
+        #expect(minimumWidth >= expectedWidth - 2, "The native window must not permit a clipped processing status")
         await onRunLoop { panel.close() }
     }
 
