@@ -1,149 +1,33 @@
 @preconcurrency import AVFoundation
 import Foundation
-import Synchronization
 import VoxFlowCore
 
-/// Decodes any AVFoundation-readable audio/video file to `AudioSamples` (16 kHz mono Float32).
+/// Decodes AVFoundation-readable files to 16 kHz mono Float32, with a bounded cursor for Files.
 public struct AudioDecoder: AudioDecoding {
     typealias FileRead = @Sendable (AVAudioFile, AVAudioPCMBuffer, AVAudioFrameCount) throws -> Void
-
-    /// Delegates to `SupportedAudio`, the single source of truth; kept as a name for existing call sites.
     public static var supportedExtensions: Set<String> { SupportedAudio.extensions }
-
-    /// Input frames converted per iteration. Bounds the *conversion* buffers; the decoded output still
-    /// holds the whole file (≈ 690 MB for 3 h) — chunking long files is a phase-2 decision.
-    private static let chunkFrames: AVAudioFrameCount = 65_536
-
     private let fileRead: FileRead
 
-    public init() {
-        fileRead = { try $0.read(into: $1, frameCount: $2) }
+    public init() { fileRead = { try $0.read(into: $1, frameCount: $2) } }
+    init(fileRead: @escaping FileRead) { self.fileRead = fileRead }
+
+    public func open(_ url: URL, progress: @escaping @Sendable (Double) -> Void) throws -> any AudioSampleReading {
+        try AudioFileReader(url: url, fileRead: fileRead, progress: progress)
     }
 
-    init(fileRead: @escaping FileRead) {
-        self.fileRead = fileRead
-    }
+    public func decode(_ url: URL) throws -> AudioSamples { try decode(url, progress: { _ in }) }
 
-    public func decode(_ url: URL) throws -> AudioSamples {
-        try decode(url, progress: { _ in })
-    }
-
+    /// Compatibility for callers that explicitly need all samples. Files uses open(_:progress:).
     public func decode(_ url: URL, progress: @Sendable (Double) -> Void) throws -> AudioSamples {
-        try Task.checkCancellation()
-        let ext = url.pathExtension.lowercased()
-        guard Self.supportedExtensions.contains(ext) else { throw AudioDecodingError.unsupportedType(ext) }
-        guard FileManager.default.fileExists(atPath: url.path) else { throw AudioDecodingError.fileNotFound(url) }
-
-        let file: AVAudioFile
-        do {
-            file = try AVAudioFile(forReading: url)
-        } catch {
-            throw AudioDecodingError.decodeFailed(error.localizedDescription)
-        }
-
-        // AVAudioConverter's own channel-count reduction does not average channels — it just
-        // selects one and drops the rest — so the mono downmix has to be ours: convert at the
-        // source's own channel count (sample-rate conversion only) and average channels below.
-        let sourceChannels = file.processingFormat.channelCount
-        let target = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: AudioSamples.sampleRate,
-                                   channels: sourceChannels, interleaved: false)!
-        guard let converter = AVAudioConverter(from: file.processingFormat, to: target) else {
-            throw AudioDecodingError.decodeFailed("no converter from \(file.processingFormat) to 16 kHz")
-        }
-
-        let ratio = AudioSamples.sampleRate / file.processingFormat.sampleRate
+        let reader = try AudioFileReader(url: url, fileRead: fileRead, progress: { _ in })
         var output: [Float] = []
-        // Allocate incrementally, so cancelling early does not reserve hours of decoded PCM.
-        output.reserveCapacity(Int(Double(Self.chunkFrames) * ratio) + 1024)
         progress(0)
-
-        // The input block reads the next chunk directly from `file` each time the converter
-        // asks for more; all state (the read cursor) lives on `file` itself, and `chunk` is
-        // allocated once and reused, so nothing mutable Swift-side needs to be captured by
-        // this @Sendable closure — except `readError`, which uses `Mutex` (Sendable, no
-        // `@unchecked`/`nonisolated(unsafe)`) to carry a mid-file read failure back out.
-        let chunk = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: Self.chunkFrames)!
-        let outputCapacity = AVAudioFrameCount(Double(Self.chunkFrames) * ratio) + 1024
-        var conversionError: NSError?
-        let readError = Mutex<(any Error)?>(nil)
-
-        conversionLoop: while true {
-            try Task.checkCancellation()
-            let outputBuffer = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: outputCapacity)!
-            let status = converter.convert(to: outputBuffer, error: &conversionError) { _, outStatus in
-                // `AVAudioFile.read` throws once `framePosition >= length` — that's the normal
-                // end-of-file signal, not a failure, so don't call it there; only a `read`
-                // while data legitimately remains can be a genuine mid-file error.
-                guard file.framePosition < file.length else {
-                    outStatus.pointee = .endOfStream
-                    return nil
-                }
-                do {
-                    try Task.checkCancellation()
-                    try fileRead(file, chunk, Self.chunkFrames)
-                    try Task.checkCancellation()
-                } catch {
-                    readError.withLock { $0 = error }
-                    outStatus.pointee = .endOfStream
-                    return nil
-                }
-                guard chunk.frameLength > 0 else {
-                    outStatus.pointee = .endOfStream
-                    return nil
-                }
-                outStatus.pointee = .haveData
-                return chunk
-            }
-            try Task.checkCancellation()
-            if let error = readError.withLock({ $0 }) {
-                if error is CancellationError { throw error }
-                throw AudioDecodingError.decodeFailed(error.localizedDescription)
-            }
-            if let conversionError { throw AudioDecodingError.decodeFailed(conversionError.localizedDescription) }
-            if status == .error { throw AudioDecodingError.decodeFailed("conversion failed") }
-
-            appendDownmixed(outputBuffer, channels: Int(sourceChannels), to: &output)
-            if file.framePosition < file.length {
-                progress(Double(file.framePosition) / Double(max(file.length, 1)))
-            }
-
-            switch status {
-            case .haveData:
-                continue conversionLoop
-            case .endOfStream, .inputRanDry:
-                break conversionLoop
-            case .error:
-                throw AudioDecodingError.decodeFailed("conversion failed")
-            @unknown default:
-                break conversionLoop
-            }
+        while let chunk = try reader.read(upTo: 65_536) {
+            output.append(contentsOf: chunk.samples)
+            progress(reader.fraction)
         }
-
         try Task.checkCancellation()
         progress(1)
         return AudioSamples(output)
-    }
-
-    /// Appends `buffer`'s frames to `output` as mono, averaging across `channels` deinterleaved
-    /// channels (a no-op copy when `channels == 1`).
-    private func appendDownmixed(_ buffer: AVAudioPCMBuffer, channels: Int, to output: inout [Float]) {
-        let frameLength = Int(buffer.frameLength)
-        guard frameLength > 0 else { return }
-        let channelData = buffer.floatChannelData!
-
-        guard channels > 1 else {
-            output.append(contentsOf: UnsafeBufferPointer(start: channelData[0], count: frameLength))
-            return
-        }
-
-        let scale = 1 / Float(channels)
-        output.reserveCapacity(output.count + frameLength)
-        for frame in 0..<frameLength {
-            var sum: Float = 0
-            for channel in 0..<channels {
-                sum += channelData[channel][frame]
-            }
-            output.append(sum * scale)
-        }
     }
 }

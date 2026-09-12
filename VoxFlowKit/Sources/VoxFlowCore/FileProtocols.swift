@@ -14,9 +14,14 @@ public protocol AudioDecoding: Sendable {
     /// Reports a fraction in 0...1. Native decoders check task cancellation between chunks;
     /// existing conformers can retain the compatibility implementation's completion-only report.
     func decode(_ url: URL, progress: @Sendable (Double) -> Void) throws -> AudioSamples
+    func open(_ url: URL, progress: @escaping @Sendable (Double) -> Void) throws -> any AudioSampleReading
 }
 
 public extension AudioDecoding {
+    func open(_ url: URL, progress: @escaping @Sendable (Double) -> Void) throws -> any AudioSampleReading {
+        BufferedAudioReader(try decode(url, progress: progress))
+    }
+
     func decode(_ url: URL, progress: @Sendable (Double) -> Void) throws -> AudioSamples {
         let audio = try decode(url)
         progress(1)
