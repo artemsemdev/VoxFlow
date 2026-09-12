@@ -28,6 +28,7 @@ struct OnboardingWindow: View {
 /// scene's own `.windowStyle(.hiddenTitleBar)` (`VoxFlowApp.swift`) — this view only reserves the
 /// clearance for them (D-1: one set of chrome, not a hand-drawn pair layered under the real ones).
 struct OnboardingContentView: View {
+    @Environment(\.colorScheme) private var colorScheme
     let viewModel: OnboardingViewModel
     let fnWarningState: FnSystemActionWarningState
     let openKeyboard: @MainActor () -> Void
@@ -52,7 +53,9 @@ struct OnboardingContentView: View {
             footer
         }
         .frame(width: 700, height: 520)
-        .background(Color(red: 0.965, green: 0.965, blue: 0.972))
+        // Keep the light canvas while pairing dark semantic text colors with a native dark surface.
+        .background(colorScheme == .dark ? Color(nsColor: .windowBackgroundColor)
+                    : Color(red: 0.965, green: 0.965, blue: 0.972))
     }
 
     @ViewBuilder
@@ -88,7 +91,7 @@ struct OnboardingContentView: View {
         HStack(spacing: 7) {
             ForEach(0..<4, id: \.self) { index in
                 Circle()
-                    .fill(index == min(viewModel.step.rawValue, 3) ? Color.accentColor : Color.black.opacity(0.15))
+                    .fill(index == min(viewModel.step.rawValue, 3) ? Color.accentColor : Color.primary.opacity(0.15))
                     .frame(width: 6, height: 6)
             }
         }

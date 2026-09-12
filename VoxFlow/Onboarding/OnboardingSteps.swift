@@ -67,7 +67,7 @@ struct PermissionsStepView: View {
                 accessibilityRow
             }
             .background(.background.secondary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Color.black.opacity(0.06)))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Color.primary.opacity(0.06)))
 
             if viewModel.showsAccessibilityDenied {
                 whyThisPermission
@@ -148,7 +148,7 @@ struct PermissionsStepView: View {
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(14)
-            .background(Color.black.opacity(0.04), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
     private var grantedLabel: some View {
@@ -213,7 +213,7 @@ struct HotkeyStepView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.background.secondary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .stroke(selected ? Color.accentColor : Color.black.opacity(0.08), lineWidth: selected ? 2 : 1))
+            .stroke(selected ? Color.accentColor : Color.primary.opacity(0.08), lineWidth: selected ? 2 : 1))
         .contentShape(Rectangle())
         .onTapGesture { viewModel.choose(mode) }
     }
@@ -224,8 +224,8 @@ struct HotkeyStepView: View {
             .padding(.horizontal, 7)
             .padding(.vertical, 4)
             .background(
-                RoundedRectangle(cornerRadius: 5).fill(Color.black.opacity(0.06))
-                    .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.black.opacity(0.15), lineWidth: 1))
+                RoundedRectangle(cornerRadius: 5).fill(Color.primary.opacity(0.06))
+                    .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.primary.opacity(0.15), lineWidth: 1))
             )
     }
 }
@@ -258,7 +258,7 @@ struct TryItStepView: View {
                 .focused($scratchpadFocused)
                 .padding(10)
                 .frame(height: 96)
-                .background(Color.white, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Color.accentColor.opacity(0.55), lineWidth: 1.5))
                 .frame(maxWidth: 500)
 
