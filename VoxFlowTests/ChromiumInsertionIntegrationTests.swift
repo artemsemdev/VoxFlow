@@ -71,7 +71,8 @@ struct ChromiumInsertionIntegrationTests {
         let resources = try file.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
         try #require(resources.isRegularFile == true && resources.isSymbolicLink != true)
         let fileIsEmpty = try Data(contentsOf: file).isEmpty
-        let editorIsEmpty = target.textValue == ""
+        // Monaco's empty virtual input buffer may contain its trailing line separator.
+        let editorIsEmpty = target.textValue == "" || target.textValue == "\n"
         let caretIsAtStart = target.selectedRange == NSRange(location: 0, length: 0)
         try #require(fileIsEmpty && editorIsEmpty && caretIsAtStart,
                      "The exact empty disposable file and editor are required before any write.")

@@ -24,7 +24,7 @@ struct TextEditLiveInsertionTests {
         let app = try #require(NSWorkspace.shared.frontmostApplication)
         try #require(app.bundleIdentifier == "com.apple.TextEdit")
         var value: CFTypeRef?
-        try #require(AXUIElementCopyAttributeValue(AXUIElementCreateSystemWide(),
+        try #require(AXUIElementCopyAttributeValue(AXUIElementCreateApplication(app.processIdentifier),
             kAXFocusedUIElementAttribute as CFString, &value) == .success)
         let focused = try #require(value)
         try #require(CFGetTypeID(focused) == AXUIElementGetTypeID())
