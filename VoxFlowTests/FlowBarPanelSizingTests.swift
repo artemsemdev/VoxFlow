@@ -57,6 +57,60 @@ struct FlowBarPanelSizingTests {
         await onRunLoop { panel.close() }
     }
 
+    @Test("a continuously visible panel fits timer ticks and completed-capture restarts")
+    func visibleRestarts() async throws {
+        let harness = DictationCoordinatorTests()
+        let (coordinator, microphone, clock, _, _) = harness.make()
+        var createdPanel: FlowBarPanel?
+        await onRunLoop { createdPanel = FlowBarPanel(rootView: FlowBarView(coordinator: coordinator)) }
+        let panel = try #require(createdPanel)
+        let scheduler = FlowBarPresenterTests.FakeScheduler()
+        let presenter = FlowBarPresenter(panel: panel, scheduler: scheduler)
+        presenter.bind(to: coordinator)
+        for cycle in 1...3 {
+            coordinator.fn(.down)
+            await harness.wait(coordinator) { if case .armed(_) = $0 { true } else { false } }
+            await microphone.waitUntilCapturing()
+            await clock.waitForSleepers(1)
+            await clock.advance(by: 0.3)
+            await harness.wait(coordinator) { if case .listening(_) = $0 { true } else { false } }
+            for second in 1...3 {
+                microphone.emit(rms: 0.5)
+                for level in 0..<14 { coordinator.reportLevel(Float(level) / 14) }
+                await clock.advance(by: 1)
+                let tickDeadline = ContinuousClock.now + .seconds(2)
+                while coordinator.elapsed < Double(second) && ContinuousClock.now < tickDeadline { await Task.yield() }
+                try #require(coordinator.elapsed >= Double(second))
+                let expectedWidth = await onRunLoop {
+                    let content = FlowBarContent.make(state: coordinator.state, elapsed: coordinator.elapsed,
+                        mode: coordinator.hotkeyMode, now: coordinator.now(), shortcuts: coordinator.shortcuts)
+                    let reference = NSHostingView(rootView: FlowBarView(content: content, levels: coordinator.levels))
+                    reference.layoutSubtreeIfNeeded()
+                    return reference.fittingSize.width
+                }
+                let deadline = ContinuousClock.now + .seconds(3)
+                var widths: (CGFloat, CGFloat) = (0, 0)
+                repeat {
+                    widths = await onRunLoop {
+                        panel.contentView?.layoutSubtreeIfNeeded()
+                        return (panel.contentView?.fittingSize.width ?? 0, panel.frame.width)
+                    }
+                } while (panel.suppressReflow || abs(widths.0 - expectedWidth) > 2 || widths.1 < widths.0 - 1) && ContinuousClock.now < deadline
+                print("Visible Flow Bar cycle \(cycle), second \(second): expected=\(expectedWidth), ideal=\(widths.0), frame=\(widths.1)")
+                #expect(abs(widths.0 - expectedWidth) <= 2)
+                #expect(widths.1 >= widths.0 - 1)
+                #expect(panel.isVisible)
+            }
+            coordinator.fn(.up)
+            await harness.wait(coordinator) { if case .inserted = $0 { true } else { false } }
+            coordinator.anyKey()
+            await harness.wait(coordinator) { $0 == .idle }
+            #expect(panel.isVisible) // Keep the production six-second grace; never manually hide.
+        }
+        scheduler.cancel()
+        await onRunLoop { panel.close() }
+    }
+
     private func onRunLoop<T: Sendable>(_ action: @escaping @MainActor () -> T) async -> T {
         await withCheckedContinuation { continuation in
             RunLoop.main.perform(inModes: [.default]) {
