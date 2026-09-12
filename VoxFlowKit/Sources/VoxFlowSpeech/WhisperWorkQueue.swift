@@ -37,7 +37,10 @@ final class WhisperWorkQueue: Sendable {
         }
     }
 
-    func run<T: Sendable>(priority: Priority, _ body: @escaping @Sendable () throws -> T) async throws -> T {
+    // Register work before yielding the caller's actor. Engine unload relies on every captured
+    // native context being queued before another actor operation can enqueue its release.
+    func run<T: Sendable>(priority: Priority, isolation: isolated (any Actor)? = #isolation,
+                         _ body: @escaping @Sendable () throws -> T) async throws -> T {
         try Task.checkCancellation()
         let cancellation = Cancellation()
         return try await withTaskCancellationHandler {

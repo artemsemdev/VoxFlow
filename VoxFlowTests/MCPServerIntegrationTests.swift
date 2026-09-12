@@ -354,6 +354,7 @@ struct MCPServerIntegrationTests {
             let text = try #require(rpc.result?["content"]?.arrayValue?.first?["text"]?.stringValue)
             #expect(text.lowercased().contains("attention"))
         }
+        await engine.unload()
     }
 
     // MARK: dictate — not exercised for real (no microphone in a test run)
