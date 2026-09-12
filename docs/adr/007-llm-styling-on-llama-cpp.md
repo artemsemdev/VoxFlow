@@ -32,7 +32,7 @@ that rewrites every segment of a finished file transcript).
 - **Fallback matrix.** Every one of the following returns the rule-based result for the
   requested tone instead of the LLM's: the backend isn't ready (model absent or still
   loading), the pre-passed text exceeds 150 words, generation throws, generation exceeds
-  8 s, or the output fails validation (empty; under 30% or over 300% of the input's word
+  the remaining processing budget (at most 8 s), or the output fails validation (empty; under 30% or over 300% of the input's word
   count; identical to the prompt; contains `<|im_`). A dictation — or a Re-style, or a
   Files cleanup — is never lost to a model problem; it degrades to the same deterministic
   output ADR-005 already shipped.
@@ -50,8 +50,9 @@ that rewrites every segment of a finished file transcript).
   kicks a background load and returns `false` immediately (that call uses rules). At real
   launch, `warmUp()` runs once, low priority, right after `dictation.start()` — the first
   Metal shader compile (~20 s) happens in the background instead of blocking the first
-  dictation. Removing the model in Settings unloads it on the next `isReady()` check; the
-  model otherwise stays resident for the process's lifetime (idle unload is a follow-up).
+  dictation. Removing the model in Settings unloads it on the next `isReady()` check. It also
+  unloads after five minutes without generation activity or on macOS memory pressure; pressure
+  during generation is coalesced until ownership releases. The next styled request reloads lazily.
 - **Re-style semantics (MW-02s).** "Re-style ▾" on every readable History row opens a
   popover — Formal / Casual / Very casual / Verbatim, a checkmark on the row's current
   style, footer "Rewrites locally and copies the result." Picking a tone re-runs
@@ -68,9 +69,15 @@ that rewrites every segment of a finished file transcript).
 
 ## Consequences
 
-- The 8 s generation ceiling plus whisper's final window stays well inside
-  `FlowBarConfig.processingTimeout` (20 s); a deadline-aware styling budget derived from the
-  remaining processing time is a follow-up.
+- Live dictation stamps a capture-local absolute deadline when recording stops, before the audio
+  feed closes. Styling shares the controller's monotonic clock and reserves one second for snippet
+  expansion and completion. The shared style-model loader permits one generation at a time;
+  another ready caller falls back immediately instead of entering the native queue. Model readiness
+  and generation share the lesser of eight seconds and
+  that remaining budget; expired budgets or late replies fall back to rules. Final speech-window
+  time counts against the budget. Direct calls and History Re-style retain the eight-second ceiling.
+  The structured timeout relies on backend cancellation cooperation; it does not make a stalled
+  speech engine or arbitrary non-cooperative backend return within the processing limit. See #153.
 - The Qwen2.5 3B GGUF is a 2.1 GB download, and llama.cpp keeps roughly 2.5 GB resident in
   memory while the model is loaded (weights plus the KV cache at `n_ctx 2048`) — on top of
   whatever the whisper.cpp speech engine is already holding. Both engines can be loaded at

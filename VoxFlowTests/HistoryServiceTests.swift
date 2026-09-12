@@ -127,7 +127,11 @@ struct HistoryServiceTests {
         let settings = DictationSettings(store: InMemoryKeyValueStore())
         let service = makeService(dir: dir, settings: settings)
         _ = await service.count()
-        let original = try #require(service.store).insert(draft("undo me", at: Date(timeIntervalSince1970: 500)))
+        let confidence = WordConfidence(span: RawTextSpan(location: 0, length: 4)!, confidence: 0.78)!
+        let original = try #require(service.store).insert(DictationDraft(
+            text: "undo me", rawText: "undo me raw", appName: "Mail", style: nil, language: "en", duration: 1,
+            createdAt: Date(timeIntervalSince1970: 500),
+            annotations: DictationAnnotations(wordConfidences: [confidence])))
 
         await service.delete(id: original.id)
         #expect(await service.count() == 0)
@@ -135,6 +139,7 @@ struct HistoryServiceTests {
         let restored = await service.reinsert(original)
         #expect(restored?.text == "undo me")
         #expect(restored?.createdAt == original.createdAt)
+        #expect(restored?.annotations == original.annotations)
         #expect(await service.count() == 1)
     }
 

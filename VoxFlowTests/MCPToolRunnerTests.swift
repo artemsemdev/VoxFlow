@@ -53,6 +53,18 @@ private final class FakeApprovalPresenter: MCPApprovalPresenting, Sendable {
     }
 }
 
+private actor HeldApprovalPersistence {
+    private(set) var callCount = 0
+    let entered = Gate()
+    let release = Gate()
+
+    func persist(_ identity: MCPClientIdentity, at date: Date) async {
+        callCount += 1
+        await entered.open()
+        await release.wait()
+    }
+}
+
 private struct DecodedHit: Decodable, Equatable {
     var text: String
     var app: String?
@@ -112,7 +124,9 @@ struct MCPToolRunnerTests {
     func makeRunner(settings: MCPSettings? = nil, coordinator: DictationCoordinator, controller: DictationController,
                     historyService: HistoryService? = nil, fileTranscribing: any FileTranscribing = FakeFileTranscriber(),
                     pathPolicy: PathPolicy? = nil, clock: any MonotonicClock,
-                    clientStore: MCPClientStore? = nil, approvalPresenter: any MCPApprovalPresenting = FakeApprovalPresenter(decision: .allow))
+                    clientStore: MCPClientStore? = nil, approvalPresenter: any MCPApprovalPresenting = FakeApprovalPresenter(decision: .allow),
+                    persistApproval: (@Sendable (MCPClientIdentity, Date) async -> Void)? = nil,
+                    onSharedAuthorization: (@MainActor @Sendable () async -> Void)? = nil)
         throws -> (MCPToolRunner, MCPSettings) {
         let resolvedSettings = settings ?? makeSettings()
         let resolvedHistory = historyService ?? makeEnabledHistory()
@@ -120,7 +134,8 @@ struct MCPToolRunnerTests {
         let resolvedStore = try clientStore ?? MCPClientStore(database: VoxFlowDatabase.inMemory())
         let runner = MCPToolRunner(settings: resolvedSettings, coordinator: coordinator, controller: controller,
                                    historyService: resolvedHistory, fileTranscribing: fileTranscribing, pathPolicy: resolvedPathPolicy,
-                                   clock: clock, clientStore: resolvedStore, approvalPresenter: approvalPresenter, serverVersion: "2.0.0-test")
+                                   clock: clock, clientStore: resolvedStore, approvalPresenter: approvalPresenter, serverVersion: "2.0.0-test",
+                                   persistApproval: persistApproval, onSharedAuthorization: onSharedAuthorization)
         return (runner, resolvedSettings)
     }
 
@@ -306,7 +321,7 @@ struct MCPToolRunnerTests {
     func concurrentDictateCallsOnlyOneWins() async throws {
         let clock = FakeClock()
         let mic = FakeMicrophone()
-        let preflightGate = Gate()
+        let preflightGate = Gate(), preflightEntered = Gate()
         let transcriber = FakeDictationTranscriber(result: DictationResult(text: "only mine", rawText: "only mine",
                                                                             segments: [], language: nil, duration: 1, lowConfidence: false))
         // Built directly (not via `makeDictation`) with a *gated* preflight — resolving preflight
@@ -314,7 +329,7 @@ struct MCPToolRunnerTests {
         // gets a chance to run; gating it keeps `isHUDActive` observably `false` for as long as the
         // test needs, proving the refusal below comes from `dictateInFlight`, not the mirror.
         let controller = DictationController(config: FlowBarConfig(), microphone: mic, transcriber: transcriber, inserter: FakeTextInserter(), clock: clock,
-                                             preflight: { await preflightGate.wait(); return Preflight(excludedApp: nil, secureInput: false, microphone: .granted, model: .loaded) },
+                                             preflight: { await preflightEntered.open(); await preflightGate.wait(); return Preflight(excludedApp: nil, secureInput: false, microphone: .granted, model: .loaded) },
                                              loadModel: {}, options: { TranscriptionOptions() }, onSave: { _, _ in }, copyToClipboard: { _ in })
         let dictationSettings = DictationSettings(store: InMemoryKeyValueStore())
         let permissions = FakePermissions(microphone: .granted, requestResult: .granted, accessibility: true)
@@ -327,11 +342,10 @@ struct MCPToolRunnerTests {
         let req2 = toolCallRequest(name: "dictate", arguments: .object([:]), token: settings.token, id: .number(2))
 
         let task1 = Task { await runner.handle(req1, peer: MCPPeer(identity)) }
-        // `dictate()`'s guard-and-set prefix (including `dictateInFlight = true` and subscribing to
-        // `results()`/`states()`) runs within a handful of actor hops, all *before* the gated
-        // `preflight()` deep inside the coordinator's command queue is ever reached — give it
-        // generous room to get there while nothing FSM-visible can happen yet.
-        for _ in 0..<20 { await Task.yield() }
+        // Entering preflight proves request 1 has acquired the runner's dictation gate, even
+        // though its blocked preflight leaves the HUD mirror idle. Scheduler yields cannot prove
+        // this: authorization suspends, so request 2 could otherwise win and deadlock this test.
+        await preflightEntered.wait()
         #expect(!coordinator.isHUDActive)   // the (stale) coordinator mirror hasn't caught up — by design
 
         let task2 = Task { await runner.handle(req2, peer: MCPPeer(identity)) }
@@ -371,7 +385,7 @@ struct MCPToolRunnerTests {
         // States that still might produce (or already produced) a result are not failures.
         #expect(MCPToolError.dictationFailureReason(for: .idle) == nil)
         #expect(MCPToolError.dictationFailureReason(for: .inserted(appName: "Mail", words: 3, limitReached: false)) == nil)
-        #expect(MCPToolError.dictationFailureReason(for: .copied) == nil)
+        #expect(MCPToolError.dictationFailureReason(for: .copied(.noTextField)) == nil)
     }
 
     @Test("dictate fails fast with -32005 when the capture is discarded (Escape)")
@@ -672,6 +686,37 @@ struct MCPToolRunnerTests {
         #expect(status1 == 200)
         #expect(status2 == 200)
         #expect(presenter.callCount == 1)
+    }
+
+    @Test("authorization remains shared until an Always allow decision finishes persisting")
+    func concurrentCallDuringApprovalPersistenceDoesNotPromptAgain() async throws {
+        let persistence = HeldApprovalPersistence()
+        let sharedAuthorization = Gate()
+        let presenter = FakeApprovalPresenter(decision: .allow)
+        let (coordinator, controller) = makeDictation(clock: FakeClock(), transcriber: FakeDictationTranscriber(result: .empty))
+        let (runner, settings) = try makeRunner(
+            coordinator: coordinator,
+            controller: controller,
+            clock: FakeClock(),
+            approvalPresenter: presenter,
+            persistApproval: { identity, date in await persistence.persist(identity, at: date) },
+            onSharedAuthorization: { await sharedAuthorization.open() }
+        )
+        let req1 = toolCallRequest(name: "search_history", arguments: .object(["query": .string("")]), token: settings.token, id: .number(1))
+        let req2 = toolCallRequest(name: "search_history", arguments: .object(["query": .string("")]), token: settings.token, id: .number(2))
+
+        let task1 = Task { await runner.handle(req1, peer: MCPPeer(identity)) }
+        await persistence.entered.wait()
+        let task2 = Task { await runner.handle(req2, peer: MCPPeer(identity)) }
+
+        await sharedAuthorization.wait()
+        #expect(presenter.callCount == 1)
+        #expect(await persistence.callCount == 1)
+        await persistence.release.open()
+        #expect(await task1.value.status == 200)
+        #expect(await task2.value.status == 200)
+        #expect(presenter.callCount == 1)
+        #expect(await persistence.callCount == 1)
     }
 
     @Test("a revoke between two calls makes the second call ask the presenter again")

@@ -111,6 +111,31 @@ struct DictionaryStoreTests {
         #expect(try store.find(word: "kubernetes")?.uses == 0)
     }
 
+    @Test("symbol entries match standalone without matching inside longer tokens")
+    func incrementUsesSymbolEntries() throws {
+        let store = try store()
+        _ = try store.insert(word: "C++", soundsLike: nil, type: .term, fixTyping: false)
+        _ = try store.insert(word: ".NET", soundsLike: nil, type: .term, fixTyping: false)
+
+        try store.incrementUses(inText: "XC++ C++Builder asp.NETwork")
+        #expect(try store.find(word: "C++")?.uses == 0)
+        #expect(try store.find(word: ".NET")?.uses == 0)
+
+        try store.incrementUses(inText: "Use (C++) and [.NET].")
+        #expect(try store.find(word: "C++")?.uses == 1)
+        #expect(try store.find(word: ".NET")?.uses == 1)
+    }
+
+    @Test("multi-word matching accepts flexible whitespace and keeps diacritic folding")
+    func incrementUsesFlexibleWhitespace() throws {
+        let store = try store()
+        _ = try store.insert(word: "Tāmaki Makaurau", soundsLike: nil, type: .place, fixTyping: false)
+
+        try store.incrementUses(inText: "TAMAKI\t\n  makaURAu is here")
+
+        #expect(try store.find(word: "tamaki makaurau")?.uses == 1)
+    }
+
     @Test("I3: incrementUses(inText:) bumps every matching entry by at most one per call")
     func incrementUsesOncePerEntryPerCall() throws {
         let store = try store()
@@ -134,5 +159,16 @@ struct DictionaryStoreTests {
         try store.incrementUses(inText: "gamma")
         #expect(try store.vocabulary(limit: 10) == ["beta", "gamma", "alpha"])
         #expect(try store.vocabulary(limit: 2) == ["beta", "gamma"])
+    }
+
+    @Test("vocabulary prefers user entries to contacts when usage ties")
+    func vocabularyPrefersUserAtEqualUsage() throws {
+        let store = try store()
+        _ = try store.insert(word: "Alpha", soundsLike: nil, type: .name, fixTyping: false, source: "contacts")
+        _ = try store.insert(word: "Zulu", soundsLike: nil, type: .term, fixTyping: false, source: "user")
+        _ = try store.insert(word: "Beta", soundsLike: nil, type: .term, fixTyping: false, source: "user")
+
+        #expect(try store.vocabulary(limit: 3) == ["Beta", "Zulu", "Alpha"])
+        #expect(try store.vocabulary(limit: 2) == ["Beta", "Zulu"])
     }
 }

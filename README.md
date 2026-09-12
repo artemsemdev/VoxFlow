@@ -32,17 +32,32 @@ any app, style cleanup with a local LLM and an MCP server follow in 2.x (see the
   processing and the result. Recognized text is inserted into the focused field via Accessibility,
   or copied to the clipboard when there isn't a text field; finished dictations save to encrypted
   history unless the Privacy toggle turns that off.
+- The Flow Bar names an app holding exclusive access to the microphone when macOS reports its
+  owner. When that app releases the device, a still-active dictation gesture retries with fresh
+  permission and target checks. Releasing push-to-talk, cancelling, or re-inserting the last
+  dictation cancels that wait; a different dictation shortcut replaces it.
 - File transcription yields the shared speech engine between ten-second windows; pending
-  dictation takes priority over the next file window. One model remains loaded for both paths.
+  dictation takes priority over the next file window. On first use, Files and Settings show the
+  model's explicit “Loading into memory…” phase; one shared load serves both Files and dictation.
+- File decoding reads on demand and checks Stop between read/conversion chunks. Automatic language
+  detection retains a 30-second prefix; transcription then uses a rolling 10.2-second lookahead,
+  without keeping the full decoded recording in memory or writing a temporary audio copy.
+- Switching microphones keeps captured audio and accounts for the restart gap in transcript
+  timing. Losing all input devices stops capture with “No microphone found”; Settings › Audio
+  follows the current device even when dictation is idle.
 - Needs Microphone and Accessibility permission, and Contacts (optional — only prompted if you turn
   on "Learn names from Contacts" on the Dictionary page). First launch walks a five-step onboarding
   window (welcome, permissions, hotkey mode, model, try it) with buttons to grant each permission
   and a scratchpad to try dictation before the main window opens; SETUP.md explains how to reset it.
+- When Accessibility is denied, the Flow Bar keeps the transcript on the clipboard and offers
+  “Can't type here · Open Settings” to open the Accessibility pane.
 - VoxFlow's own window is frontmost at launch, so click into the text field you want to dictate
   into (e.g. TextEdit) before the first fn press, or the dictation lands on the clipboard instead.
-- History page: search past dictations and filter by app or date, expand a row for the full
+- History page: browse local calendar-day groups, search past dictations and filter by app or date,
+  expand a row for the full
   transcript, Edit, Copy, Delete with Undo; right-click an inserted word to add it to Dictionary.
-  The expanded row shows the resolved style. Settings › Hotkeys records
+  The expanded row shows the resolved style, actual removed fillers and available low-confidence
+  raw-word annotations. Settings › Hotkeys records
   Push-to-talk, Hands-free, Cancel and Re-insert last bindings, checks known system/VoxFlow conflicts,
   and updates the live monitor and HUD hints. Re-insert uses a fresh privacy-checked target and
   supports the current session with history disabled. fn guidance opens Keyboard settings. Audio
@@ -76,7 +91,9 @@ any app, style cleanup with a local LLM and an MCP server follow in 2.x (see the
 - On-device style cleanup: an optional local LLM (Qwen2.5 3B Instruct via llama.cpp, Settings ›
   Models) rewrites the tone step for Formal/Casual/Very casual on top of the same rule pass, with
   automatic fallback to rule-based styling whenever the model is absent, still loading, too slow
-  or produces a bad answer — dictation never waits on it and never loses a result. "Re-style ▾" on
+  or produces a bad answer. Live dictation bounds styling by the time left after speech recognition,
+  reserving one second for completion. The style model unloads after five idle minutes or macOS
+  memory pressure, then reloads lazily on the next styled request. "Re-style ▾" on
   a History row rewrites a past dictation into another tone without re-recording and copies the
   result; Files' result view can "Apply {Style} cleanup" to instantly rewrite every segment of a
   finished transcript (rule-based only, no re-processing) — see

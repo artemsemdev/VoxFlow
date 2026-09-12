@@ -87,8 +87,12 @@ struct FlowBarContent: Hashable {
             return FlowBarContent(leading: .check, title: title, subtitle: subtitle, showsWaveform: false,
                                    timer: nil, timerIsAmber: false, trailing: nil)
 
-        case .copied:
-            return FlowBarContent(leading: .check, title: "Copied — no text field here", subtitle: nil,
+        case .copied(.accessibilityDenied):
+            return FlowBarContent(leading: .dot(.error), title: "Can't type here", subtitle: nil,
+                                   showsWaveform: false, timer: nil, timerIsAmber: false, trailing: .button(.openSettings))
+        case .copied(let reason):
+            let title = reason == .noTextField ? "Copied — no text field here" : "Copied — couldn't type here"
+            return FlowBarContent(leading: .check, title: title, subtitle: nil,
                                    showsWaveform: false, timer: nil, timerIsAmber: false, trailing: .keycap("⌘V"))
 
         case .didntCatch(let rawAvailable):
@@ -148,14 +152,7 @@ struct FlowBarContent: Hashable {
         return String(format: "%d:%02d", total / 60, total % 60)
     }
 
-    /// ≥ 1 GB → one decimal ("1.6 GB"); else MB truncated to the nearest ten ("480 MB"). Pinned by
-    /// `FlowBarContentTests`, and deliberately *not* `ModelsViewModel.gigabytes` (which rounds to
-    /// the nearest MB, "488 MB" for the same bytes) — Settings and the HUD intentionally differ
-    /// here; unifying them would mean touching `ModelsViewModel.swift`, outside this task's files.
     static func sizeText(_ bytes: Int64) -> String {
-        let gb = Double(bytes) / 1_000_000_000
-        if gb >= 1 { return String(format: "%.1f GB", gb) }
-        let mb = Int(Double(bytes) / 1_000_000)
-        return "\((mb / 10) * 10) MB"
+        ModelSizeText.format(bytes)
     }
 }

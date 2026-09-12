@@ -29,6 +29,36 @@ struct AccessibilityTextInserterTests {
         }
     }
 
+    @Test("denied or revoked Accessibility copies with its reason and never writes", arguments: [false, true])
+    func deniedAccessibility(revoked: Bool) async {
+        let permissions = FakePermissions(microphone: .granted, requestResult: .granted, accessibility: revoked)
+        let target = Target(), clipboard = FakePasteboard()
+        var captures = 0
+        let inserter = AccessibilityTextInserter(permissions: permissions, pasteboard: clipboard,
+                                                focusTarget: { captures += 1; return target })
+        await inserter.captureFocus(app: FrontmostApp(name: "TextEdit", bundleID: "com.apple.TextEdit"))
+        permissions.accessibility = false
+        #expect(await inserter.insert("keep this text") == .copiedToClipboard(reason: .accessibilityDenied))
+        await inserter.captureFocus(app: FrontmostApp(name: "TextEdit", bundleID: "com.apple.TextEdit"))
+        #expect(await inserter.insert("second text") == .copiedToClipboard(reason: .accessibilityDenied))
+        #expect(captures == (revoked ? 1 : 0))
+        #expect(target.texts.isEmpty && target.selections.isEmpty)
+        #expect(clipboard.strings == ["keep this text", "second text"])
+        #expect(permissions.prompted == 1)
+    }
+
+    @Test("trusted capture without an editable field reports noTextField", arguments: [false, true])
+    func noField(missing: Bool) async {
+        let permissions = FakePermissions(microphone: .granted, requestResult: .granted, accessibility: true)
+        let target = Target(), clipboard = FakePasteboard()
+        target.isEditable = false
+        let inserter = AccessibilityTextInserter(permissions: permissions, pasteboard: clipboard,
+                                                focusTarget: { missing ? nil : target })
+        await inserter.captureFocus(app: FrontmostApp(name: "Finder", bundleID: "com.apple.finder"))
+        #expect(await inserter.insert("keep this text") == .copiedToClipboard(reason: .noTextField))
+        #expect(clipboard.strings == ["keep this text"] && target.texts.isEmpty)
+    }
+
     private func makeInserter(_ target: Target, clipboard: FakePasteboard = FakePasteboard()) -> AccessibilityTextInserter {
         AccessibilityTextInserter(permissions: FakePermissions(microphone: .granted, requestResult: .granted, accessibility: true),
                                   pasteboard: clipboard, focusTarget: { target })
@@ -44,7 +74,7 @@ struct AccessibilityTextInserterTests {
         #expect(await inserter.insert(text, cursorOffset: offset) == .inserted(appName: "Mail"))
         #expect(target.texts == [text])
         #expect(target.selections == [NSRange(location: expectedPosition, length: 0)])
-        #expect(await inserter.insert("next", cursorOffset: 0) == .copiedToClipboard)
+        #expect(await inserter.insert("next", cursorOffset: 0) == .copiedToClipboard(reason: .noTextField))
         #expect(target.texts == [text]) // consumed focus cannot be reused
     }
 
@@ -78,7 +108,7 @@ struct AccessibilityTextInserterTests {
         let clipboard = FakePasteboard()
         let inserter = makeInserter(target, clipboard: clipboard)
         await inserter.captureFocus(app: FrontmostApp(name: "Mail", bundleID: "com.apple.mail"))
-        #expect(await inserter.insert("Best,\n\nArtem", cursorOffset: 6) == .copiedToClipboard)
+        #expect(await inserter.insert("Best,\n\nArtem", cursorOffset: 6) == .copiedToClipboard(reason: .insertionFailed))
         #expect(clipboard.strings == ["Best,\n\nArtem"])
         #expect(target.selections.isEmpty)
     }

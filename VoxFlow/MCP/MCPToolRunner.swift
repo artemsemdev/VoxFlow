@@ -48,6 +48,8 @@ final class MCPToolRunner: MCPRequestHandling, Sendable {
     private let clientStore: MCPClientStore
     private let clientRegistry = ClientRegistry()
     private let approvalPresenter: any MCPApprovalPresenting
+    private let persistApproval: @Sendable (MCPClientIdentity, Date) async -> Void
+    private let onSharedAuthorization: (@MainActor @Sendable () async -> Void)?
     private let serverVersion: String
     private let now: @Sendable () -> Date
 
@@ -69,17 +71,22 @@ final class MCPToolRunner: MCPRequestHandling, Sendable {
     /// lifetime (the app session) and is never written to `mcp_clients`. Also where an `.allow`
     /// answer for an identity with no persistable path (`canPersist == false`, review item 8) lands.
     private var sessionAllowed: Set<String> = []
-    /// One in-flight `approvalPresenter.present` call per client key (review item 3): a second
-    /// concurrent call for the same unapproved client awaits this task's result instead of opening
-    /// a second dialog. Set and read only inside `authorize`/`presentationDecision`, both of which
-    /// run to completion (no `await`) between checking and inserting — see `presentationDecision`'s
-    /// doc for why that makes the check-then-insert atomic on this actor.
-    private var pendingPresentations: [String: Task<MCPClientDecision, Never>] = [:]
+    private struct PendingAuthorization {
+        let token: UUID
+        let task: Task<Bool, Never>
+    }
+
+    /// One full read → presentation → decision-commit lifetime per client. Keeping the task until
+    /// persistence/session state is committed prevents a caller with a stale approval snapshot
+    /// from opening a second dialog after the presenter returns but before that commit finishes.
+    private var pendingAuthorizations: [String: PendingAuthorization] = [:]
 
     init(settings: MCPSettings, coordinator: DictationCoordinator, controller: DictationController,
          historyService: HistoryService, fileTranscribing: any FileTranscribing, pathPolicy: PathPolicy,
          clock: any MonotonicClock, clientStore: MCPClientStore, approvalPresenter: any MCPApprovalPresenting,
-         serverVersion: String, now: @escaping @Sendable () -> Date = Date.init) {
+         serverVersion: String, now: @escaping @Sendable () -> Date = Date.init,
+         persistApproval: (@Sendable (MCPClientIdentity, Date) async -> Void)? = nil,
+         onSharedAuthorization: (@MainActor @Sendable () async -> Void)? = nil) {
         self.settings = settings
         self.coordinator = coordinator
         self.controller = controller
@@ -89,8 +96,18 @@ final class MCPToolRunner: MCPRequestHandling, Sendable {
         self.clock = clock
         self.clientStore = clientStore
         self.approvalPresenter = approvalPresenter
+        if let persistApproval {
+            self.persistApproval = persistApproval
+        } else {
+            self.persistApproval = { identity, seenAt in
+                _ = await Task.detached(priority: .utility) {
+                    try? clientStore.approve(name: identity.name, path: identity.path, now: seenAt)
+                }.value
+            }
+        }
         self.serverVersion = serverVersion
         self.now = now
+        self.onSharedAuthorization = onSharedAuthorization
     }
 
     private var enabledTools: Set<MCPToolID> {
@@ -172,8 +189,8 @@ final class MCPToolRunner: MCPRequestHandling, Sendable {
     /// de-approve/re-approve anyone; see `MCPClientStore`'s doc), then resolves through
     /// `ClientRegistry.decision` over `sessionAllowed`/`deniedThisSession` and a *read-through*
     /// query of `mcp_clients` (review item 2 — no cache, so Revoke/Regenerate take effect on the
-    /// very next call, not only after a relaunch) and, only on `.ask`, calls the presenter through
-    /// `presentationDecision`, which de-duplicates concurrent callers (review item 3).
+    /// very next call, not only after a relaunch). The full decision lifetime is de-duplicated per
+    /// client after the sighting is recorded.
     private func authorize(_ identity: MCPClientIdentity, toolNames: [String]) async -> Bool {
         let key = ClientRegistry.key(identity)
         // Review item 8: never persist an approval for an identity whose peer resolution didn't
@@ -181,6 +198,25 @@ final class MCPToolRunner: MCPRequestHandling, Sendable {
         // would otherwise all share one approval.
         let canPersist = !identity.path.isEmpty
         await touchLastSeen(identity)
+        if let existing = pendingAuthorizations[key] {
+            if let onSharedAuthorization { await onSharedAuthorization() }
+            return await existing.task.value
+        }
+
+        let token = UUID()
+        let task = Task<Bool, Never> {
+            await resolveAuthorization(identity, key: key, toolNames: toolNames, canPersist: canPersist)
+        }
+        pendingAuthorizations[key] = PendingAuthorization(token: token, task: task)
+        let allowed = await task.value
+        // Only the task that installed this entry may clear it. A late waiter resuming after a
+        // revoke/new authorization must not erase the newer task.
+        if pendingAuthorizations[key]?.token == token { pendingAuthorizations[key] = nil }
+        return allowed
+    }
+
+    private func resolveAuthorization(_ identity: MCPClientIdentity, key: String,
+                                      toolNames: [String], canPersist: Bool) async -> Bool {
         // `ClientRegistry.decision` takes the full `approved` set (Task 2's pure-function shape);
         // the read-through check below only ever needs to know about `key`, so it's wrapped as a
         // single-element set rather than fetching every approved key just to discard the rest.
@@ -195,12 +231,10 @@ final class MCPToolRunner: MCPRequestHandling, Sendable {
         case .deny:
             return false
         case .ask:
-            switch await presentationDecision(for: identity, toolNames: toolNames, canPersist: canPersist) {
+            switch await approvalPresenter.present(identity: identity, tools: toolNames, canPersist: canPersist) {
             case .allow:
                 if canPersist {
-                    let store = clientStore
-                    let name = identity.name, path = identity.path, seenAt = now()
-                    _ = await Task.detached(priority: .utility) { try? store.approve(name: name, path: path, now: seenAt) }.value
+                    await persistApproval(identity, now())
                 } else {
                     // The presenter shouldn't offer "Always allow" when `canPersist` is false, but
                     // if it answers `.allow` anyway, degrade to a session-scoped grant rather than
@@ -220,23 +254,6 @@ final class MCPToolRunner: MCPRequestHandling, Sendable {
                 return false
             }
         }
-    }
-
-    /// Runs `approvalPresenter.present` at most once per `identity`'s key at any given time: the
-    /// `if let existing … return` check and the `pendingPresentations[key] = task` write below it
-    /// are separated by no `await`, so — this method being `@MainActor`-isolated like the rest of
-    /// this class — no other call can observe the key as "not pending" in between; a second
-    /// concurrent call for the same key always finds the first's task already registered and awaits
-    /// its `.value` instead of presenting again (review item 3).
-    private func presentationDecision(for identity: MCPClientIdentity, toolNames: [String], canPersist: Bool) async -> MCPClientDecision {
-        let key = ClientRegistry.key(identity)
-        if let existing = pendingPresentations[key] { return await existing.value }
-        let presenter = approvalPresenter
-        let task = Task<MCPClientDecision, Never> { await presenter.present(identity: identity, tools: toolNames, canPersist: canPersist) }
-        pendingPresentations[key] = task
-        let decision = await task.value
-        pendingPresentations[key] = nil
-        return decision
     }
 
     private func touchLastSeen(_ identity: MCPClientIdentity) async {

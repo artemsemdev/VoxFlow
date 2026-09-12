@@ -49,4 +49,115 @@ struct ModelLoaderTests {
         _ = missingDir
         _ = presentDir
     }
+
+    @Test("concurrent callers share one load and cancelling one waiter leaves the shared load active")
+    func sharedLoadSurvivesOneWaiterCancellation() async throws {
+        let (store, directory) = try await store(installed: true)
+        let engine = HeldLoadEngine()
+        let loader = ModelLoader(store: store, engine: engine)
+        var events = await loader.subscribe().makeAsyncIterator()
+        let notifications = AsyncStream<String>.makeStream()
+
+        let first = Task { try await loader.ensureLoaded { notifications.continuation.yield($0) } }
+        var loading = notifications.stream.makeAsyncIterator()
+        #expect(await loading.next() == "whisper-large-v3-turbo")
+        await engine.waitUntilEntered()
+        #expect(await events.next() == .started("whisper-large-v3-turbo"))
+
+        let second = Task { try await loader.ensureLoaded { notifications.continuation.yield($0) } }
+        #expect(await loading.next() == "whisper-large-v3-turbo")
+        first.cancel()
+        await #expect(throws: CancellationError.self) { _ = try await first.value }
+        #expect(await loader.loadingModelID == "whisper-large-v3-turbo")
+
+        await engine.release()
+        #expect(try await second.value.id == "whisper-large-v3-turbo")
+        #expect(await engine.loadCount == 1)
+        #expect(await events.next() == .finished("whisper-large-v3-turbo"))
+        #expect(await loader.loadingModelID == nil)
+        _ = directory
+    }
+
+    @Test("cancelling the sole waiter cancels its load and publishes one terminal event")
+    func soleWaiterCancellation() async throws {
+        let (store, directory) = try await store(installed: true)
+        let engine = HeldLoadEngine()
+        let loader = ModelLoader(store: store, engine: engine)
+        var events = await loader.subscribe().makeAsyncIterator()
+        let operation = Task { try await loader.ensureLoaded() }
+        await engine.waitUntilEntered()
+        #expect(await events.next() == .started("whisper-large-v3-turbo"))
+
+        operation.cancel()
+        await #expect(throws: CancellationError.self) { _ = try await operation.value }
+        #expect(await events.next() == .finished("whisper-large-v3-turbo"))
+        #expect(await loader.loadingModelID == nil)
+        #expect(await loader.readiness() == .installedNotLoaded)
+
+        #expect(try await loader.ensureLoaded().id == "whisper-large-v3-turbo")
+        #expect(await events.next() == .started("whisper-large-v3-turbo"))
+        #expect(await events.next() == .finished("whisper-large-v3-turbo"))
+        #expect(await engine.loadCount == 2)
+        #expect(await loader.readiness() == .loaded)
+        _ = directory
+    }
+
+    @Test("cancellation inside the starter callback cannot leave a zero-waiter load active")
+    func starterCancelledBeforeWaitRegistration() async throws {
+        let (store, directory) = try await store(installed: true)
+        let engine = HeldLoadEngine()
+        let loader = ModelLoader(store: store, engine: engine)
+        var events = await loader.subscribe().makeAsyncIterator()
+
+        let operation = Task {
+            try await loader.ensureLoaded { _ in withUnsafeCurrentTask { $0?.cancel() } }
+        }
+        await #expect(throws: CancellationError.self) { _ = try await operation.value }
+        #expect(await events.next() == .started("whisper-large-v3-turbo"))
+        await engine.waitUntilEntered()
+        #expect(await events.next() == .finished("whisper-large-v3-turbo"))
+        #expect(await engine.cancellationCount == 1)
+        #expect(await loader.loadingModelID == nil)
+
+        #expect(try await loader.ensureLoaded().id == "whisper-large-v3-turbo")
+        #expect(await events.next() == .started("whisper-large-v3-turbo"))
+        #expect(await events.next() == .finished("whisper-large-v3-turbo"))
+        #expect(await loader.readiness() == .loaded)
+        _ = directory
+    }
+}
+
+private actor HeldLoadEngine: SpeechEngine {
+    private let entered = Gate()
+    private let hold = Gate()
+    private(set) var loadCount = 0
+    private(set) var cancellationCount = 0
+
+    func waitUntilEntered() async { await entered.wait() }
+    func release() async { await hold.open() }
+
+    func load(modelAt url: URL) async throws {
+        loadCount += 1
+        await entered.open()
+        do {
+            try await withTaskCancellationHandler {
+                await hold.wait()
+                try Task.checkCancellation()
+            } onCancel: {
+                Task { await self.hold.open() }
+            }
+        } catch is CancellationError {
+            cancellationCount += 1
+            throw CancellationError()
+        }
+    }
+
+    func detectLanguage(in audio: AudioSamples) async throws -> LanguageDetection {
+        LanguageDetection(code: "en", confidence: 1)
+    }
+
+    nonisolated func transcribe(_ audio: AudioSamples,
+                               options: TranscriptionOptions) -> AsyncThrowingStream<SegmentEvent, Error> {
+        AsyncThrowingStream { $0.finish() }
+    }
 }

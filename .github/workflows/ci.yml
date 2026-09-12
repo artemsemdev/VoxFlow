@@ -265,7 +265,8 @@ jobs:
         run: |
           set -o pipefail
           xcodebuild -xcconfig Build.xcconfig -scheme VoxFlow -destination 'platform=macOS,arch=arm64' test -resultBundlePath TestResults.xcresult 2>&1 | tee test.log
-          python3 scripts/check_build_logs.py test.log
+          xcrun xcresulttool get object --legacy --path TestResults.xcresult --format json > test-results.json
+          python3 scripts/check_build_logs.py test.log --xcresult-json test-results.json
 
       - name: Package tests without Xcode project
         run: |
@@ -284,6 +285,7 @@ jobs:
             test.log
             VoxFlowKit/package-test.log
             TestResults.xcresult
+            test-results.json
           if-no-files-found: ignore
 
   # The single status check for branch protection: red if any job that ran failed or was

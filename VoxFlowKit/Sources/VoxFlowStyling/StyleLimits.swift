@@ -1,9 +1,8 @@
 import Foundation
 import VoxFlowCore
 
-/// Ruling 2/3: when the LLM is used at all, and how much it may generate. Amended in the final
-/// review (I2): 8 s / 150 words keeps the worst case (whisper's tail + generation) well inside
-/// `FlowBarConfig.processingTimeout` (20 s) instead of eating almost all of it.
+/// Maximum LLM work per call. Live dictation also supplies the remaining processing deadline,
+/// so readiness and generation can use less than this ceiling after a slow final speech window.
 public struct StyleLimits: Sendable, Equatable {
     public var maxInputWords = 150
     public var generationTimeout: TimeInterval = 8

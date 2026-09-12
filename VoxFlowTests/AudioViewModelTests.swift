@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Testing
 import VoxFlowCore
 import VoxFlowDictation
@@ -8,9 +9,53 @@ import VoxFlowTestSupport
 /// Fake `InputDeviceProviding` — a mutable `name` so a test can simulate a device appearing or
 /// disappearing between `refreshDevice()` calls.
 private final class FakeInputDeviceProvider: InputDeviceProviding, @unchecked Sendable {
-    var name: String?
-    init(name: String? = "MacBook Pro Microphone") { self.name = name }
-    func defaultInputName() -> String? { name }
+    private struct State {
+        var name: String?
+        var continuation: AsyncStream<String?>.Continuation?
+        var subscriptions = 0
+        var terminations = 0
+        var order: [String] = []
+    }
+    private let state: Mutex<State>
+    private let eventOnSubscribe: String?
+
+    init(name: String? = "MacBook Pro Microphone", eventOnSubscribe: String? = nil) {
+        state = Mutex(State(name: name))
+        self.eventOnSubscribe = eventOnSubscribe
+    }
+    var name: String? {
+        get { state.withLock { $0.name } }
+        set { state.withLock { $0.name = newValue } }
+    }
+    var subscriptions: Int { state.withLock { $0.subscriptions } }
+    var terminations: Int { state.withLock { $0.terminations } }
+    var order: [String] { state.withLock { $0.order } }
+
+    func defaultInputName() -> String? {
+        state.withLock { $0.order.append("refresh"); return $0.name }
+    }
+
+    func changes() -> AsyncStream<String?> {
+        let (stream, continuation) = AsyncStream<String?>.makeStream()
+        state.withLock {
+            $0.subscriptions += 1
+            $0.order.append("subscribe")
+            $0.continuation = continuation
+        }
+        continuation.onTermination = { [weak self] _ in
+            self?.state.withLock { $0.terminations += 1; $0.continuation = nil }
+        }
+        if let eventOnSubscribe { continuation.yield(eventOnSubscribe) }
+        return stream
+    }
+
+    func emit(_ name: String?) {
+        let continuation = state.withLock { state -> AsyncStream<String?>.Continuation? in
+            state.name = name
+            return state.continuation
+        }
+        continuation?.yield(name)
+    }
 }
 
 @Suite("AudioViewModel") @MainActor
@@ -70,5 +115,41 @@ struct AudioViewModelTests {
         let model = AudioViewModel(devices: FakeInputDeviceProvider(), settings: DictationSettings(store: InMemoryKeyValueStore()), dictation: coordinator)
         #expect(model.levels == coordinator.levels)
         #expect(model.levels.allSatisfy { $0 == 0 })
+    }
+
+    @Test("subscribes before refresh so a concurrent default-device event is not lost")
+    func liveDeviceEvents() async {
+        let devices = FakeInputDeviceProvider(name: "Built-in", eventOnSubscribe: "Studio Display Microphone")
+        let connected = AudioViewModel(devices: devices,
+                                       settings: DictationSettings(store: InMemoryKeyValueStore()),
+                                       dictation: makeCoordinator())
+        let task = Task { await connected.observeDeviceChanges() }
+        for _ in 0..<1_000 where connected.deviceName != "Studio Display Microphone" { await Task.yield() }
+        #expect(connected.deviceName == "Studio Display Microphone")
+        #expect(devices.order.suffix(2) == ["subscribe", "refresh"])
+        task.cancel()
+        await task.value
+    }
+
+    @Test("an open Audio page follows connect/disconnect and releases its listener on cancellation")
+    func connectionLifetime() async {
+        let devices = FakeInputDeviceProvider(name: nil)
+        let model = AudioViewModel(devices: devices, settings: DictationSettings(store: InMemoryKeyValueStore()),
+                                   dictation: makeCoordinator())
+        let task = Task { await model.observeDeviceChanges() }
+        for _ in 0..<1_000 where devices.subscriptions == 0 { await Task.yield() }
+        #expect(devices.subscriptions == 1 && model.deviceName == nil)
+
+        devices.emit("USB Microphone")
+        for _ in 0..<1_000 where model.deviceName != "USB Microphone" { await Task.yield() }
+        #expect(model.deviceName == "USB Microphone")
+        devices.emit(nil)
+        for _ in 0..<1_000 where model.deviceName != nil { await Task.yield() }
+        #expect(model.deviceName == nil)
+
+        task.cancel()
+        await task.value
+        for _ in 0..<1_000 where devices.terminations == 0 { await Task.yield() }
+        #expect(devices.terminations == 1)
     }
 }

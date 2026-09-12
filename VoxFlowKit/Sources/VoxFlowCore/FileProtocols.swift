@@ -11,6 +11,22 @@ public enum AudioDecodingError: Error, Equatable, Sendable {
 /// Decodes a file to engine-ready samples (implemented by `AudioDecoder`).
 public protocol AudioDecoding: Sendable {
     func decode(_ url: URL) throws -> AudioSamples
+    /// Reports a fraction in 0...1. Native decoders check task cancellation between chunks;
+    /// existing conformers can retain the compatibility implementation's completion-only report.
+    func decode(_ url: URL, progress: @Sendable (Double) -> Void) throws -> AudioSamples
+    func open(_ url: URL, progress: @escaping @Sendable (Double) -> Void) throws -> any AudioSampleReading
+}
+
+public extension AudioDecoding {
+    func open(_ url: URL, progress: @escaping @Sendable (Double) -> Void) throws -> any AudioSampleReading {
+        BufferedAudioReader(try decode(url, progress: progress))
+    }
+
+    func decode(_ url: URL, progress: @Sendable (Double) -> Void) throws -> AudioSamples {
+        let audio = try decode(url)
+        progress(1)
+        return audio
+    }
 }
 
 /// Reads a file's duration cheaply, without decoding (queue header, > 4 h confirmation).
@@ -26,8 +42,13 @@ public enum FileTranscriptionError: Error, Equatable, Sendable {
     case cancelled
 }
 
-/// Transcribes one file end to end; `progress` is 0…1.
+public enum FileTranscriptionUpdate: Sendable, Equatable {
+    case loadingModel(modelID: String)
+    case progress(Double)
+}
+
+/// Transcribes one file end to end, reporting model loading separately from 0…1 inference progress.
 public protocol FileTranscribing: Sendable {
     func transcribe(_ url: URL, options: TranscriptionOptions,
-                    progress: @Sendable @escaping (Double) -> Void) async throws -> TranscriptDocument
+                    update: @Sendable @escaping (FileTranscriptionUpdate) -> Void) async throws -> TranscriptDocument
 }

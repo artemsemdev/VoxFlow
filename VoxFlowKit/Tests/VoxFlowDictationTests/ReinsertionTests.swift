@@ -59,12 +59,12 @@ struct ReinsertionTests {
     @Test("a stored fallback can be reinserted on a fresh launch without microphone/model checks; clipboard fallback is retained")
     func storedResult() async {
         let h = await Harness(preflight: Preflight(excludedApp: nil, secureInput: false, microphone: .denied, model: .notInstalled(sizeBytes: 1)))
-        h.inserter.setResult(.copiedToClipboard)
+        h.inserter.setResult(.copiedToClipboard(reason: .noTextField))
         let result = await h.controller.reinsertLast(prepare: { .ready }, lastSaved: { previous })
-        #expect(result == .copiedToClipboard)
+        #expect(result == .copiedToClipboard(reason: .noTextField))
         #expect(h.inserter.insertedTexts == [previous.text])
         #expect(h.mic.startCount == 0 && h.preflightCalls.items.isEmpty && h.saved.items.isEmpty)
-        #expect(await h.controller.state == .copied)
+        #expect(await h.controller.state == .copied(.noTextField))
     }
 
     @Test("history fallback has no cursor metadata")

@@ -113,6 +113,9 @@ public final class VoxFlowDatabase: Sendable {
                   UNIQUE(name, path));
                 """)
         }
+        migrator.registerMigration("v4-history-annotations") { db in
+            try db.alter(table: "dictations") { $0.add(column: "annotations", .blob) }
+        }
         return migrator
     }
 }

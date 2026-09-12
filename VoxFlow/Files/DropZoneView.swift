@@ -8,9 +8,11 @@ struct DropZoneView: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            Image(systemName: "arrow.down.circle")
-                .font(.system(size: 32, weight: .medium))
-                .foregroundStyle(.secondary)
+            Image(systemName: "arrow.down")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(.tint)
+                .frame(width: 40, height: 40)
+                .background(Color.accentColor.opacity(0.14), in: RoundedRectangle(cornerRadius: 11))
             Text("Drop audio or video to transcribe")
                 .font(.headline)
             Text("MP3, WAV, M4A, MP4, MOV · any length · processed on this Mac, never uploaded")

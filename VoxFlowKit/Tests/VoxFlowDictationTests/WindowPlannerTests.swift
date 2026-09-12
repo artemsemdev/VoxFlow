@@ -47,6 +47,31 @@ struct WindowPlannerTests {
         #expect(planner.flush() == nil)
     }
 
+    @Test("a device gap closes buffered audio and advances the next absolute offset")
+    func deviceGap() {
+        var planner = WindowPlanner()
+        _ = planner.append(chunk(seconds: 0.2, rms: 0.3))
+        let beforeSwitch = planner.interrupt(by: 1.5)
+        #expect(beforeSwitch?.startOffset == 0)
+        #expect(beforeSwitch?.samples.duration == 0.2)
+
+        _ = planner.append(chunk(seconds: 0.4, rms: 0.3))
+        #expect(planner.flush()?.startOffset == 1.7)
+    }
+
+    @Test("a new planner resets prior gaps and multiple switches accumulate")
+    func resetAndMultipleGaps() {
+        var planner = WindowPlanner()
+        #expect(planner.interrupt(by: 0.25) == nil)
+        #expect(planner.interrupt(by: 0.75) == nil)
+        _ = planner.append(chunk(seconds: 0.4, rms: 0.3))
+        #expect(planner.flush()?.startOffset == 1)
+
+        var nextCapture = WindowPlanner()
+        _ = nextCapture.append(chunk(seconds: 0.4, rms: 0.3))
+        #expect(nextCapture.flush()?.startOffset == 0)
+    }
+
     @Test("prompt context is the last 200 characters of the text so far")
     func promptTail() {
         #expect(WindowedTranscriber.promptContext(from: "") == nil)

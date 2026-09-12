@@ -27,6 +27,15 @@ struct HistoryWriterTests {
         #expect(d.style == "formal")
     }
 
+    @Test("draft mapping carries only validated raw annotations")
+    func draftCarriesAnnotations() {
+        let span = RawTextSpan(location: 0, length: 5)!
+        let annotations = DictationAnnotations(wordConfidences: [WordConfidence(span: span, confidence: 0.78)!])
+        let annotated = DictationResult(text: "hello there", rawText: "hello there", segments: [], language: nil,
+                                       duration: 1, lowConfidence: false, annotations: annotations)
+        #expect(HistoryWriter.draft(from: annotated, appName: nil, now: Date()).annotations == annotations)
+    }
+
     @Test("saves when keepHistory is on; skips when off")
     func save() async throws {
         let store = try DictationStore(inMemoryWith: nil)

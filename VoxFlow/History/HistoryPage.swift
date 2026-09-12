@@ -211,14 +211,14 @@ struct HistoryRowList: View {
     var addToDictionary: @MainActor (String) -> Void = { _ in }
 
     var body: some View {
-        VStack(spacing: 0) {
-            ForEach(viewModel.records) { record in
-                if viewModel.expandedID == record.id {
-                    HistoryCardView(record: record, model: viewModel, addToDictionary: addToDictionary)
-                } else {
-                    HistoryRowView(record: record, model: viewModel)
-                    Divider()
+        TimelineView(.periodic(from: .now, by: 60)) { timeline in
+            VStack(alignment: .leading, spacing: 16) {
+                ForEach(viewModel.dayGroups(at: timeline.date)) { group in
+                    HistoryDaySection(group: group, model: viewModel, addToDictionary: addToDictionary)
                 }
+            }
+            .task(id: viewModel.dayIdentifier(at: timeline.date)) {
+                viewModel.dateBoundaryDidChange(at: timeline.date)
             }
         }
         .padding(.horizontal, 20)
@@ -226,24 +226,60 @@ struct HistoryRowList: View {
     }
 }
 
-/// One joined card, shared by the production list and native editor render fixtures.
-struct HistoryCardView: View {
-    let record: DictationRecord
+private struct HistoryDaySection: View {
+    let group: HistoryViewModel.DayGroup
     let model: HistoryViewModel
-    var addToDictionary: @MainActor (String) -> Void = { _ in }
+    let addToDictionary: @MainActor (String) -> Void
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         let colors = HistoryCardColors(scheme: colorScheme)
+        VStack(alignment: .leading, spacing: 8) {
+            Text(group.title.uppercased())
+                .font(.system(size: 12, weight: .semibold))
+                .tracking(0.48)
+                .foregroundStyle(colors.secondaryText)
+            VStack(spacing: 0) {
+                ForEach(Array(group.records.enumerated()), id: \.element.id) { index, record in
+                    HistoryCardView(record: record, model: model, showsContainer: false, addToDictionary: addToDictionary)
+                    if index < group.records.count - 1 { Divider() }
+                }
+            }
+            .background(colors.surface)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(colors.border))
+        }
+    }
+}
+
+/// One joined card, shared by the production list and native editor render fixtures.
+struct HistoryCardView: View {
+    let record: DictationRecord
+    let model: HistoryViewModel
+    var showsContainer = true
+    var addToDictionary: @MainActor (String) -> Void = { _ in }
+    @Environment(\.colorScheme) private var colorScheme
+
+    @ViewBuilder
+    var body: some View {
+        let colors = HistoryCardColors(scheme: colorScheme)
+        if showsContainer {
+            contents
+                .background(colors.surface)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(colors.border))
+        } else {
+            contents
+        }
+    }
+
+    private var contents: some View {
         VStack(spacing: 0) {
             HistoryRowView(record: record, model: model)
             if model.expandedID == record.id {
                 HistoryDetailView(record: record, model: model, addToDictionary: addToDictionary)
             }
         }
-        .background(colors.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(colors.border))
     }
 }
 

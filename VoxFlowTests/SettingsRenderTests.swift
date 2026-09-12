@@ -87,10 +87,10 @@ struct SettingsRenderTests {
         // Audio (ST-04, ST-04n): a device present, then none (banner).
         let withDevice = AudioViewModel(devices: FakeInputDeviceProvider(name: "MacBook Pro Microphone"),
                                         settings: DictationSettings(store: InMemoryKeyValueStore()), dictation: makeCoordinator())
-        try Self.render(AudioSettingsBody(audio: withDevice), name: "audio-1-device", to: directory)
+        try Self.render(AudioSettingsView(audio: withDevice), name: "audio-1-device", to: directory)
         let noDevice = AudioViewModel(devices: FakeInputDeviceProvider(name: nil),
                                       settings: DictationSettings(store: InMemoryKeyValueStore()), dictation: makeCoordinator())
-        try Self.render(AudioSettingsBody(audio: noDevice), name: "audio-2-no-device", to: directory)
+        try Self.render(AudioSettingsView(audio: noDevice), name: "audio-2-no-device", to: directory)
 
         // Privacy (ST-05): the default excluded apps, plus one with an extra app + Keychain subtitle.
         let privacyDefault = makePrivacyModel(dir: TemporaryDirectory())
@@ -120,13 +120,9 @@ struct SettingsRenderTests {
     }
 
     private static func render(_ view: some View, name: String, to directory: URL) throws {
-        let renderer = ImageRenderer(content: view.frame(width: 900, height: 600))
-        renderer.scale = 2
-        guard let image = renderer.nsImage else {
-            Issue.record("Failed to render \(name)")
-            return
-        }
-        try writePNG(image, to: directory.appendingPathComponent("Settings-\(name).png"))
+        let host = NativeRenderHost(view, size: NSSize(width: 900, height: 600))
+        defer { host.close() }
+        try host.capture(to: directory.appendingPathComponent("Settings-\(name).png"))
     }
 
     private static func rendersDirectory() -> URL {
@@ -136,14 +132,6 @@ struct SettingsRenderTests {
             .appendingPathComponent(".superpowers/design/renders")
     }
 
-    private static func writePNG(_ image: NSImage, to url: URL) throws {
-        guard let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
-              let png = rep.representation(using: .png, properties: [:]) else {
-            Issue.record("Failed to encode PNG for \(url.lastPathComponent)")
-            return
-        }
-        try png.write(to: url)
-    }
 }
 
 /// A same-style stand-in for `ModelsSettingsView`'s grouped section/row look (ST-03) — `ModelsSettingsView`

@@ -10,6 +10,13 @@ import VoxFlowStyling
 /// it; nothing else decides.
 @Observable @MainActor
 final class HistoryViewModel {
+    struct DayGroup: Identifiable {
+        let day: Date
+        let title: String
+        let records: [DictationRecord]
+        var id: Date { day }
+    }
+
     enum DateRange: String, CaseIterable {
         case today = "Today", thisWeek = "This week", thisMonth = "This month", allTime = "All time"
 
@@ -153,6 +160,44 @@ final class HistoryViewModel {
         let tail = days == 0 ? "until you delete it" : "for \(days) \(days == 1 ? "day" : "days")"
         let lead = settings.encryptHistory ? "History is encrypted on this Mac and kept \(tail)." : "History is kept on this Mac \(tail)."
         return lead + " Change in Settings → Privacy."
+    }
+
+    /// Visible rows grouped by the same local calendar used by date filtering. Iterating the
+    /// already-sorted rows preserves newest-first order and keeps an edit-pinned row at the top.
+    func dayGroups(at referenceDate: Date? = nil) -> [DayGroup] {
+        let referenceDate = referenceDate ?? now()
+        var order: [Date] = []
+        var recordsByDay: [Date: [DictationRecord]] = [:]
+        for record in records {
+            let day = calendar.startOfDay(for: record.createdAt)
+            if recordsByDay[day] == nil { order.append(day) }
+            recordsByDay[day, default: []].append(record)
+        }
+        return order.map { day in
+            DayGroup(day: day, title: dayTitle(day, referenceDate: referenceDate),
+                     records: recordsByDay[day, default: []])
+        }
+    }
+
+    func dayIdentifier(at date: Date) -> Date { calendar.startOfDay(for: date) }
+
+    /// Called by the list's day timeline. This is what moves a `.today` filter at local midnight;
+    /// `applyFilters` retains any active edit even when its original date has just become yesterday.
+    func dateBoundaryDidChange(at referenceDate: Date? = nil) {
+        applyFilters(referenceDate: referenceDate)
+    }
+
+    private func dayTitle(_ day: Date, referenceDate: Date) -> String {
+        if calendar.isDate(day, inSameDayAs: referenceDate) { return "Today" }
+        if let yesterday = calendar.date(byAdding: .day, value: -1, to: referenceDate),
+           calendar.isDate(day, inSameDayAs: yesterday) { return "Yesterday" }
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.locale = calendar.locale ?? .current
+        formatter.timeZone = calendar.timeZone
+        let sameYear = calendar.component(.year, from: day) == calendar.component(.year, from: referenceDate)
+        formatter.setLocalizedDateFormatFromTemplate(sameYear ? "MMMMd" : "MMMMdyyyy")
+        return formatter.string(from: day)
     }
 
     // MARK: Actions
@@ -299,8 +344,9 @@ final class HistoryViewModel {
         guard restylingID == nil, editingID == nil, !record.isUnreadable else { return }
         restylingID = record.id
         defer { restylingID = nil }
-        let text = await restyler.restyle(rawText: record.rawText, to: style)
-        guard let updated = await service.updateStyled(id: record.id, text: text, style: style.rawValue) else { return }
+        let styled = await restyler.restyleResult(rawText: record.rawText, to: style)
+        guard let updated = await service.updateStyled(id: record.id, text: styled.text, style: style.rawValue,
+                                                       removedFillerSpans: styled.removedFillerSpans) else { return }
         pasteboard.setString(updated.text)
         await refresh()
     }
@@ -344,10 +390,10 @@ final class HistoryViewModel {
         applyFilters()
     }
 
-    private func applyFilters() {
+    private func applyFilters(referenceDate: Date? = nil) {
         // Keep Save/Cancel reachable if filters or an earlier search change during editing.
         let edited = records.first { $0.id == editingID }
-        let date = now()
+        let date = referenceDate ?? now()
         records = searchResults.filter {
             (selectedApp == nil || Self.appLabel($0) == selectedApp)
                 && dateRange.includes($0.createdAt, now: date, calendar: calendar)
@@ -439,6 +485,13 @@ final class HistoryViewModel {
     /// (Slack purple, Mail blue, Notes orange, Xcode blue) still gets a consistent colour.
     static func color(for appName: String?) -> Color {
         guard let appName, !appName.isEmpty else { return .gray }
+        switch appName.lowercased() {
+        case "mail": return Color(red: 10 / 255, green: 132 / 255, blue: 1)
+        case "slack": return Color(red: 97 / 255, green: 31 / 255, blue: 105 / 255)
+        case "notes": return Color(red: 242 / 255, green: 178 / 255, blue: 27 / 255)
+        case "xcode": return Color(red: 30 / 255, green: 139 / 255, blue: 1)
+        default: break
+        }
         var hash: UInt64 = 0
         for byte in appName.utf8 { hash = hash &* 31 &+ UInt64(byte) }
         return palette[Int(hash % UInt64(palette.count))]

@@ -53,7 +53,10 @@ final class AccessibilityTextInserter: TextInserting {
 
     private func performInsert(_ text: String, cursorOffset: Int?) -> InsertionResult {
         defer { target = nil }
-        if let target, permissions.accessibilityTrusted(prompt: false), target.isEditable {
+        guard permissions.accessibilityTrusted(prompt: false) else {
+            return copy(text, reason: .accessibilityDenied)
+        }
+        if let target, target.isEditable {
             // Read the replacement's start before writing: most targets move selection to its end.
             let selection = cursorOffset == nil ? nil : target.selectedRange
             if target.replaceSelectedText(text) {
@@ -64,8 +67,13 @@ final class AccessibilityTextInserter: TextInserting {
                 }
                 return .inserted(appName: appName)
             }
+            return copy(text, reason: .insertionFailed)
         }
+        return copy(text, reason: .noTextField)
+    }
+
+    private func copy(_ text: String, reason: CopyReason) -> InsertionResult {
         pasteboard.setString(text)
-        return .copiedToClipboard
+        return .copiedToClipboard(reason: reason)
     }
 }

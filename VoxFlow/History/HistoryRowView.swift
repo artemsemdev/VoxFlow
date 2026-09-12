@@ -35,7 +35,7 @@ struct HistoryRowView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .contentShape(Rectangle())
-        .background(isExpanded ? colors.header : Color.clear)
+        .background(isExpanded || isHovering ? colors.header : Color.clear)
         .onTapGesture { model.toggleExpanded(id: record.id) }
         .onHover { isHovering = $0 }
     }

@@ -2,8 +2,8 @@ import AppKit
 import Foundation
 
 /// Settings › Audio (design ST-04, ST-04n). Thin: `deviceName`/`hasDevice` come from
-/// `InputDeviceProviding` (re-read via `refreshDevice()`, since a device can appear/disappear while
-/// the tab is open — ST-04n "auto-recovers when device appears"); `levels` mirrors the live
+/// `InputDeviceProviding` (re-read and observed while the tab is open, so ST-04n auto-recovers when
+/// a device appears); `levels` mirrors the live
 /// `DictationCoordinator` (flat while idle, per `DictationCoordinator.apply`); `silenceStop` is a
 /// pass-through binding onto `DictationSettings`, which does its own 1…10 s clamping.
 @Observable @MainActor
@@ -28,9 +28,17 @@ final class AudioViewModel {
         deviceName = devices.defaultInputName()
     }
 
-    /// Re-reads the device list — called from the view's `.task`/`.onAppear` so a mic plugged in
-    /// while Settings is open clears the ST-04n banner without needing a relaunch.
+    /// Re-reads the device list when observation starts or a caller explicitly requests a refresh.
     func refreshDevice() { deviceName = devices.defaultInputName() }
+
+    func observeDeviceChanges() async {
+        let changes = devices.changes()
+        refreshDevice()
+        for await name in changes {
+            guard !Task.isCancelled else { return }
+            deviceName = name
+        }
+    }
 
     /// ST-04n "Open Sound Settings" — deep-links to the Sound pane.
     func openSoundSettings() {

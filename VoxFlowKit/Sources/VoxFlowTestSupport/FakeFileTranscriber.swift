@@ -11,11 +11,13 @@ public actor FakeFileTranscriber: FileTranscribing {
     private var waiters: [URL: [CheckedContinuation<Void, Never>]] = [:]
     public private(set) var calls: [URL] = []
     public var progressSteps: [Double] = [0.25, 0.5, 0.75]
+    private var loadingModelID: String?
 
     public init() {}
 
     public func script(_ url: URL, _ script: Script) { scripts[url] = script }
     public func setProgressSteps(_ steps: [Double]) { progressSteps = steps }
+    public func setLoadingModelID(_ id: String?) { loadingModelID = id }
     /// Hold the next job for `url` after reporting `progressSteps`, until `release(url)` or cancellation.
     public func hold(_ url: URL) { holdURLs.insert(url) }
     public func waitUntilHeld(_ url: URL) async {
@@ -25,11 +27,12 @@ public actor FakeFileTranscriber: FileTranscribing {
     public func release(_ url: URL) { gates.removeValue(forKey: url)?.resume() }
 
     public func transcribe(_ url: URL, options: TranscriptionOptions,
-                           progress: @Sendable @escaping (Double) -> Void) async throws -> TranscriptDocument {
+                           update: @Sendable @escaping (FileTranscriptionUpdate) -> Void) async throws -> TranscriptDocument {
         calls.append(url)
+        if let loadingModelID { update(.loadingModel(modelID: loadingModelID)) }
         for step in progressSteps {
             try Task.checkCancellation()
-            progress(step)
+            update(.progress(step))
         }
         if holdURLs.remove(url) != nil { try await park(url) }
         switch scripts[url] {
