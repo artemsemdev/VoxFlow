@@ -37,6 +37,11 @@ cd VoxFlowKit && swift test                                             # packag
 - Warnings are errors; strict concurrency is `complete`. CI checks stdout and stderr logs case-insensitively with `scripts/check_build_logs.py`, including Xcode driver and native-backend warnings. Select `arch=arm64` explicitly to avoid Xcode choosing between native and Rosetta destinations. Do not add `@unchecked Sendable`,
   `nonisolated(unsafe)` or `MainActor.assumeIsolated` without a comment that proves the invariant,
   and prefer `Mutex` / actors.
+- Check the structured Xcode result as well as stdout/stderr: SwiftUI runtime warnings can appear
+  only in the result bundle. Export the completed bundle with
+  `xcrun xcresulttool get object --legacy --path TestResults.xcresult --format json > test-results.json`,
+  then run `python3 scripts/check_build_logs.py test.log --xcresult-json test-results.json`.
+  Use the actual bundle path from your Xcode run, or specify `-resultBundlePath` when starting it.
 - Tests first (TDD): a failing test, then the smallest change that makes it pass. Unit tests use the
   fakes in `VoxFlowTestSupport`; tests that need a real model are gated with `.enabled(if:)` and print
   why they skipped. Tests must be deterministic: gate on state, never on `sleep`.

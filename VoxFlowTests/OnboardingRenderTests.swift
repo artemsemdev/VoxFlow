@@ -111,11 +111,8 @@ struct OnboardingRenderTests {
         RenderCase(name: "4-model", step: .model) { bundle in
             for _ in 0..<200 where bundle.vm.modelRow == nil { await Task.yield() }
         },
-        // N-6: `beginTryIt()` is no longer called directly here — `render()` primes the view (one
-        // discarded `.nsImage` pass) before running `configure`, which does trigger `TryItStepView`'s
-        // own `.onAppear` (confirmed: it also emits SwiftUI's "Accessing FocusState's value outside of
-        // the body of a View" warning), so both try-it cases now exercise the real production wiring
-        // instead of calling the view model's method as a stand-in for it.
+        // `render()` attaches the production view to its native host before configuration, so the
+        // Try It view's own `.onAppear` starts the exercise exactly as it does in the app.
         RenderCase(name: "5-tryit", step: .tryIt) { _ in },
         RenderCase(name: "5b-tryit-inserted", step: .tryIt) { bundle in
             // M-7: exercises the result chip — the most distinctive element on ONB-05 — which no
@@ -140,34 +137,16 @@ struct OnboardingRenderTests {
 
         for testCase in Self.cases {
             let bundle = makeBundle(step: testCase.step, accessibility: testCase.accessibility)
-            // D-1: the shipped window relies on the real titlebar's traffic lights
-            // (`.windowStyle(.hiddenTitleBar)`), which an `ImageRenderer` snapshot of bare content
-            // never shows — draw a stand-in set here only, so the PNG still has something to compare
-            // against the mock's top-left corner.
+            // The shipped hidden-titlebar window still owns its traffic lights; this render-only
+            // chrome keeps the fixture comparable to the mock without showing or focusing a window.
             let fnState = FnSystemActionWarningState(action: testCase.fnAction, currentAction: { testCase.fnAction })
             let content = OnboardingContentView(viewModel: bundle.vm, fnWarningState: fnState, openKeyboard: {})
-            let renderer = ImageRenderer(content: RenderChrome(content: content))
-            renderer.scale = 2
-            // Prime the view once, discarding the image, so each step view's own `.onAppear` wiring
-            // (in particular `TryItStepView`'s `beginTryIt()` + focus) has actually run before
-            // `configure` drives further state — see N-6. `beginTryIt()` is idempotent while already
-            // armed, so this is harmless for cases that don't care about it.
-            _ = renderer.nsImage
+            let host = NativeRenderHost(RenderChrome(content: content), size: NSSize(width: 700, height: 520))
+            defer { host.close() }
             await testCase.configure(bundle)
-            // `ImageRenderer.nsImage` can return a backing render that hasn't yet picked up an
-            // `@Observable` mutation from moments ago if nothing has pumped the run loop since —
-            // `5b-tryit-inserted`'s long yield chain (waiting through `.armed`/`.listening`/`.inserted`)
-            // happens to give it plenty of chances, but a case like `2a` that exits its wait loop on
-            // the very first successful check does not. Discard one extra pass, yielding first, so
-            // every case's *final* capture reliably reflects the state `configure` just set up.
             await Task.yield()
-            _ = renderer.nsImage
-            guard let image = renderer.nsImage else {
-                Issue.record("Failed to render \(testCase.name)")
-                continue
-            }
-            let url = directory.appendingPathComponent("Onboarding-\(testCase.name).png")
-            try Self.writePNG(image, to: url)
+            host.layout()
+            try host.capture(to: directory.appendingPathComponent("Onboarding-\(testCase.name).png"))
         }
     }
 
@@ -178,14 +157,6 @@ struct OnboardingRenderTests {
             .appendingPathComponent(".superpowers/design/renders")
     }
 
-    private static func writePNG(_ image: NSImage, to url: URL) throws {
-        guard let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
-              let png = rep.representation(using: .png, properties: [:]) else {
-            Issue.record("Failed to encode PNG for \(url.lastPathComponent)")
-            return
-        }
-        try png.write(to: url)
-    }
 }
 
 /// Render-only stand-in for the real window's `.hiddenTitleBar` traffic lights (D-1) — the shipped
