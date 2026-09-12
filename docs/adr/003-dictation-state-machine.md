@@ -73,6 +73,17 @@ state with I/O.
   `WindowedTranscriber` against `SpeechEngine`, with the previous window's decoded
   text tail (last 200 chars, `WindowedTranscriber.promptTailLength`) fed back in as
   `TranscriptionOptions.promptContext` so whisper conditions on what was just said.
+  The controller awaits cumulative previews through the optional `LiveTextInserting` capability.
+  A capture context is invalidated synchronously on teardown, including Escape; suspended partial
+  or final callbacks cannot write into a newer capture. Escape preserves already-inserted text.
+  The AX adapter snapshots the focused field's text and selection during preflight, checks the
+  same focused target and unchanged full text/selection before each write, and appends or replaces
+  only the capture-owned tail on UTF-16 grapheme boundaries. Final styling and snippet caret
+  placement reconcile the same range, without calling ordinary `insert` a second time.
+  Observed ownership loss permanently disables that capture's external edits: only the full final
+  text is copied, once. Unreadable AX snapshots also use this fallback. Ephemeral onboarding and
+  History scratchpads keep final-only insertion. Async cancellation cleanup releases the matching
+  live snapshot without changing another capture's target.
   Any remainder shorter than `minFlush` (0.3 s) at the end of the feed is dropped
   rather than transcribed as its own tiny window — a deliberate trade against
   spending a whisper pass on a fragment too short to be meaningful; the last spoken

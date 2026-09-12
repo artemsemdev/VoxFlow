@@ -6,14 +6,32 @@ import Foundation
 protocol AccessibilityTextTarget: AnyObject {
     var isEditable: Bool { get }
     var selectedRange: NSRange? { get }
+    var textValue: String? { get }
+    func isSameTarget(as other: any AccessibilityTextTarget) -> Bool
     func replaceSelectedText(_ text: String) -> Bool
     func setSelectedRange(_ range: NSRange) -> Bool
+}
+
+extension AccessibilityTextTarget {
+    var textValue: String? { nil }
+    func isSameTarget(as other: any AccessibilityTextTarget) -> Bool { self === other }
 }
 
 @MainActor
 final class AXTextTarget: AccessibilityTextTarget {
     private let element: AXUIElement
     init(_ element: AXUIElement) { self.element = element }
+
+    var textValue: String? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXValueAttribute as CFString, &value) == .success else { return nil }
+        return value as? String
+    }
+
+    func isSameTarget(as other: any AccessibilityTextTarget) -> Bool {
+        guard let other = other as? AXTextTarget else { return false }
+        return CFEqual(element, other.element)
+    }
 
     static func focused() -> AXTextTarget? {
         var focused: CFTypeRef?
