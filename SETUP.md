@@ -33,6 +33,14 @@ change the signing identity. Standalone SwiftPM runs use
 
 ## Running the app
 
+For a local Release build, use `bash scripts/install.sh --build-only`. After quitting
+VoxFlow, `bash scripts/install.sh` builds and installs `/Applications/VoxFlow.app`
+with the same `VoxFlow Dev` identity, verifying signatures before replacement and
+restoring the previous app if final verification fails. Launch it with
+`open /Applications/VoxFlow.app`. Configure [local signing](#local-code-signing-once-per-mac)
+first. See the [release process](docs/delivery/release-process.md) for versioning,
+validation and the separate notarized distribution prerequisites.
+
 Open `VoxFlow.xcodeproj`, select the `VoxFlow` scheme and run. On first launch go to
 Settings › Models and download a speech model (large-v3-turbo is recommended on Macs with 16 GB or
 more; small on 8 GB). Then drop an audio file on the window or the Dock icon.
