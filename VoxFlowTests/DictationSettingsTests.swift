@@ -8,6 +8,18 @@ import VoxFlowTestSupport
 @Suite("DictationSettings")
 @MainActor
 struct DictationSettingsTests {
+    @Test("voice processing defaults off and persisted levels reach the capture snapshot")
+    func audioProcessing() {
+        let store = InMemoryKeyValueStore()
+        let settings = DictationSettings(store: store)
+        #expect(settings.snapshot.audioProcessing == MicrophoneProcessingOptions())
+        settings.noiseSuppression = true
+        settings.otherAudioReduction = .maximum
+        let restored = DictationSettings(store: store)
+        #expect(restored.snapshot.audioProcessing == .init(noiseSuppression: true, ducking: .maximum))
+        settings.noiseSuppression = false
+        #expect(!settings.snapshot.audioProcessing.noiseSuppression)
+    }
     @Test("defaults match the design; values persist and clamp")
     func defaults() {
         let store = InMemoryKeyValueStore()

@@ -47,6 +47,10 @@ any app, style cleanup with a local LLM and an MCP server follow in 2.x (see the
 - Switching microphones keeps captured audio and accounts for the restart gap in transcript
   timing. Losing all input devices stops capture with “No microphone found”; Settings › Audio
   follows the current device even when dictation is idle.
+- Settings › Audio can suppress microphone noise using Apple's voice processing, with explicit
+  minimum/standard/maximum reduction of other audio. Processing defaults off. “Test microphone”
+  records up to five seconds and plays it back from memory; Stop or leaving Audio cancels the test.
+  See [microphone processing](docs/audio-processing.md) for the public API's coupling and limits.
 - Needs Microphone and Accessibility permission, and Contacts (optional — only prompted if you turn
   on "Learn names from Contacts" on the Dictionary page). First launch walks a five-step onboarding
   window (welcome, permissions, hotkey mode, model, try it) with buttons to grant each permission

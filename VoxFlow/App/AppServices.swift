@@ -325,9 +325,11 @@ final class AppServices {
         // start of every capture below so an onboarding/scratchpad dictation is never written to
         // History (I-1/I-2/I-3), replacing the old shared `HistoryWriter` suppression flag.
         let ephemeralScope = EphemeralScope()
+        let microphone = MicrophoneSource(microphoneUse: microphoneUse,
+                                          processing: { dictationSettings.box.current.audioProcessing })
         let dictationController = DictationController(
             config: dictationSettings.flowBarConfig,
-            microphone: MeteredMicrophone(base: MicrophoneSource(microphoneUse: microphoneUse)) { rms in levelSink.report(rms) },
+            microphone: MeteredMicrophone(base: microphone) { rms in levelSink.report(rms) },
             transcriber: styledTranscriber,
             inserter: inserter,
             clock: clock,
@@ -400,7 +402,14 @@ final class AppServices {
                                                        models: modelsViewModel, dictation: dictation, ephemeralScope: ephemeralScope,
                                                        navigation: navigation, clock: SystemMonotonicClock())
 
-        let audioViewModel = AudioViewModel(devices: AVCaptureInputDeviceProvider(), settings: dictationSettings, dictation: dictation)
+        let microphoneTest = MicrophoneTestController(microphone: microphone, player: InMemoryAudioPlayer(), permissions: permissions) {
+            switch dictation.state {
+            case .idle, .paused: true
+            default: dictation.state.isDismissable
+            }
+        }
+        let audioViewModel = AudioViewModel(devices: AVCaptureInputDeviceProvider(), settings: dictationSettings,
+                                           dictation: dictation, microphoneTest: microphoneTest)
         // Shared across Privacy/Snippets/Styles — one `/Applications` scan behind the three app
         // pickers ("Never record in", "Only in {app}", "Add app override").
         let installedApps = WorkspaceInstalledApps()

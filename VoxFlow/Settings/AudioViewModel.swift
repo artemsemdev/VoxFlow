@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import VoxFlowCore
 
 /// Settings › Audio (design ST-04, ST-04n). Thin: `deviceName`/`hasDevice` come from
 /// `InputDeviceProviding` (re-read and observed while the tab is open, so ST-04n auto-recovers when
@@ -11,20 +12,37 @@ final class AudioViewModel {
     private let devices: any InputDeviceProviding
     private let settings: DictationSettings
     private let dictation: DictationCoordinator
+    let microphoneTest: MicrophoneTestController?
 
     private(set) var deviceName: String?
     var hasDevice: Bool { deviceName != nil }
-    var levels: [Float] { dictation.levels }
+    var levels: [Float] { microphoneTest?.state == .recording ? microphoneTest!.levels : dictation.levels }
+    var dictationBusy: Bool {
+        switch dictation.state {
+        case .idle, .paused: false
+        default: !dictation.state.isDismissable
+        }
+    }
+    var noiseSuppression: Bool {
+        get { settings.noiseSuppression }
+        set { settings.noiseSuppression = newValue }
+    }
+    var otherAudioReduction: MicrophoneProcessingOptions.Ducking {
+        get { settings.otherAudioReduction }
+        set { settings.otherAudioReduction = newValue }
+    }
 
     var silenceStop: TimeInterval {
         get { settings.silenceStop }
         set { settings.silenceStop = newValue }
     }
 
-    init(devices: any InputDeviceProviding, settings: DictationSettings, dictation: DictationCoordinator) {
+    init(devices: any InputDeviceProviding, settings: DictationSettings, dictation: DictationCoordinator,
+         microphoneTest: MicrophoneTestController? = nil) {
         self.devices = devices
         self.settings = settings
         self.dictation = dictation
+        self.microphoneTest = microphoneTest
         deviceName = devices.defaultInputName()
     }
 

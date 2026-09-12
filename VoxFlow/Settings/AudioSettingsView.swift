@@ -1,4 +1,5 @@
 import SwiftUI
+import VoxFlowCore
 import VoxFlowDictation
 
 /// Settings › Audio (design ST-04, ST-04n): thin `ScrollView` wrapper around `AudioSettingsBody` —
@@ -11,11 +12,12 @@ struct AudioSettingsView: View {
         ScrollView { AudioSettingsBody(audio: audio) }
             .frame(maxWidth: .infinity)
             .task { await audio.observeDeviceChanges() }
+            .onDisappear { audio.microphoneTest?.stop() }
+            .onChange(of: audio.dictationBusy) { _, busy in if busy { audio.microphoneTest?.stop() } }
     }
 }
 
-/// "Noise suppression"/"Duck other audio"/"Test microphone" are omitted (ruling: dead controls with
-/// no effect until phase 4).
+/// Capture settings use public voice-processing capabilities; attenuation is never labeled off.
 struct AudioSettingsBody: View {
     let audio: AudioViewModel
 
@@ -37,9 +39,43 @@ struct AudioSettingsBody: View {
             .background(.background.secondary, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
             VStack(spacing: 0) {
+                Toggle("Noise suppression", isOn: $audio.noiseSuppression)
+                    .padding(.horizontal, 16).padding(.vertical, 10)
+                Divider().padding(.leading, 16)
+                HStack {
+                    Text("Other audio reduction")
+                    Spacer()
+                    Picker("Other audio reduction", selection: $audio.otherAudioReduction) {
+                        ForEach(MicrophoneProcessingOptions.Ducking.allCases, id: \.self) { level in
+                            Text(level.title).tag(level)
+                        }
+                    }
+                    .labelsHidden().frame(maxWidth: 160)
+                    .disabled(!audio.noiseSuppression)
+                }
+                .padding(.horizontal, 16).padding(.vertical, 10)
+                Text("Noise suppression uses Apple's voice processing, which always lowers other audio at least slightly. Turn it off for unprocessed input and no audio reduction. Changes apply to the next recording.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16).padding(.bottom, 10)
+                Divider().padding(.leading, 16)
                 silenceRow(silenceStop: $audio.silenceStop)
             }
             .background(.background.secondary, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+            if let test = audio.microphoneTest {
+                HStack {
+                    Button(test.isRunning ? "Stop test" : "Test microphone") {
+                        if test.isRunning { test.stop() } else { test.start() }
+                    }
+                    .disabled(!test.isRunning && (!audio.hasDevice || audio.dictationBusy))
+                    Text(test.state == .recording ? "Recording up to 5 seconds…" : test.state == .playing ? "Playing back…" : "Record, then listen. Audio stays in memory.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                if let message = test.message {
+                    Text(message).font(.caption).foregroundStyle(.secondary)
+                }
+            }
         }
         .padding(20)
         .frame(maxWidth: 640, alignment: .leading)
