@@ -89,16 +89,13 @@ struct FlowBarPanelSizingTests {
                     return reference.fittingSize.width
                 }
                 let deadline = ContinuousClock.now + .seconds(3)
-                var widths: (CGFloat, CGFloat) = (0, 0)
+                var frameWidth: CGFloat = 0
                 repeat {
-                    widths = await onRunLoop {
-                        panel.contentView?.layoutSubtreeIfNeeded()
-                        return (panel.contentView?.fittingSize.width ?? 0, panel.frame.width)
-                    }
-                } while (panel.suppressReflow || abs(widths.0 - expectedWidth) > 2 || widths.1 < widths.0 - 1) && ContinuousClock.now < deadline
-                print("Visible Flow Bar cycle \(cycle), second \(second): expected=\(expectedWidth), ideal=\(widths.0), frame=\(widths.1)")
-                #expect(abs(widths.0 - expectedWidth) <= 2)
-                #expect(widths.1 >= widths.0 - 1)
+                    // Reading the actual frame must not force live SwiftUI layout and heal the bug.
+                    frameWidth = await onRunLoop { panel.frame.width }
+                } while (panel.suppressReflow || frameWidth < expectedWidth - 2) && ContinuousClock.now < deadline
+                print("Visible Flow Bar cycle \(cycle), second \(second): expected=\(expectedWidth), frame=\(frameWidth)")
+                #expect(frameWidth >= expectedWidth - 2)
                 #expect(panel.isVisible)
             }
             coordinator.fn(.up)
