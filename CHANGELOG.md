@@ -135,6 +135,8 @@ versioning.
 - Live dictation limits model readiness and styling to the remaining processing time, falling back
   to rule cleanup after a slow final speech window instead of adding a fresh eight-second wait.
 - Models settings and download hints share the same decimal size labels, including 480 MB for Small.
+- Keep onboarding readable in light and dark appearances, including its canvas, scratchpad,
+  navigation dots, cards and keycaps; native render checks now cover both appearances.
 - Snippets preserve authored spacing, clipboard indentation and attachment characters while keeping
   cursor offsets correct. Dictionary usage counts symbol names and flexible phrase spacing, and
   vocabulary ranking favors user entries over contacts when usage is tied.

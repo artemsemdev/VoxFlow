@@ -133,24 +133,55 @@ struct OnboardingRenderTests {
         let directory = Self.rendersDirectory()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 
-        for testCase in Self.cases {
-            let bundle = makeBundle(step: testCase.step, accessibility: testCase.accessibility)
-            // The shipped hidden-titlebar window still owns its traffic lights; this render-only
-            // chrome keeps the fixture comparable to the mock without showing or focusing a window.
-            let fnState = FnSystemActionWarningState(action: testCase.fnAction, currentAction: { testCase.fnAction })
-            let content = OnboardingContentView(viewModel: bundle.vm, fnWarningState: fnState, openKeyboard: {})
-            let host = NativeRenderHost(RenderChrome(content: content), size: NSSize(width: 700, height: 520))
-            // NativeRenderHost is lazy: prepare the real view so TryIt's production onAppear
-            // arms observation and history suppression before sending any dictation commands.
-            await host.prepareForAlert()
-            do {
-                if testCase.step == .tryIt { try #require(bundle.ephemeralScope.isActive) }
-                await testCase.configure(bundle)
-            } catch {
-                await host.closeSettled()
-                throw error
+        for dark in [false, true] {
+            for testCase in Self.cases {
+                let bundle = makeBundle(step: testCase.step, accessibility: testCase.accessibility)
+                // The shipped hidden-titlebar window still owns its traffic lights; this render-only
+                // chrome keeps the fixture comparable to the mock without showing or focusing a window.
+                let fnState = FnSystemActionWarningState(action: testCase.fnAction, currentAction: { testCase.fnAction })
+                let content = OnboardingContentView(viewModel: bundle.vm, fnWarningState: fnState, openKeyboard: {})
+                let host = NativeRenderHost(RenderChrome(content: content), size: NSSize(width: 700, height: 520), dark: dark)
+                // NativeRenderHost is lazy: prepare the real view so TryIt's production onAppear
+                // arms observation and history suppression before sending any dictation commands.
+                await host.prepareContent()
+                do {
+                    if testCase.step == .tryIt { try #require(bundle.ephemeralScope.isActive) }
+                    await testCase.configure(bundle)
+                } catch {
+                    await host.closeSettled()
+                    throw error
+                }
+                let url = directory.appendingPathComponent("Onboarding-\(testCase.name)\(dark ? "-dark" : "").png")
+                try await host.captureSettled(to: url)
+                try Self.verifyAppearance(at: url, dark: dark, welcome: testCase.step == .welcome)
             }
-            try await host.captureSettled(to: directory.appendingPathComponent("Onboarding-\(testCase.name).png"))
+        }
+    }
+
+    /// Inspect actual rasterized surfaces, not only semantic color declarations. The title,
+    /// subtitle and chip bands exclude the blue icon/buttons so they cannot mask invisible text.
+    private static func verifyAppearance(at url: URL, dark: Bool, welcome: Bool) throws {
+        let bitmap = try #require(NSBitmapImageRep(data: try Data(contentsOf: url)))
+        func luminance(x: Int, y: Int) -> Double {
+            guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(NSColorSpace.sRGB) else { return 0 }
+            func linear(_ c: Double) -> Double { c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4) }
+            return 0.2126 * linear(color.redComponent) + 0.7152 * linear(color.greenComponent)
+                + 0.0722 * linear(color.blueComponent)
+        }
+        let background = luminance(x: 2, y: 2)
+        #expect(dark ? background < 0.2 : background > 0.8, "Onboarding background must follow its appearance")
+        guard welcome else { return }
+        let scale = Double(bitmap.pixelsWide) / 700
+        for (band, minimum) in [(245..<282, 7.0), (295..<327, 3.0), (350..<368, 3.0)] {
+            var readablePixels = 0
+            for y in Int(Double(band.lowerBound) * scale)..<Int(Double(band.upperBound) * scale) {
+                for x in Int(120 * scale)..<Int(580 * scale) {
+                    let foreground = luminance(x: x, y: y)
+                    let contrast = (max(background, foreground) + 0.05) / (min(background, foreground) + 0.05)
+                    if contrast >= minimum { readablePixels += 1 }
+                }
+            }
+            #expect(readablePixels > 100, "Welcome title, subtitle and chips must remain readable in each appearance")
         }
     }
 
