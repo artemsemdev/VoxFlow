@@ -8,6 +8,20 @@ import VoxFlowTestSupport
 @Suite("DictationSettings")
 @MainActor
 struct DictationSettingsTests {
+    @Test("input device UID persists independently of its name and can return to system default")
+    func inputDevice() {
+        let store = InMemoryKeyValueStore()
+        let settings = DictationSettings(store: store)
+        #expect(settings.snapshot.inputDeviceUID == nil)
+        settings.inputDeviceName = "USB Microphone"
+        settings.inputDeviceUID = "stable-device-uid"
+        let restored = DictationSettings(store: store)
+        #expect(restored.inputDeviceUID == "stable-device-uid")
+        #expect(restored.inputDeviceName == "USB Microphone")
+        #expect(restored.snapshot.inputDeviceUID == "stable-device-uid")
+        restored.inputDeviceUID = nil
+        #expect(DictationSettings(store: store).snapshot.inputDeviceUID == nil)
+    }
     @Test("voice processing defaults off and persisted levels reach the capture snapshot")
     func audioProcessing() {
         let store = InMemoryKeyValueStore()

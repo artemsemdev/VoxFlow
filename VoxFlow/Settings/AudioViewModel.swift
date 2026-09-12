@@ -13,8 +13,29 @@ final class AudioViewModel {
     private let settings: DictationSettings
     private let dictation: DictationCoordinator
     let microphoneTest: MicrophoneTestController?
+    private let onInputDeviceChange: () -> Void
 
-    private(set) var deviceName: String?
+    private(set) var availableInputs: [AudioInputDevice] = []
+    private(set) var defaultDeviceName: String?
+    var deviceName: String? {
+        guard let uid = settings.inputDeviceUID else { return defaultDeviceName }
+        return availableInputs.first { $0.id == uid }?.name
+    }
+    var selectedInputID: String {
+        get { settings.inputDeviceUID ?? "" }
+        set {
+            guard canChangeInput, newValue != selectedInputID else { return }
+            let device = availableInputs.first { $0.id == newValue }
+            guard newValue.isEmpty || device != nil else { return }
+            settings.inputDeviceName = device?.name
+            settings.inputDeviceUID = device?.id
+            onInputDeviceChange()
+        }
+    }
+    var unavailableInputName: String? {
+        settings.inputDeviceUID != nil && deviceName == nil ? (settings.inputDeviceName ?? "Selected microphone") : nil
+    }
+    var canChangeInput: Bool { !dictationBusy && microphoneTest?.isRunning != true }
     var hasDevice: Bool { deviceName != nil }
     var levels: [Float] { microphoneTest?.state == .recording ? microphoneTest!.levels : dictation.levels }
     var dictationBusy: Bool {
@@ -38,23 +59,28 @@ final class AudioViewModel {
     }
 
     init(devices: any InputDeviceProviding, settings: DictationSettings, dictation: DictationCoordinator,
-         microphoneTest: MicrophoneTestController? = nil) {
+         microphoneTest: MicrophoneTestController? = nil, onInputDeviceChange: @escaping () -> Void = {}) {
         self.devices = devices
         self.settings = settings
         self.dictation = dictation
         self.microphoneTest = microphoneTest
-        deviceName = devices.defaultInputName()
+        self.onInputDeviceChange = onInputDeviceChange
+        refreshDevice()
     }
 
     /// Re-reads the device list when observation starts or a caller explicitly requests a refresh.
-    func refreshDevice() { deviceName = devices.defaultInputName() }
+    func refreshDevice() {
+        defaultDeviceName = devices.defaultInputName()
+        availableInputs = devices.availableInputs()
+    }
 
     func observeDeviceChanges() async {
         let changes = devices.changes()
         refreshDevice()
         for await name in changes {
             guard !Task.isCancelled else { return }
-            deviceName = name
+            defaultDeviceName = name
+            availableInputs = devices.availableInputs()
         }
     }
 

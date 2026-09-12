@@ -248,7 +248,7 @@ final class AppServices {
         let dictationSettings = DictationSettings(store: settingsStore)
         let permissions = SystemPermissions()
         let frontmost = WorkspaceFrontmostApp()
-        let microphoneUse = CoreAudioMicrophoneUseMonitor { pid in
+        let microphoneUse = CoreAudioMicrophoneUseMonitor(inputDeviceUID: { dictationSettings.box.current.inputDeviceUID }) { pid in
             NSRunningApplication(processIdentifier: pid)?.localizedName
         }
         let inserter = AccessibilityTextInserter(permissions: permissions, pasteboard: SystemPasteboard())
@@ -326,6 +326,7 @@ final class AppServices {
         // History (I-1/I-2/I-3), replacing the old shared `HistoryWriter` suppression flag.
         let ephemeralScope = EphemeralScope()
         let microphone = MicrophoneSource(microphoneUse: microphoneUse,
+                                          inputDeviceUID: { dictationSettings.box.current.inputDeviceUID },
                                           processing: { dictationSettings.box.current.audioProcessing })
         let dictationController = DictationController(
             config: dictationSettings.flowBarConfig,
@@ -409,7 +410,8 @@ final class AppServices {
             }
         }
         let audioViewModel = AudioViewModel(devices: AVCaptureInputDeviceProvider(), settings: dictationSettings,
-                                           dictation: dictation, microphoneTest: microphoneTest)
+                                           dictation: dictation, microphoneTest: microphoneTest,
+                                           onInputDeviceChange: { _ = microphoneUse.freshState() })
         // Shared across Privacy/Snippets/Styles — one `/Applications` scan behind the three app
         // pickers ("Never record in", "Only in {app}", "Add app override").
         let installedApps = WorkspaceInstalledApps()

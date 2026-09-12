@@ -9,13 +9,16 @@ public final class MicrophoneSource: MicrophoneCapturing, Sendable {
     private let chunkSeconds: Double
     private let microphoneUse: any MicrophoneUseMonitoring
     private let processing: @Sendable () -> MicrophoneProcessingOptions
+    private let inputDeviceUID: @Sendable () -> String?
     private let lease = MicrophoneCaptureLease()
 
     public init(chunkSeconds: Double = 0.1, microphoneUse: any MicrophoneUseMonitoring = UnmonitoredMicrophoneUse(),
+                inputDeviceUID: @escaping @Sendable () -> String? = { nil },
                 processing: @escaping @Sendable () -> MicrophoneProcessingOptions = { .init() }) {
         self.chunkSeconds = chunkSeconds
         self.microphoneUse = microphoneUse
         self.processing = processing
+        self.inputDeviceUID = inputDeviceUID
     }
 
     public func classifiedStartError(_ description: String) -> MicrophoneError {
@@ -39,7 +42,9 @@ public final class MicrophoneSource: MicrophoneCapturing, Sendable {
             let classifyStartError: @Sendable (String) -> MicrophoneError = { [microphoneUse] description in
                 Self.classifyStartError(description, microphoneUse: microphoneUse)
             }
-            let session = CaptureSession(chunkSeconds: chunkSeconds, processing: processing(), classifyStartError: classifyStartError,
+            // A settings edit affects the next capture, never a running session or its restarts.
+            let session = CaptureSession(chunkSeconds: chunkSeconds, processing: processing(), inputDeviceUID: inputDeviceUID(),
+                                         classifyStartError: classifyStartError,
                                          continuation: continuation, onStopped: { [lease] in lease.release() })
             continuation.onTermination = { _ in session.stop() }
             session.start()
@@ -54,20 +59,23 @@ private final class CaptureSession: @unchecked Sendable {
     private let engine = AVAudioEngine()
     private let chunkSeconds: Double
     private let processing: MicrophoneProcessingOptions
+    private let inputDeviceUID: String?
     private let classifyStartError: @Sendable (String) -> MicrophoneError
     private let continuation: AsyncThrowingStream<MicrophoneEvent, Error>.Continuation
     private let onStopped: @Sendable () -> Void
     private var observer: NSObjectProtocol?
+    private var deviceChanges: Task<Void, Never>?
     private var stopped = false
     private var gapTracker = CaptureGapTracker()
     private var currentTap: CaptureAudioTapBox?
 
-    init(chunkSeconds: Double, processing: MicrophoneProcessingOptions,
+    init(chunkSeconds: Double, processing: MicrophoneProcessingOptions, inputDeviceUID: String?,
          classifyStartError: @escaping @Sendable (String) -> MicrophoneError,
          continuation: AsyncThrowingStream<MicrophoneEvent, Error>.Continuation,
          onStopped: @escaping @Sendable () -> Void) {
         self.chunkSeconds = chunkSeconds
         self.processing = processing
+        self.inputDeviceUID = inputDeviceUID
         self.classifyStartError = classifyStartError
         self.continuation = continuation
         self.onStopped = onStopped
@@ -81,13 +89,31 @@ private final class CaptureSession: @unchecked Sendable {
                 let interruptedAt = AVAudioTime.seconds(forHostTime: mach_absolute_time())
                 self.queue.async { self.restart(interruptedAt: interruptedAt) }
             }
+            if inputDeviceUID != nil {
+                // Register before engine startup so disconnects cannot fall into a subscription gap.
+                let changes = AudioInputDevices.changes()
+                deviceChanges = Task { [weak self] in
+                    for await _ in changes {
+                        guard !Task.isCancelled, let self else { return }
+                        self.queue.async {
+                            guard !self.stopped, let uid = self.inputDeviceUID else { return }
+                            // A disconnected selected input can stop producing buffers entirely.
+                            if AudioInputDevices.deviceID(forUID: uid) == nil { self.fail(MicrophoneError.noInputDevice) }
+                        }
+                    }
+                }
+            }
             do { try installTapAndRun(generation: gapTracker.activeToken) } catch { fail(error) }
         }
     }
 
     private func installTapAndRun(generation: UInt64) throws {
-        let input = engine.inputNode
+        var input = engine.inputNode
+        _ = try InputDeviceRouting.apply(uid: inputDeviceUID, to: input, resolve: AudioInputDevices.deviceID(forUID:))
         try VoiceProcessingConfiguration.apply(processing, to: input)
+        // Voice processing can replace the underlying IO unit. Rebind before reading its format.
+        input = engine.inputNode
+        let selectedDevice = try InputDeviceRouting.apply(uid: inputDeviceUID, to: input, resolve: AudioInputDevices.deviceID(forUID:))
         let inputFormat = input.outputFormat(forBus: 0)
         guard inputFormat.channelCount > 0, inputFormat.sampleRate > 0 else { throw MicrophoneError.noInputDevice }
         let target = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: AudioSamples.sampleRate, channels: 1, interleaved: false)!
@@ -125,6 +151,14 @@ private final class CaptureSession: @unchecked Sendable {
             }
             queue.async { [self] in
                 guard !stopped, gapTracker.isActive(generation) else { return }
+                // Refuse audio if hardware disappeared or the engine switched routes before its
+                // configuration-change callback reached us. Never emit fallback-device samples.
+                do {
+                    if let inputDeviceUID, AudioInputDevices.deviceID(forUID: inputDeviceUID) != selectedDevice {
+                        throw MicrophoneError.noInputDevice
+                    }
+                    try InputDeviceRouting.verify(expected: selectedDevice, on: engine.inputNode)
+                } catch { fail(error); return }
                 let chunks = tap.append(samples, resumedAt: resumedAt, tracker: &gapTracker)
                 for chunk in chunks { continuation.yield(.chunk(chunk)) }
             }
@@ -133,6 +167,7 @@ private final class CaptureSession: @unchecked Sendable {
         do { try engine.start() } catch {
             throw classifyStartError(error.localizedDescription)
         }
+        try InputDeviceRouting.verify(expected: selectedDevice, on: engine.inputNode)
     }
 
     private func restart(interruptedAt: TimeInterval) {
@@ -144,10 +179,15 @@ private final class CaptureSession: @unchecked Sendable {
         currentTap = nil
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
-        let format = engine.inputNode.inputFormat(forBus: 0)
-        guard format.channelCount > 0 else { fail(MicrophoneError.noInputDevice); return }
-        continuation.yield(.deviceChanged(name: AVCaptureDevice.default(for: .audio)?.localizedName))
-        do { try installTapAndRun(generation: resumeToken) } catch { fail(error) }
+        do {
+            try installTapAndRun(generation: resumeToken)
+            let name = if let inputDeviceUID {
+                AudioInputDevices.available().first { $0.id == inputDeviceUID }?.name
+            } else {
+                AudioInputDevices.defaultDevice()?.name
+            }
+            continuation.yield(.deviceChanged(name: name))
+        } catch { fail(error) }
     }
 
     private func fail(_ error: Error) {
@@ -163,6 +203,7 @@ private final class CaptureSession: @unchecked Sendable {
         gapTracker.reset()
         currentTap = nil
         if let observer { NotificationCenter.default.removeObserver(observer) }
+        deviceChanges?.cancel(); deviceChanges = nil
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
         // Disabling the stopped voice-processing IO also releases its output attenuation.

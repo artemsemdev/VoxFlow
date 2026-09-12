@@ -1,6 +1,7 @@
 @preconcurrency import CoreAudio
 import Foundation
 import Synchronization
+import VoxFlowAudio
 import VoxFlowCore
 
 protocol CoreAudioHogAccessing: Sendable {
@@ -35,8 +36,9 @@ final class CoreAudioMicrophoneUseMonitor: MicrophoneUseMonitoring, @unchecked S
         }
     }
 
-    convenience init(resolveName: @escaping @Sendable (pid_t) -> String?) {
-        self.init(access: SystemCoreAudioHogAccess(), resolveName: resolveName)
+    convenience init(inputDeviceUID: @escaping @Sendable () -> String? = { nil },
+                     resolveName: @escaping @Sendable (pid_t) -> String?) {
+        self.init(access: SystemCoreAudioHogAccess(inputDeviceUID: inputDeviceUID), resolveName: resolveName)
     }
 
     deinit {
@@ -115,8 +117,12 @@ final class CoreAudioMicrophoneUseMonitor: MicrophoneUseMonitoring, @unchecked S
 
 private final class SystemCoreAudioHogAccess: CoreAudioHogAccessing, Sendable {
     private let listenerQueue = DispatchQueue(label: "dev.artemsem.voxflow.microphone-use")
+    private let inputDeviceUID: @Sendable () -> String?
+
+    init(inputDeviceUID: @escaping @Sendable () -> String?) { self.inputDeviceUID = inputDeviceUID }
 
     func defaultInputDevice() -> AudioObjectID? {
+        if let uid = inputDeviceUID() { return AudioInputDevices.deviceID(forUID: uid) }
         var address = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDefaultInputDevice,
             mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
         var device = AudioObjectID(kAudioObjectUnknown)
@@ -136,8 +142,10 @@ private final class SystemCoreAudioHogAccess: CoreAudioHogAccessing, Sendable {
     }
 
     func observeDefaultInput(_ changed: @escaping @Sendable () -> Void) -> (any CoreAudioObservation)? {
-        observe(AudioObjectID(kAudioObjectSystemObject),
-                selector: kAudioHardwarePropertyDefaultInputDevice, changed)
+        let selectors = [kAudioHardwarePropertyDefaultInputDevice, kAudioHardwarePropertyDevices]
+        let observations = selectors.compactMap { observe(AudioObjectID(kAudioObjectSystemObject), selector: $0, changed) }
+        guard observations.count == selectors.count else { observations.forEach { $0.cancel() }; return nil }
+        return CoreAudioObservationGroup(observations)
     }
 
     func observeHogMode(of device: AudioObjectID, _ changed: @escaping @Sendable () -> Void) -> (any CoreAudioObservation)? {
@@ -153,6 +161,13 @@ private final class SystemCoreAudioHogAccess: CoreAudioHogAccessing, Sendable {
         return SystemCoreAudioObservation(
             object: object, address: address, queue: listenerQueue, block: block)
     }
+}
+
+private final class CoreAudioObservationGroup: CoreAudioObservation, Sendable {
+    private let observations: [any CoreAudioObservation]
+    init(_ observations: [any CoreAudioObservation]) { self.observations = observations }
+    func cancel() { observations.forEach { $0.cancel() } }
+    deinit { cancel() }
 }
 
 /// CoreAudio does not annotate its copied listener block as Sendable. The other fields are

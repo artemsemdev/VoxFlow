@@ -9,6 +9,7 @@ struct DictationSettingsSnapshot: Sendable, Equatable {
     var keepHistory: Bool
     var options: TranscriptionOptions
     var audioProcessing = MicrophoneProcessingOptions()
+    var inputDeviceUID: String? = nil
 }
 
 final class DictationSettingsBox: Sendable {
@@ -72,6 +73,8 @@ final class DictationSettings {
         }
     }
     var language: String? { didSet { store.set(language, forKey: "dictation.language"); sync() } }
+    var inputDeviceUID: String? { didSet { store.set(inputDeviceUID, forKey: "audio.inputDeviceUID"); sync() } }
+    var inputDeviceName: String? { didSet { store.set(inputDeviceName, forKey: "audio.inputDeviceName") } }
     var noiseSuppression: Bool { didSet { store.set(noiseSuppression ? "1" : "0", forKey: "audio.noiseSuppression"); sync() } }
     var otherAudioReduction: MicrophoneProcessingOptions.Ducking {
         didSet { store.set(otherAudioReduction.rawValue, forKey: "audio.otherAudioReduction"); sync() }
@@ -90,6 +93,8 @@ final class DictationSettings {
         hotkeyMode = store.string(forKey: "dictation.hotkeyMode").flatMap(HotkeyMode.init(rawValue:)) ?? .pushToTalk
         silenceStop = FlowBarConfig(silenceStop: store.string(forKey: "dictation.silenceStop").flatMap(Double.init) ?? 3).silenceStop
         language = store.string(forKey: "dictation.language")
+        inputDeviceUID = store.string(forKey: "audio.inputDeviceUID").flatMap { $0.isEmpty ? nil : $0 }
+        inputDeviceName = store.string(forKey: "audio.inputDeviceName")
         noiseSuppression = store.string(forKey: "audio.noiseSuppression") == "1"
         otherAudioReduction = store.string(forKey: "audio.otherAudioReduction").flatMap(MicrophoneProcessingOptions.Ducking.init(rawValue:)) ?? .minimum
         keepHistory = store.string(forKey: "privacy.keepHistory") != "0"
@@ -106,6 +111,7 @@ final class DictationSettings {
 
     private func sync() {
         box.update(DictationSettingsSnapshot(excludedBundleIDs: excludedBundleIDs, keepHistory: keepHistory, options: transcriptionOptions,
-                                             audioProcessing: .init(noiseSuppression: noiseSuppression, ducking: otherAudioReduction)))
+                                             audioProcessing: .init(noiseSuppression: noiseSuppression, ducking: otherAudioReduction),
+                                             inputDeviceUID: inputDeviceUID))
     }
 }

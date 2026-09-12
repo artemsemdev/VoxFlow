@@ -88,8 +88,9 @@ struct AudioSettingsBody: View {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(.orange)
             VStack(alignment: .leading, spacing: 2) {
-                Text("No microphone found").fontWeight(.medium)
-                Text("Connect a microphone or headset. VoxFlow picks it up automatically.")
+                Text(audio.unavailableInputName == nil ? "No microphone found" : "Selected microphone unavailable").fontWeight(.medium)
+                Text(audio.unavailableInputName.map { "Reconnect \($0) or choose another input device." }
+                     ?? "Connect a microphone or headset. VoxFlow picks it up automatically.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
@@ -105,11 +106,26 @@ struct AudioSettingsBody: View {
     // MARK: rows
 
     private var deviceRow: some View {
-        HStack {
-            Text("Input device")
-            Spacer()
-            Text(audio.deviceName ?? "None available")
-                .foregroundStyle(audio.hasDevice ? .primary : .secondary)
+        @Bindable var audio = audio
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Input device")
+                Spacer()
+                Picker("Input device", selection: $audio.selectedInputID) {
+                    Text(audio.defaultDeviceName.map { "System Default (\($0))" } ?? "System Default").tag("")
+                    ForEach(audio.availableInputs) { device in Text(device.name).tag(device.id) }
+                    if let name = audio.unavailableInputName {
+                        Text("\(name) — Unavailable").tag(audio.selectedInputID).disabled(true)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .frame(maxWidth: 320)
+                .disabled(!audio.canChangeInput)
+            }
+            Text(audio.canChangeInput ? "Used for dictation and microphone tests. Changes apply to the next recording."
+                 : "Stop recording or the microphone test to change the input device.")
+                .font(.caption).foregroundStyle(.secondary)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)

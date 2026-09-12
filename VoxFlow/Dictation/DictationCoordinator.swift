@@ -199,7 +199,11 @@ final class DictationCoordinator {
 
     func openSettingsForCurrentError() {
         switch state {
-        case .micUnavailable(.denied), .micUnavailable(.noDevice): permissions.openMicrophoneSettings()
+        case .micUnavailable(.denied): permissions.openMicrophoneSettings()
+        case .micUnavailable(.noDevice):
+            navigation.settingsTab = .audio
+            navigation.page = .settings
+            navigation.requestMainWindow = true
         case .copied(.accessibilityDenied): permissions.openAccessibilitySettings()
         case .error, .modelNotInstalled:
             // `.error` (model-load / transcription failure) has nothing to do with Accessibility —
