@@ -230,8 +230,7 @@ final class ModelsViewModel {
     }
 
     nonisolated static func gigabytes(_ bytes: Int64) -> String {
-        let gb = Double(bytes) / 1_000_000_000
-        return gb >= 1 ? String(format: "%.1f GB", gb) : "\(Int((Double(bytes) / 1_000_000).rounded())) MB"
+        ModelSizeText.format(bytes)
     }
 
     static func abbreviate(_ url: URL) -> String { ResultViewModel.abbreviate(url) }

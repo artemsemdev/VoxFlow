@@ -84,8 +84,8 @@ struct ModelsViewModelTests {
     @Test("gigabytes formats decimal GB/MB per the design examples")
     func gigabytes() {
         #expect(ModelsViewModel.gigabytes(1_624_555_275) == "1.6 GB")
-        #expect(ModelsViewModel.gigabytes(487_601_967) == "488 MB")
-        #expect(ModelsViewModel.gigabytes(744_000_000) == "744 MB")
+        #expect(ModelsViewModel.gigabytes(487_601_967) == "480 MB")
+        #expect(ModelsViewModel.gigabytes(744_000_000) == "740 MB")
     }
 
     // MARK: 1. refreshReflectsDisk

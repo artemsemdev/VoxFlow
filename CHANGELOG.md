@@ -102,6 +102,7 @@ versioning.
   [docs/runbooks/connect-an-mcp-client.md](docs/runbooks/connect-an-mcp-client.md).
 
 ### Fixed
+- Models settings and download hints share the same decimal size labels, including 480 MB for Small.
 - MCP startup and stop races: concurrent first callers share initialization, and an older operation
   cannot restart a disabled server or overwrite a newer endpoint and setting.
 - Stopping the MCP listener cancels pending binding; old waiting callers cannot restart it or
