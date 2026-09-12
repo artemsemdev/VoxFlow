@@ -57,11 +57,9 @@ protocol FlowBarPositioning: AnyObject {
 ///
 /// Mounted once with the coordinator-backed `FlowBarView` — that view re-reads the coordinator on
 /// every SwiftUI render (see `FlowBarView.Source`), so the hosting controller re-renders on its own
-/// as the state changes. Sizing is `NSHostingController.sizingOptions = [.intrinsicContentSize]`,
-/// Apple's own documented mechanism for a window that tracks its SwiftUI content's ideal size —
-/// preferred over hand-rolling it from a bare `NSHostingView`'s `fittingSize` plus a manual
-/// `NSView.frameDidChangeNotification` observer, which depends on Auto Layout constraints this
-/// borderless panel never installs and so may not fire reliably.
+/// as the state changes. Intrinsic sizing tracks normal content updates; the presentation animation
+/// must also reconcile its final frame with the latest content, since its captured target can be
+/// older and narrower than a state that arrived while the animation was running.
 @MainActor
 final class FlowBarPanel: NSPanel, FlowBarPanelling, FlowBarPositioning, NSWindowDelegate {
     private let hostingController: NSHostingController<FlowBarView>
@@ -89,11 +87,13 @@ final class FlowBarPanel: NSPanel, FlowBarPanelling, FlowBarPositioning, NSWindo
     private var isHiding = false
     /// Suppressed while `show()`'s own scale-in animates the frame, so its intermediate frames don't
     /// each re-trigger `reflow()` via `windowDidResize` and cut the animation short.
-    private var suppressReflow = false
+    private(set) var suppressReflow = false
 
     init(rootView: FlowBarView) {
         hostingController = NSHostingController(rootView: rootView)
-        hostingController.sizingOptions = [.intrinsicContentSize]
+        // The window needs content bounds as well as an ideal size. Intrinsic-only sizing can
+        // leave its frame at the armed width while wider recording/processing content is clipped.
+        hostingController.sizingOptions = .standardBounds
         super.init(contentRect: .zero, styleMask: [.nonactivatingPanel, .borderless, .fullSizeContentView],
                     backing: .buffered, defer: true)
         level = .statusBar
@@ -167,6 +167,7 @@ final class FlowBarPanel: NSPanel, FlowBarPanelling, FlowBarPositioning, NSWindo
 
     func show() {
         generation += 1
+        let myGeneration = generation
         isHiding = false
         // Must come before `reflow()` below (N2): while still `true` from a previous `show()`'s
         // in-flight scale-in, `reflow()` early-returns and the anchor below is computed from a
@@ -201,7 +202,16 @@ final class FlowBarPanel: NSPanel, FlowBarPanelling, FlowBarPositioning, NSWindo
             context.timingFunction = CAMediaTimingFunction(name: .easeOut)
             animator().setFrame(target, display: true)
         }, completionHandler: { [weak self] in
-            Task { @MainActor in self?.suppressReflow = false }
+            Task { @MainActor in
+                guard let self, self.generation == myGeneration else { return }
+                self.suppressReflow = false
+                // The animation may have restored its armed-state target after SwiftUI already
+                // expanded for listening. No further intrinsic-size change is then guaranteed.
+                self.hostingController.view.layoutSubtreeIfNeeded()
+                let size = self.hostingController.view.fittingSize
+                if size != .zero { self.setContentSize(size) }
+                self.reflow()
+            }
         })
     }
 

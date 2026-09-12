@@ -129,6 +129,7 @@ versioning.
 
 ### Fixed
 - Deliver final dictation through guarded Unicode input in Chromium/Electron editors whose Accessibility setter silently ignores text; keep native live previews and clipboard fallback on lost focus.
+- Keep the Flow Bar window wide enough for live timers and processing statuses across repeated recordings by updating its native content bounds.
 - Recover Fn and custom shortcuts when returning from permission settings after a failed keyboard
   listener start. Home refreshes permission status and identifies the permission still required.
 - Recheck excluded apps and secure input after dictation preparation, and keep insertion bound
