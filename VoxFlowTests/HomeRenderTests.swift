@@ -41,7 +41,7 @@ struct HomeRenderTests {
 
     private func makeBundle(microphone: PermissionState = .granted, accessibility: Bool = true,
                             modelStatus: HomeModelStatus = HomeModelStatus(readiness: .loaded, displayName: "large-v3-turbo"),
-                            hotkeyMode: HotkeyMode = .pushToTalk) -> Bundle {
+                            hotkeyMode: HotkeyMode = .pushToTalk, ephemeralScope: EphemeralScope = EphemeralScope()) -> Bundle {
         let dir = TemporaryDirectory()
         let settings = DictationSettings(store: InMemoryKeyValueStore())
         settings.retentionDays = 0
@@ -54,7 +54,7 @@ struct HomeRenderTests {
         let permissions = FakePermissions(microphone: microphone, requestResult: microphone, accessibility: accessibility)
         let vm = HomeViewModel(stats: stats, settings: settings, permissions: permissions,
                                modelStatus: { modelStatus }, navigation: navigation,
-                               ephemeralScope: EphemeralScope(), now: { Self.now }, fullUserName: { "Anh Nguyen" })
+                               ephemeralScope: ephemeralScope, now: { Self.now }, fullUserName: { "Anh Nguyen" })
         return Bundle(vm: vm, history: history, dir: dir)
     }
 
@@ -102,7 +102,78 @@ struct HomeRenderTests {
         try await renderCase(permissionMissing.vm, name: "3-permission-missing", directory: directory)
     }
 
+    @Test("scratchpad text and ephemeral scope survive compact-wide-compact resizing")
+    func scratchpadSurvivesResize() async throws {
+        let scope = EphemeralScope()
+        let bundle = makeBundle(ephemeralScope: scope)
+        await bundle.vm.refresh()
+        var window: NSWindow?
+        var host: NSHostingView<HomePageBody>?
+        await onRunLoop {
+            let content = NSHostingView(rootView: HomePageBody(viewModel: bundle.vm))
+            let fixture = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 700),
+                                   styleMask: [.borderless], backing: .buffered, defer: false)
+            fixture.isReleasedWhenClosed = false
+            fixture.contentView = content
+            window = fixture; host = content
+        }
+        var originalEditor: NSTextView?
+        do {
+            for width in [640, 900, 640] {
+                await onRunLoop { window?.setContentSize(NSSize(width: width, height: 700)) }
+                let deadline = ContinuousClock.now + .seconds(3)
+                var settled = false
+                repeat {
+                    settled = await onRunLoop {
+                        host?.layoutSubtreeIfNeeded()
+                        guard let host, let editor = textEditor(in: host) else { return false }
+                        let editorWidth = editor.visibleRect.width
+                        return window?.frame.width == CGFloat(width) && scope.isActive
+                            && (width == 640 ? editorWidth > 500 : (280..<480).contains(editorWidth))
+                    }
+                } while !settled && ContinuousClock.now < deadline
+                try #require(settled, "The actual scratchpad must reach the requested layout")
+                let snapshot = await onRunLoop {
+                    guard let host, let editor = textEditor(in: host) else { return (false, false, false) }
+                    if originalEditor == nil {
+                        originalEditor = editor
+                        editor.insertText("Keep this scratchpad text", replacementRange: NSRange(location: 0, length: 0))
+                    }
+                    return (editor === originalEditor, editor.string == "Keep this scratchpad text", scope.isActive)
+                }
+                // Assertions must run in the test task; run-loop callbacks lose Testing's context.
+                #expect(snapshot.0, "Resizing must preserve the same native editor")
+                #expect(snapshot.1, "Resizing must preserve entered scratchpad text")
+                #expect(snapshot.2, "The visible scratchpad must keep its ephemeral scope active")
+            }
+        } catch {
+            await onRunLoop { window?.close(); window?.contentView = nil; host = nil; window = nil }
+            throw error
+        }
+        await onRunLoop { window?.close(); window?.contentView = nil; host = nil; window = nil }
+    }
+
+    private func textEditor(in view: NSView) -> NSTextView? {
+        if let editor = view as? NSTextView { return editor }
+        return view.subviews.lazy.compactMap { textEditor(in: $0) }.first
+    }
+
+    private func onRunLoop<T: Sendable>(_ action: @escaping @MainActor () -> T) async -> T {
+        await withCheckedContinuation { continuation in
+            RunLoop.main.perform(inModes: [.default]) {
+                // RunLoop.main owns this callback, satisfying MainActor isolation.
+                continuation.resume(returning: MainActor.assumeIsolated { action() })
+            }
+        }
+    }
+
     private func renderCase(_ vm: HomeViewModel, name: String, directory: URL) async throws {
+        for width in [640, 900] {
+            for dark in [false, true] {
+                let host = NativeRenderHost(HomePageBody(viewModel: vm), size: NSSize(width: width, height: 700), dark: dark)
+                try await host.captureSettled(to: directory.appendingPathComponent("Layout-Home-\(name)-\(width)-\(dark).png"))
+            }
+        }
         let renderer = ImageRenderer(content: HomeRenderPreview(viewModel: vm)
             .frame(width: 1000, height: 780)
             .background(Color(nsColor: .windowBackgroundColor)))

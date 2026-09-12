@@ -130,6 +130,8 @@ versioning.
   [docs/runbooks/connect-an-mcp-client.md](docs/runbooks/connect-an-mcp-client.md).
 
 ### Fixed
+- Align Files controls, Audio/General/Privacy settings and Snippets/Styles cards; keep the Home
+  scratchpad readable when the window is narrow, and show the audio meter in both appearances.
 - Deliver final dictation through guarded Unicode input in Chromium/Electron editors whose Accessibility setter silently ignores text; keep native live previews and clipboard fallback on lost focus.
 - Keep the Flow Bar window wide enough for live timers and processing statuses across repeated recordings by updating its native content bounds.
 - Recover Fn and custom shortcuts when returning from permission settings after a failed keyboard

@@ -20,12 +20,7 @@ private struct InsecureKeyProvider: HistoryKeyProviding {
 /// (MW-03v), 5 (MW-03c), 8 (MW-03a), 9 (MW-03e), and the canvas HTML's `words` sample rows for the
 /// MW-03 list.
 ///
-/// Known `ImageRenderer` limitation (confirmed empirically, not a real UI bug — see
-/// `SettingsRenderTests`'s doc comment for the first writeup): `Toggle`/`Picker`/`Menu` rasterize as a
-/// plain yellow "unavailable cursor" glyph instead of their real appearance. So in these PNGs: the
-/// switch on the Contacts row (5/6/7) and the "Also fix it when I type it wrong" checkbox (3/4) show
-/// that glyph — everything else is representative. Verify Toggle/checkbox appearance by running the
-/// live app instead.
+/// Native hosting captures real switches and checkboxes at the original 900 × 640 viewport.
 @Suite(.enabled(if: ProcessInfo.processInfo.environment["VOXFLOW_RENDER"] != nil))
 @MainActor
 struct DictionaryRenderTests {
@@ -80,18 +75,18 @@ struct DictionaryRenderTests {
             }
         }
         await listBundle.vm.load()
-        try Self.render(DictionaryRenderPreview(viewModel: listBundle.vm), name: "1-list", directory: directory)
+        try await Self.render(DictionaryRenderPreview(viewModel: listBundle.vm), name: "1-list", directory: directory)
 
         // 2. MW-03e — empty dictionary.
         let emptyBundle = makeBundle()
         await emptyBundle.vm.load()
-        try Self.render(DictionaryRenderPreview(viewModel: emptyBundle.vm), name: "2-empty", directory: directory)
+        try await Self.render(DictionaryRenderPreview(viewModel: emptyBundle.vm), name: "2-empty", directory: directory)
 
         // 3. MW-03a — blank "Add word" sheet.
         let addBundle = makeBundle()
         await addBundle.vm.load()
         addBundle.vm.presentAdd()
-        try Self.render(AddWordSheetRenderPreview(viewModel: addBundle.vm), name: "3-sheet-add", directory: directory)
+        try await Self.render(AddWordSheetRenderPreview(viewModel: addBundle.vm), name: "3-sheet-add", directory: directory)
 
         // 4. MW-03v — duplicate validation ("Kubernetes" already present), Add disabled, "Edit existing".
         let validationBundle = makeBundle()
@@ -99,7 +94,7 @@ struct DictionaryRenderTests {
         await validationBundle.vm.load()
         validationBundle.vm.presentAdd()
         validationBundle.vm.sheet?.word = "Kubernetes"
-        try Self.render(AddWordSheetRenderPreview(viewModel: validationBundle.vm), name: "4-validation-duplicate", directory: directory)
+        try await Self.render(AddWordSheetRenderPreview(viewModel: validationBundle.vm), name: "4-validation-duplicate", directory: directory)
 
         // 5. MW-03c importing — fetch still in flight, count unknown yet (F2: spinner, no number).
         let doneNames312 = (1...312).map { "Contact \($0)" }
@@ -108,7 +103,7 @@ struct DictionaryRenderTests {
         await importingBundle.vm.load()
         let importTask = Task { await importingBundle.vm.setLearnFromContacts(true) }
         await waitFor { importingBundle.vm.contacts == .importing(count: nil) }
-        try Self.render(DictionaryContactsRow(viewModel: importingBundle.vm).frame(width: 860).padding(20).background(Color(nsColor: .windowBackgroundColor)),
+        try await Self.render(DictionaryContactsRow(viewModel: importingBundle.vm).frame(width: 860).padding(20).background(Color(nsColor: .windowBackgroundColor)),
                         name: "5-contacts-importing", directory: directory)
         blocking.unblock()
         await importTask.value
@@ -118,28 +113,23 @@ struct DictionaryRenderTests {
         let doneBundle = makeBundle(contacts: FakeContacts(authorization: .granted, names: doneNames))
         await doneBundle.vm.load()
         await doneBundle.vm.setLearnFromContacts(true)
-        try Self.render(DictionaryContactsRow(viewModel: doneBundle.vm).frame(width: 860).padding(20).background(Color(nsColor: .windowBackgroundColor)),
+        try await Self.render(DictionaryContactsRow(viewModel: doneBundle.vm).frame(width: 860).padding(20).background(Color(nsColor: .windowBackgroundColor)),
                         name: "6-contacts-done", directory: directory)
 
         // 7. MW-03c denied — amber row, "Open System Settings", toggle snapped back off.
         let deniedBundle = makeBundle(contacts: FakeContacts(authorization: .denied))
         await deniedBundle.vm.load()
         await deniedBundle.vm.setLearnFromContacts(true)
-        try Self.render(DictionaryContactsRow(viewModel: deniedBundle.vm).frame(width: 860).padding(20).background(Color(nsColor: .windowBackgroundColor)),
+        try await Self.render(DictionaryContactsRow(viewModel: deniedBundle.vm).frame(width: 860).padding(20).background(Color(nsColor: .windowBackgroundColor)),
                         name: "7-contacts-denied", directory: directory)
 
         withExtendedLifetime([listBundle.dir, emptyBundle.dir, addBundle.dir, validationBundle.dir, importingBundle.dir, doneBundle.dir, deniedBundle.dir]) {}
     }
 
     @MainActor
-    private static func render(_ view: some View, name: String, directory: URL) throws {
-        let renderer = ImageRenderer(content: view.frame(width: 900, height: 640))
-        renderer.scale = 2
-        guard let image = renderer.nsImage else {
-            Issue.record("Failed to render \(name)")
-            return
-        }
-        try writePNG(image, to: directory.appendingPathComponent("Dictionary-\(name).png"))
+    private static func render(_ view: some View, name: String, directory: URL) async throws {
+        let host = NativeRenderHost(view, size: NSSize(width: 900, height: 640))
+        try await host.captureSettled(to: directory.appendingPathComponent("Dictionary-\(name).png"))
     }
 
     private static func rendersDirectory() -> URL {
@@ -147,15 +137,6 @@ struct DictionaryRenderTests {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .appendingPathComponent(".superpowers/design/renders")
-    }
-
-    private static func writePNG(_ image: NSImage, to url: URL) throws {
-        guard let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
-              let png = rep.representation(using: .png, properties: [:]) else {
-            Issue.record("Failed to encode PNG for \(url.lastPathComponent)")
-            return
-        }
-        try png.write(to: url)
     }
 }
 

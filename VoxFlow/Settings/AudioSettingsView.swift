@@ -39,7 +39,12 @@ struct AudioSettingsBody: View {
             .background(.background.secondary, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
             VStack(spacing: 0) {
-                Toggle("Noise suppression", isOn: $audio.noiseSuppression)
+                HStack {
+                    Text("Noise suppression")
+                    Spacer()
+                    Toggle("Noise suppression", isOn: $audio.noiseSuppression)
+                        .labelsHidden().toggleStyle(.switch)
+                }
                     .padding(.horizontal, 16).padding(.vertical, 10)
                 Divider().padding(.leading, 16)
                 HStack {
@@ -50,7 +55,8 @@ struct AudioSettingsBody: View {
                             Text(level.title).tag(level)
                         }
                     }
-                    .labelsHidden().frame(maxWidth: 160)
+                    .pickerStyle(.menu)
+                    .labelsHidden().frame(maxWidth: 160, alignment: .trailing)
                     .disabled(!audio.noiseSuppression)
                 }
                 .padding(.horizontal, 16).padding(.vertical, 10)
@@ -120,7 +126,7 @@ struct AudioSettingsBody: View {
                 }
                 .pickerStyle(.menu)
                 .labelsHidden()
-                .frame(maxWidth: 320)
+                .frame(maxWidth: 320, alignment: .trailing)
                 .disabled(!audio.canChangeInput)
             }
             Text(audio.canChangeInput ? "Used for dictation and microphone tests. Changes apply to the next recording."
@@ -134,9 +140,9 @@ struct AudioSettingsBody: View {
     private var levelRow: some View {
         HStack(spacing: 24) {
             Text("Input level").foregroundStyle(audio.hasDevice ? .primary : .secondary)
-            WaveformView(levels: audio.levels)
-                .colorMultiply(.primary)
-                .frame(maxWidth: 320, alignment: .leading)
+            Spacer(minLength: 0)
+            WaveformView(levels: audio.levels, color: .primary)
+                .frame(maxWidth: 320, alignment: .trailing)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
@@ -154,8 +160,9 @@ struct AudioSettingsBody: View {
                     Text("\(Int(seconds)) second\(Int(seconds) == 1 ? "" : "s")").tag(seconds)
                 }
             }
+            .pickerStyle(.menu)
             .labelsHidden()
-            .frame(maxWidth: 160)
+            .frame(maxWidth: 160, alignment: .trailing)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)

@@ -95,8 +95,9 @@ struct GeneralSettingsBody: View {
                     Text(choice.displayName).tag(choice)
                 }
             }
+            .pickerStyle(.menu)
             .labelsHidden()
-            .frame(maxWidth: 140)
+            .frame(maxWidth: 140, alignment: .trailing)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -111,8 +112,9 @@ struct GeneralSettingsBody: View {
                     Text(choice.displayName).tag(choice)
                 }
             }
+            .pickerStyle(.menu)
             .labelsHidden()
-            .frame(maxWidth: 160)
+            .frame(maxWidth: 160, alignment: .trailing)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -127,8 +129,9 @@ struct GeneralSettingsBody: View {
                     Text(choice.label).tag(choice.code)
                 }
             }
+            .pickerStyle(.menu)
             .labelsHidden()
-            .frame(maxWidth: 160)
+            .frame(maxWidth: 160, alignment: .trailing)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)

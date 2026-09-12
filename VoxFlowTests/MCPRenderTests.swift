@@ -16,9 +16,7 @@ import VoxFlowTestSupport
 /// this is now the one file that owns MCP design-fidelity, since `MCPSettingsBody` needs a real
 /// `MCPServerControlling`/`MCPClientStoreProviding` pair to render post-Task-4's state at all.
 ///
-/// Same `ImageRenderer` limitation `SettingsRenderTests` documents: `Toggle` rasterizes as a plain
-/// yellow "unavailable cursor" glyph instead of its real appearance — everything else (labels,
-/// buttons, the connected-clients rows) is representative.
+/// Native hosting captures actual controls while preserving the original fixture viewports.
 @Suite(.enabled(if: ProcessInfo.processInfo.environment["VOXFLOW_RENDER"] != nil))
 @MainActor
 struct MCPRenderTests {
@@ -42,7 +40,7 @@ struct MCPRenderTests {
                               approvalObserver: FakeApprovalObserver(), now: { now })
         await vm.setEnabled(true)
         await vm.refreshClients()
-        try Self.render(MCPSettingsBody(mcp: vm), name: "settings", to: directory)
+        try await Self.render(MCPSettingsBody(mcp: vm), name: "settings", size: NSSize(width: 423.5, height: 602), to: directory)
 
         // ST-06a (canvas page 5): exact canvas example — "Cursor", pid 4812, transcribe_file + dictate.
         let approvalContent = MCPApprovalContentView(
@@ -51,23 +49,18 @@ struct MCPRenderTests {
             processLine: MCPApprovalCopy.processLine(name: "Cursor", pid: 4812, path: "/Applications/Cursor.app/Contents/MacOS/Cursor"),
             buttons: MCPApprovalButtons.offered(canPersist: true),
             onDecision: { _ in })
-        try Self.render(approvalContent.frame(width: 340), name: "approval", to: directory)
+        try await Self.render(approvalContent.frame(width: 340), name: "approval", size: NSSize(width: 340, height: 301), to: directory)
 
         // ST-06r (canvas page 6, moved here from `SettingsRenderTests` — Task 3): `.alert()` itself
         // is a native window `ImageRenderer` can't capture, so this reproduces the card layout the
         // MW-06c/SYS-DISK alerts use on canvas page 5 (icon, centered title, centered message,
         // stacked full-width buttons) with the ruling-4-extended copy.
-        try Self.render(MCPRegenerateAlertPreview(), name: "regenerate", to: directory)
+        try await Self.render(MCPRegenerateAlertPreview(), name: "regenerate", size: NSSize(width: 400, height: 374), to: directory)
     }
 
-    private static func render(_ view: some View, name: String, to directory: URL) throws {
-        let renderer = ImageRenderer(content: view.background(Color(nsColor: .windowBackgroundColor)))
-        renderer.scale = 2
-        guard let image = renderer.nsImage else {
-            Issue.record("Failed to render \(name)")
-            return
-        }
-        try writePNG(image, to: directory.appendingPathComponent("MCP-\(name).png"))
+    private static func render(_ view: some View, name: String, size: NSSize, to directory: URL) async throws {
+        let host = NativeRenderHost(view, size: size)
+        try await host.captureSettled(to: directory.appendingPathComponent("MCP-\(name).png"))
     }
 
     private static func rendersDirectory() -> URL {
@@ -75,15 +68,6 @@ struct MCPRenderTests {
             .deletingLastPathComponent()   // VoxFlowTests/
             .deletingLastPathComponent()   // repo root
             .appendingPathComponent(".superpowers/design/renders")
-    }
-
-    private static func writePNG(_ image: NSImage, to url: URL) throws {
-        guard let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
-              let png = rep.representation(using: .png, properties: [:]) else {
-            Issue.record("Failed to encode PNG for \(url.lastPathComponent)")
-            return
-        }
-        try png.write(to: url)
     }
 }
 

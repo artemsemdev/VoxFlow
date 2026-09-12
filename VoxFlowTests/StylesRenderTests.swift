@@ -97,6 +97,11 @@ struct StylesRenderTests {
         let host = NativeRenderHost(view, size: NSSize(width: 900, height: 900))
         defer { host.close() }
         try host.capture(to: directory.appendingPathComponent("Styles-\(name).png"))
+        for dark in [false, true] {
+            let narrow = NativeRenderHost(view, size: NSSize(width: 640, height: 900), dark: dark)
+            defer { narrow.close() }
+            try narrow.capture(to: directory.appendingPathComponent("Layout-Styles-\(name)-640-\(dark).png"))
+        }
     }
 
     private static func rendersDirectory() -> URL {
