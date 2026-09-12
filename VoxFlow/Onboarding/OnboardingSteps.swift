@@ -238,6 +238,7 @@ struct TryItStepView: View {
     /// scratchpad is never first responder just by appearing, and the dictated text has nowhere to
     /// land (B-3).
     @FocusState private var scratchpadFocused: Bool
+    @State private var focusRequestID: UUID?
 
     var body: some View {
         VStack(spacing: 16) {
@@ -275,15 +276,25 @@ struct TryItStepView: View {
         }
         .onAppear {
             viewModel.beginTryIt()
-            // The AX insertion types into the frontmost app's focused element — re-assert both that
-            // this window is key/front *and* that the scratchpad holds first responder, since a prior
-            // step (System Settings, granting a permission) may have stolen focus (B-3).
-            NSApp.windows.first { $0.identifier?.rawValue == OnboardingWindowID.onboarding }?.makeKeyAndOrderFront(nil)
-            // N-5: `activate(ignoringOtherApps:)` is deprecated since macOS 14 — `makeKeyAndOrderFront`
-            // above already covers the ordering intent; `activate()` covers bringing the app forward.
-            NSApp.activate()
-            scratchpadFocused = true
+            let requestID = UUID()
+            focusRequestID = requestID
+            // Window activation opens an AppKit transaction. Run it after SwiftUI's appearance
+            // commit, and only for the owning scene (previews/offscreen renders have no such window).
+            RunLoop.main.perform(inModes: [.default]) {
+                // This callback runs exclusively on the main run loop, hence on MainActor's thread.
+                MainActor.assumeIsolated {
+                    guard focusRequestID == requestID,
+                          let window = NSApp.windows.first(where: { $0.identifier?.rawValue == OnboardingWindowID.onboarding }) else { return }
+                    focusRequestID = nil
+                    window.makeKeyAndOrderFront(nil)
+                    NSApp.activate()
+                    scratchpadFocused = true
+                }
+            }
         }
-        .onDisappear { viewModel.endTryIt() }
+        .onDisappear {
+            focusRequestID = nil
+            viewModel.endTryIt()
+        }
     }
 }
