@@ -5,6 +5,7 @@ import VoxFlowCore
 public struct AudioChunker: Sendable, Equatable {
     public let chunkSamples: Int
     private var pending: [Float] = []
+    var pendingSampleCount: Int { pending.count }
 
     public init(chunkSamples: Int) { self.chunkSamples = max(1, chunkSamples) }
     public init(seconds: Double) { self.init(chunkSamples: Int(seconds * AudioSamples.sampleRate)) }

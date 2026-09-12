@@ -31,6 +31,14 @@ public struct WindowPlanner: Sendable, Equatable {
         return nil
     }
 
+    /// Ends the pre-switch window and advances its absolute timeline without adding fake samples.
+    public mutating func interrupt(by gap: TimeInterval) -> Window? {
+        guard gap > 0 else { return nil }
+        let interrupted = buffer.isEmpty ? nil : cut()
+        consumed += gap
+        return interrupted
+    }
+
     public mutating func flush() -> Window? {
         // A short remainder is left buffered rather than dropped, so a later append can top it
         // up past `minFlush` (e.g. two separate flush() calls straddling a pause in the feed).

@@ -80,12 +80,9 @@ public final class DictionaryStore: Sendable {
         try queue.write { try $0.execute(sql: "DELETE FROM dictionary WHERE source = ?", arguments: [source]) }
     }
 
-    /// I3: bumps `uses` by exactly one for every dictionary entry (single word *or* multi-word
-    /// phrase, e.g. a Contacts import's `"Priya Raghunathan"`) whose folded word/phrase appears at
-    /// a word boundary anywhere in `text`'s folded form — no entry is bumped more than once per
-    /// call, no matter how many times its word/phrase occurs in `text`. Replaces the old
-    /// single-whole-token `incrementUses(words:)`, which could never match a multi-word entry: a
-    /// two-token folded value has no single token it could ever equal.
+    /// Bumps `uses` once per matching entry and call. Matching is folded, accepts flexible
+    /// whitespace inside phrases, and uses explicit token boundaries so entries ending or starting
+    /// with symbols (such as `C++` and `.NET`) work without matching inside longer tokens.
     public func incrementUses(inText text: String) throws {
         let folded = text.foldedForMatching
         guard !folded.isEmpty else { return }
@@ -101,22 +98,29 @@ public final class DictionaryStore: Sendable {
         }
     }
 
-    /// Whether `needle` (already folded) occurs in `haystack` (already folded) at word boundaries —
-    /// `\b` on both ends means a multi-word `needle` like `"priya raghunathan"` matches only the
-    /// exact phrase, and a single-word `needle` like `"kubernetes"` does not match inside
-    /// `"kubernetesish"`.
+    /// Whether `needle` (already folded) occurs in `haystack` (already folded) outside a larger
+    /// Unicode letter/mark/number/underscore token.
     private static func containsWholeMatch(of needle: String, in haystack: String) -> Bool {
-        guard let regex = try? NSRegularExpression(pattern: "\\b\(NSRegularExpression.escapedPattern(for: needle))\\b") else {
+        let parts = needle.split(whereSeparator: \.isWhitespace)
+        guard !parts.isEmpty else { return false }
+        let phrase = parts.map { NSRegularExpression.escapedPattern(for: String($0)) }.joined(separator: "\\s+")
+        let tokenCharacters = "\\p{L}\\p{M}\\p{N}_"
+        let pattern = "(?<![\(tokenCharacters)])\(phrase)(?![\(tokenCharacters)])"
+        guard let regex = try? NSRegularExpression(pattern: pattern) else {
             return false
         }
         let range = NSRange(haystack.startIndex..., in: haystack)
         return regex.firstMatch(in: haystack, options: [], range: range) != nil
     }
 
-    /// The most-used words first, ties broken alphabetically, capped at `limit`.
+    /// The most-used words first; usage ties prefer user entries, then sort alphabetically.
     public func vocabulary(limit: Int) throws -> [String] {
         try queue.read { db in
-            try String.fetchAll(db, sql: "SELECT word FROM dictionary ORDER BY uses DESC, word_folded ASC LIMIT ?", arguments: [limit])
+            try String.fetchAll(
+                db,
+                sql: "SELECT word FROM dictionary ORDER BY uses DESC, CASE WHEN source = 'user' THEN 0 ELSE 1 END, word_folded ASC LIMIT ?",
+                arguments: [limit]
+            )
         }
     }
 

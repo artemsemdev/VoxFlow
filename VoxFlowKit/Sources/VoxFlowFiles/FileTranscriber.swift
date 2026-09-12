@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import VoxFlowCore
 
 /// Decode → (auto language) → transcribe → `TranscriptDocument`. One file per call.
@@ -21,33 +22,33 @@ public struct FileTranscriber: FileTranscribing {
     }
 
     public func transcribe(_ url: URL, options: TranscriptionOptions,
-                           progress: @Sendable @escaping (Double) -> Void) async throws -> TranscriptDocument {
+                           update: @Sendable @escaping (FileTranscriptionUpdate) -> Void) async throws -> TranscriptDocument {
         try Task.checkCancellation()
         let started = now()
-        let audio: AudioSamples
-        do {
-            audio = try decoder.decode(url)
-        } catch let error as AudioDecodingError {
-            switch error {
-            case .unsupportedType(let ext): throw FileTranscriptionError.unsupportedType(ext)
-            case .fileNotFound(let missing): throw FileTranscriptionError.decodeFailed("file not found: \(missing.lastPathComponent)")
-            case .decodeFailed(let reason): throw FileTranscriptionError.decodeFailed(reason)
-            }
-        }
-        progress(Self.decodeShare)
-
+        let preparing = Mutex(true)
+        defer { preparing.withLock { $0 = false } }
         var options = options
         do {
+            let source = try decoder.open(url) { fraction in
+                if preparing.withLock({ $0 }) { update(.progress(Self.decodeShare * min(max(fraction, 0), 1))) }
+            }
+            let estimatedCount = source.estimatedSampleCount
+            var audio = DecodedWindowBuffer(source: source)
+            try audio.fill(upTo: options.language == nil ? Int(30 * AudioSamples.sampleRate) : Self.windowSamples + Self.minimumTailSamples)
+            preparing.withLock { $0 = false }
+            update(.progress(Self.decodeShare))
+            var lastProgress = Self.decodeShare
             if options.language == nil {
-                let detectionAudio = AudioSamples(Array(audio.samples.prefix(Int(30 * AudioSamples.sampleRate))))
+                let detectionAudio = AudioSamples(audio.samples)
                 options.language = try await engine.detectLanguage(in: detectionAudio).code
             }
             var segments: [TranscriptSegment] = []
             var offset = 0
             repeat {
                 try Task.checkCancellation()
-                let count = Self.windowEnd(in: audio.samples, from: offset) - offset
-                let window = AudioSamples(Array(audio.samples[offset..<(offset + count)]))
+                try audio.fill(upTo: Self.windowSamples + Self.minimumTailSamples)
+                let count = Self.windowEnd(in: audio.samples, from: 0)
+                let window = AudioSamples(Array(audio.samples.prefix(count)))
                 for try await event in engine.transcribe(window, options: options) {
                     switch event {
                     case .segment(let segment):
@@ -55,18 +56,28 @@ public struct FileTranscriber: FileTranscribing {
                         segments.append(TranscriptSegment(start: segment.start + start, end: segment.end + start,
                                                           text: segment.text, confidence: segment.confidence)!)
                     case .progress(let value):
-                        let fraction = (Double(offset) + min(max(value, 0), 1) * Double(count)) / Double(max(audio.samples.count, 1))
-                        progress(Self.decodeShare + (1 - Self.decodeShare) * fraction)
+                        let fraction = (Double(offset) + min(max(value, 0), 1) * Double(count)) / Double(max(estimatedCount, 1))
+                        // Metadata can under/overestimate decoded length. Never regress, or report
+                        // completion until the real reader EOF and the last inference have finished.
+                        lastProgress = max(lastProgress, min(Double(1).nextDown, Self.decodeShare + (1 - Self.decodeShare) * fraction))
+                        update(.progress(lastProgress))
                     }
                 }
                 offset += count
-            } while offset < audio.samples.count
+                audio.consume(count)
+            } while !audio.reachedEnd || !audio.samples.isEmpty
             try Task.checkCancellation()
-            progress(1)
+            update(.progress(1))
             let finished = now()
             return TranscriptDocument(sourceURL: url, transcript: Transcript(segments: segments, language: options.language),
-                                      modelID: modelID, audioDuration: audio.duration,
+                                      modelID: modelID, audioDuration: Double(audio.decodedCount) / AudioSamples.sampleRate,
                                       processingTime: finished.timeIntervalSince(started), createdAt: finished)
+        } catch let error as AudioDecodingError {
+            switch error {
+            case .unsupportedType(let ext): throw FileTranscriptionError.unsupportedType(ext)
+            case .fileNotFound(let missing): throw FileTranscriptionError.decodeFailed("file not found: \(missing.lastPathComponent)")
+            case .decodeFailed(let reason): throw FileTranscriptionError.decodeFailed(reason)
+            }
         } catch SpeechEngineError.modelNotLoaded {
             throw FileTranscriptionError.noModelInstalled
         } catch SpeechEngineError.cancelled {

@@ -94,7 +94,9 @@ final class FilesViewModel {
         // drop shouldn't claim "0 min of audio" in the header.
         if Int((total / 60).rounded()) > 0 { parts.append("\(Self.hoursMinutes(total)) of audio") }
         let done = items.filter { if case .done = $0.status { true } else { false } }.count
-        let running = items.filter { if case .running = $0.status { true } else { false } }.count
+        let running = items.filter {
+            switch $0.status { case .running, .loadingModel: true; default: false }
+        }.count
         let failed = items.filter { if case .failed = $0.status { true } else { false } }.count
         if done > 0 { parts.append("\(done) done") }
         if running > 0 { parts.append("\(running) running") }
@@ -274,6 +276,10 @@ final class FilesViewModel {
                 guard timestamp.timeIntervalSince(last) >= Self.uiRefreshInterval || progress >= 1 else { return }
                 lastRender[item.id] = timestamp
                 etaSeconds[item.id] = estimator.secondsRemaining
+            } else if case .loadingModel = item.status {
+                estimators[item.id] = nil
+                etaSeconds[item.id] = nil
+                lastRender[item.id] = nil
             } else {
                 estimators[item.id] = nil
                 etaSeconds[item.id] = nil

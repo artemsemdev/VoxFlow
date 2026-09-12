@@ -30,6 +30,14 @@ model memory. Neither is needed to give interactive work a turn.
   repeated native fixture, and quiet boundaries removed that regression.
 - File progress covers the original sample count, and every sample, including a short tail,
   remains in the transcription input. Cancellation is checked between windows.
+- #129 extends this windowing to decoding: a pull-based AVAudioConverter cursor supplies only the
+  requested samples. FileTranscriber retains up to 30 seconds for detection and replay, then fills
+  a rolling 10.2-second lookahead. The explicit whole-buffer decode API remains for other callers;
+  Files uses the bounded native reader. No PCM spool is written to disk.
+- Decoder cancellation is checked around every native read/conversion. Preparation progress covers
+  the initial prefix; after inference begins, later lazy reads cannot regress it. Metadata length
+  is only a progress estimate: actual emitted samples determine timestamps and duration, and only
+  reader EOF plus completed inference can report 100%.
 
 ## Consequences and validation
 
@@ -47,3 +55,6 @@ model memory. Neither is needed to give interactive work a turn.
   absolute timing, progress and a ten-minute fake job whose dictation completes within the
   processing budget while the file remains running, with explicit and automatic language selection.
   A separately gated native test compares repeated-fixture word coverage against batch inference.
+- Decoder tests compare small reads across WAV, AAC and MP3, including converter tails and downmix.
+  Five-minute fake streams prove bounded read-ahead; inaccurate estimates and late read failures
+  preserve progress and completion semantics. Queue Stop is tested during a synchronous decode chunk.

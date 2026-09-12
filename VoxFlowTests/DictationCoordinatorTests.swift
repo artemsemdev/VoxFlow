@@ -41,6 +41,20 @@ struct DictationCoordinatorTests {
         if let mode { c.shortcutDown(mode) } else { c.fn(.down) }
     }
 
+    @Test("clipboard Accessibility denial routes Open Settings to Accessibility only",
+          arguments: [CopyReason.noTextField, .accessibilityDenied, .insertionFailed])
+    func clipboardSettings(reason: CopyReason) async {
+        let (coordinator, microphone, _, permissions, navigation) = make(
+            inserter: FakeTextInserter(result: .copiedToClipboard(reason: reason)))
+        coordinator.shortcutDown(.pushToTalk)
+        await microphone.waitUntilCapturing()
+        coordinator.pushToTalkReleased()
+        await wait(coordinator) { if case .copied = $0 { true } else { false } }
+        coordinator.openSettingsForCurrentError()
+        #expect(permissions.openedAccessibilitySettings == (reason == .accessibilityDenied ? 1 : 0))
+        #expect(permissions.openedMicrophoneSettings == 0 && !navigation.requestMainWindow)
+    }
+
     @Test("Escape cancels suspended preparation before any capture starts", arguments: [nil, .pushToTalk, .handsFree] as [HotkeyMode?])
     func cancelPreparation(mode: HotkeyMode?) async {
         let entered = Gate(), release = Gate(), cancellations = Mutex<[Bool]>([])

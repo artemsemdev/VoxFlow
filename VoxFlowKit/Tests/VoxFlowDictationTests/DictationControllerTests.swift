@@ -108,6 +108,37 @@ struct DictationControllerTests {
         #expect(await h.next() == .idle)
     }
 
+    @Test("device changes are forwarded while captured audio remains continuous")
+    func deviceChanged() async {
+        let h = await Harness()
+        var deviceChanges = await h.controller.deviceChanges().makeAsyncIterator()
+        await h.controller.shortcutDown(.pushToTalk)
+        #expect(await h.next() == .listening(Listening(mode: .pushToTalk, startedAt: 0, language: nil)))
+        await h.mic.waitUntilCapturing()
+
+        h.mic.emit(rms: 0.3, seconds: 1)
+        await h.transcriber.waitUntilReceived(1)
+        h.mic.changeDevice(to: "External Microphone")
+        #expect(await deviceChanges.next() == "External Microphone")
+        h.mic.emit(rms: 0.3, seconds: 2)
+        await h.transcriber.waitUntilReceived(2)
+        #expect(await h.controller.state == .listening(Listening(mode: .pushToTalk, startedAt: 0, language: nil)))
+        #expect(h.transcriber.receivedSeconds == 3)
+
+        h.mic.changeDevice(to: nil)
+        let missing = await deviceChanges.next()
+        #expect(missing != nil && missing! == nil)
+        // Terminates the fake stream so the old implementation also produces a state instead of
+        // leaving this assertion suspended: it reports `.inUse`, while forwarding nil reports
+        // `.noDevice` first and invalidates this later failure with the capture generation.
+        h.mic.fail(.engineFailed("after device change"))
+        #expect(await h.next() == .micUnavailable(.noDevice))
+        await h.mic.waitUntilStopped()
+        await h.transcriber.waitUntilCancelled()
+        #expect(h.inserter.insertedTexts.isEmpty)
+        #expect(h.saved.items.isEmpty)
+    }
+
     @Test("the snippet caret request reaches the inserter with its matching final text", arguments: [nil, 6] as [Int?])
     func snippetCaret(offset: Int?) async {
         let text = "Best,\n\nArtem"
@@ -180,7 +211,7 @@ struct DictationControllerTests {
     @Test("hands-free: double tap, silence stops, clipboard fallback → copied")
     func handsFreeClipboard() async throws {
         let h = await Harness()
-        h.inserter.setResult(.copiedToClipboard)
+        h.inserter.setResult(.copiedToClipboard(reason: .noTextField))
         await h.controller.fnDown(); _ = await h.next()
         await h.controller.fnUp(); _ = await h.next()
         await h.controller.fnDown()
@@ -188,7 +219,7 @@ struct DictationControllerTests {
         await h.clock.waitForSleepers(2)                 // cap + silence
         await h.clock.advance(by: 3)
         guard case .processing = await h.next() else { Issue.record("expected processing"); return }
-        #expect(await h.next() == .copied)
+        #expect(await h.next() == .copied(.noTextField))
         await h.saved.waitUntilCount(1)                    // saveHistory runs on its own task
         #expect(h.saved.items.count == 1)
     }

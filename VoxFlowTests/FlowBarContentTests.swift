@@ -5,6 +5,15 @@ import VoxFlowDictation
 
 @Suite("FlowBarContent")
 struct FlowBarContentTests {
+    @Test("clipboard fallback distinguishes denied Accessibility from a failed write")
+    func clipboardReasons() {
+        let denied = FlowBarContent.make(state: .copied(.accessibilityDenied), elapsed: 0, mode: .pushToTalk)
+        #expect(denied.title == "Can't type here")
+        #expect(denied.leading == .dot(.error) && denied.trailing == .button(.openSettings))
+        let failed = FlowBarContent.make(state: .copied(.insertionFailed), elapsed: 0, mode: .pushToTalk)
+        #expect(failed.title == "Copied — couldn't type here" && failed.trailing == .keycap("⌘V"))
+    }
+
     @Test("idle, stop and retry hints follow each configured action")
     func configuredShortcuts() {
         var shortcuts = DictationShortcuts()
@@ -44,7 +53,7 @@ struct FlowBarContentTests {
                                   timer: nil, timerIsAmber: false, trailing: nil))
         #expect(FlowBarContent.make(state: .inserted(appName: nil, words: 3, limitReached: true), elapsed: 0, mode: .pushToTalk).subtitle == "15:00 · limit reached")
         #expect(FlowBarContent.make(state: .inserted(appName: nil, words: 1, limitReached: false), elapsed: 0, mode: .pushToTalk).title == "Inserted")
-        let copied = FlowBarContent.make(state: .copied, elapsed: 0, mode: .pushToTalk)
+        let copied = FlowBarContent.make(state: .copied(.noTextField), elapsed: 0, mode: .pushToTalk)
         #expect(copied.leading == .check && copied.title == "Copied — no text field here" && copied.trailing == .keycap("⌘V"))
         let didnt = FlowBarContent.make(state: .didntCatch(rawAvailable: false), elapsed: 0, mode: .pushToTalk)
         #expect(didnt.leading == .dot(.warning) && didnt.title == "Didn't catch that" && didnt.trailing == .button(.tryAgain))

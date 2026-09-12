@@ -9,6 +9,57 @@ import VoxFlowTestSupport
 
 @Suite("WindowedTranscriber", .timeLimit(.minutes(1)))
 struct WindowedTranscriberTests {
+    @Test("join remaps complete segment-local confidence spans through trim and inserted spaces")
+    func joinsWordConfidenceSpans() throws {
+        let first = TranscriptSegment(start: 0, end: 1, text: "  café ", wordConfidences: [
+            WordConfidence(span: RawTextSpan(location: 2, length: 4)!, confidence: 0.78)!,
+        ])!
+        let second = TranscriptSegment(start: 1, end: 2, text: " next ", wordConfidences: [
+            WordConfidence(span: RawTextSpan(location: 1, length: 4)!, confidence: 0.95)!,
+        ])!
+
+        let joined = WindowedTranscriber.joinWithWordConfidences([first, second])
+        #expect(joined.text == "café next")
+        #expect(joined.wordConfidences?.map(\.span) == [RawTextSpan(location: 0, length: 4)!, RawTextSpan(location: 5, length: 4)!])
+        #expect(joined.wordConfidences?.map(\.confidence) == [0.78, 0.95])
+    }
+
+    @Test("join leaves confidence unavailable when any nonempty segment lacks word observations")
+    func incompleteWordConfidenceSpansStayUnavailable() throws {
+        let known = TranscriptSegment(start: 0, end: 1, text: "one", wordConfidences: [
+            WordConfidence(span: RawTextSpan(location: 0, length: 3)!, confidence: 0.9)!,
+        ])!
+        let unknown = TranscriptSegment(start: 1, end: 2, text: "two")!
+        #expect(WindowedTranscriber.joinWithWordConfidences([known, unknown]).wordConfidences == nil)
+    }
+
+    @Test("join safely rejects confidence spans mutated after segment construction")
+    func malformedWordConfidenceSpansStayUnavailable() throws {
+        var segment = TranscriptSegment(start: 0, end: 1, text: "word", wordConfidences: [
+            WordConfidence(span: RawTextSpan(location: 0, length: 4)!, confidence: 0.9)!,
+        ])!
+        segment.wordConfidences![0].span.location = Int.max
+
+        let joined = WindowedTranscriber.joinWithWordConfidences([segment])
+        #expect(joined.text == "word")
+        #expect(joined.wordConfidences == nil)
+    }
+
+    @Test("transcription strips mutated invalid confidence metadata without dropping the transcript")
+    func malformedEngineMetadata() async throws {
+        var segment = TranscriptSegment(start: 0, end: 1, text: "word", confidence: 0.9, wordConfidences: [
+            WordConfidence(span: RawTextSpan(location: 0, length: 4)!, confidence: 0.9)!,
+        ])!
+        segment.wordConfidences![0].span.location = Int.max
+        let engine = FakeSpeechEngine(script: [.segment(segment)])
+        try await engine.load(modelAt: URL(fileURLWithPath: "/dev/null"))
+
+        let result = try await WindowedTranscriber(engine: engine).transcribe(
+            feed([voiced(1)]), options: TranscriptionOptions(language: "en")) { _ in }
+        #expect(result.text == "word")
+        #expect(result.annotations?.wordConfidences == nil)
+    }
+
     func feed(_ chunks: [AudioChunk]) -> AsyncStream<AudioChunk> {
         AsyncStream { c in chunks.forEach { c.yield($0) }; c.finish() }
     }
@@ -17,7 +68,12 @@ struct WindowedTranscriberTests {
 
     @Test("two windows: segments are offset, the second window gets the first text as prompt context, language detected once")
     func twoWindows() async throws {
-        let engine = FakeSpeechEngine(script: [.segment(TranscriptSegment(start: 0, end: 1, text: "hello world", confidence: 0.9)!)],
+        let wordSpans = [
+            WordConfidence(span: RawTextSpan(location: 0, length: 5)!, confidence: 0.9)!,
+            WordConfidence(span: RawTextSpan(location: 6, length: 5)!, confidence: 0.78)!,
+        ]
+        let engine = FakeSpeechEngine(script: [.segment(TranscriptSegment(start: 0, end: 1, text: "hello world", confidence: 0.9,
+                                                                          wordConfidences: wordSpans)!)],
                                       detection: LanguageDetection(code: "en", confidence: 0.95))
         try await engine.load(modelAt: URL(fileURLWithPath: "/dev/null"))
         let transcriber = WindowedTranscriber(engine: engine)
@@ -30,11 +86,27 @@ struct WindowedTranscriberTests {
         #expect(result.language == LanguageDetection(code: "en", confidence: 0.95))
         #expect(result.wordCount == 4)
         #expect(result.lowConfidence == false)
+        #expect(result.annotations?.wordConfidences?.map(\.span) == [
+            RawTextSpan(location: 0, length: 5)!, RawTextSpan(location: 6, length: 5)!,
+            RawTextSpan(location: 12, length: 5)!, RawTextSpan(location: 18, length: 5)!,
+        ])
         #expect(abs(result.duration - 7.0) < 0.001)
         #expect(await engine.transcribeCalls == 2)
         #expect(await engine.lastOptions == TranscriptionOptions(language: "en", vocabulary: ["VoxFlow"], promptContext: "hello world"))
         #expect(await events.entries == [.language(LanguageDetection(code: "en", confidence: 0.95)),
                                          .partialText("hello world"), .partialText("hello world hello world")])
+    }
+
+    @Test("a switch gap shifts later segments and duration without inserting samples")
+    func switchGap() async throws {
+        let engine = FakeSpeechEngine(script: [.segment(TranscriptSegment(start: 0, end: 0.25, text: "word", confidence: 0.9)!)])
+        try await engine.load(modelAt: URL(fileURLWithPath: "/dev/null"))
+        let chunks = [voiced(0.5), AudioChunk(samples: voiced(0.5).samples, precedingGap: 2)]
+        let result = try await WindowedTranscriber(engine: engine).transcribe(feed(chunks), options: TranscriptionOptions(language: "en")) { _ in }
+
+        #expect(result.segments.map(\.start) == [0, 2.5])
+        #expect(abs(result.duration - 3) < 0.001)
+        #expect(await engine.transcribeCalls == 2)
     }
 
     @Test("short feed below 0.3 s produces an empty result without calling the engine")

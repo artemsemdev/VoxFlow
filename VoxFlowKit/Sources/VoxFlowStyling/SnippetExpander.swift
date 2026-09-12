@@ -99,40 +99,57 @@ public struct SnippetExpander: Sendable {
 
     // MARK: - Body placeholders
 
-    /// M1: the offset used to be measured *before* the trailing `"  " -> " "` collapse ran, so a
-    /// double space anywhere earlier in the body (pre-existing, or left behind by removing the
-    /// `cursor` word itself) silently shifted the reported position by one per collapse. A sentinel
-    /// (`\u{FFFC}`, the Unicode "object replacement character" — never typed by a user) stands in
-    /// for the first `cursor` occurrence through the collapse, so the offset is read back from the
-    /// *final* string instead of a pre-collapse one.
+    /// Cursor markers are split out before expanding user-provided placeholder values. This keeps
+    /// attachment characters or the word "cursor" in clipboard/app text from becoming markers.
+    /// Only runs of spaces directly touching a removed marker are normalized; all other authored
+    /// and clipboard whitespace is preserved verbatim.
     private func expandBody(_ body: String) -> (text: String, cursorOffset: Int?) {
-        var result = replaceAllOccurrences(of: "date", with: formattedDate(), in: body)
-        result = replaceAllOccurrences(of: "clipboard", with: context.clipboard ?? "", in: result)
-        result = replaceAllOccurrences(of: "app", with: context.appName ?? "", in: result)
+        let cursorRanges = wordRanges(body, "cursor", includingBraces: true)
+        guard !cursorRanges.isEmpty else {
+            return (expandPlaceholders(in: body), nil)
+        }
 
-        let cursorRanges = wordRanges(result, "cursor", includingBraces: true)
-        guard let first = cursorRanges.first else {
-            return (collapseSpaces(result), nil)
+        var fragments: [String] = []
+        var start = body.startIndex
+        for range in cursorRanges {
+            fragments.append(String(body[start..<range.lowerBound]))
+            start = range.upperBound
         }
-        let sentinel = "\u{FFFC}"
-        for range in cursorRanges.reversed() {
-            result.replaceSubrange(range, with: range == first ? sentinel : "")
+        fragments.append(String(body[start...]))
+
+        for index in fragments.indices {
+            if index > 0 { fragments[index] = collapsingLeadingSpaces(in: fragments[index]) }
+            if index < cursorRanges.count { fragments[index] = collapsingTrailingSpaces(in: fragments[index]) }
         }
-        result = collapseSpaces(result)
-        guard let sentinelRange = result.range(of: sentinel) else {
-            return (result, nil)
+        // The first marker owns the reported caret gap. Each later marker is only removed, so when
+        // it has a space on both sides those sides become one space rather than adding another gap.
+        for index in fragments.indices.dropFirst(2) where fragments[index - 1].last == " " && fragments[index].first == " " {
+            fragments[index].removeFirst()
         }
-        let cursorOffset = result.distance(from: result.startIndex, to: sentinelRange.lowerBound)
-        result.removeSubrange(sentinelRange)
-        return (result, cursorOffset)
+        let expanded = fragments.map(expandPlaceholders)
+        return (expanded.joined(), expanded[0].count)
     }
 
-    private func collapseSpaces(_ text: String) -> String {
-        var result = text
-        while result.contains("  ") {
-            result = result.replacingOccurrences(of: "  ", with: " ")
+    private func expandPlaceholders(in body: String) -> String {
+        var result = replaceAllOccurrences(of: "date", with: formattedDate(), in: body)
+        result = replaceAllOccurrences(of: "clipboard", with: context.clipboard ?? "", in: result)
+        return replaceAllOccurrences(of: "app", with: context.appName ?? "", in: result)
+    }
+
+    private func collapsingLeadingSpaces(in text: String) -> String {
+        var start = text.startIndex
+        while start < text.endIndex, text[start] == " " { text.formIndex(after: &start) }
+        return start == text.startIndex ? text : " " + String(text[start...])
+    }
+
+    private func collapsingTrailingSpaces(in text: String) -> String {
+        var end = text.endIndex
+        while end > text.startIndex {
+            let previous = text.index(before: end)
+            guard text[previous] == " " else { break }
+            end = previous
         }
-        return result
+        return end == text.endIndex ? text : String(text[..<end]) + " "
     }
 
     private func formattedDate() -> String {

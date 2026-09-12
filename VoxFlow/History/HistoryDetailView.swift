@@ -1,7 +1,7 @@
 import SwiftUI
 import VoxFlowStorage
 
-/// Canvas 2e: equal transcript columns joined to the compact row. Annotations are tracked in #177.
+/// Canvas 2e: equal transcript columns joined to the compact row.
 struct HistoryDetailView: View {
     let record: DictationRecord
     @Bindable var model: HistoryViewModel
@@ -9,10 +9,13 @@ struct HistoryDetailView: View {
     @FocusState private var editorFocused: Bool
     @Environment(\.colorScheme) private var colorScheme
     private var colors: HistoryCardColors { HistoryCardColors(scheme: colorScheme) }
+    private var annotationPresentation: HistoryAnnotationPresentation {
+        HistoryAnnotationPresentation(record: record)
+    }
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
-            column(title: "WHAT YOU SAID", text: HistoryViewModel.displayRawText(for: record))
+            rawColumn
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Text(HistoryViewModel.detailHeader(for: record))
@@ -73,15 +76,29 @@ struct HistoryDetailView: View {
         .foregroundStyle(.tint)
     }
 
-    private func column(title: String, text: String) -> some View {
+    private var rawColumn: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(title)
+            Text("WHAT YOU SAID")
                 .font(.system(size: 11.5, weight: .semibold))
                 .tracking(0.46)
                 .foregroundStyle(colors.secondaryText)
-            Text(text)
+            Text(annotationPresentation.attributedRawText(
+                displayText: HistoryViewModel.displayRawText(for: record),
+                rawColor: colors.rawText,
+                accentColor: .accentColor))
                 .font(.system(size: 13)).lineSpacing(5.2)
-                .foregroundStyle(colors.rawText)
+            if !annotationPresentation.badges.isEmpty {
+                HStack(spacing: 6) {
+                    ForEach(annotationPresentation.badges, id: \.self) { badge in
+                        Text(badge)
+                            .font(.system(size: 11.5))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 2)
+                            .background(colors.neutralAction, in: RoundedRectangle(cornerRadius: 5))
+                    }
+                }
+                .padding(.top, 2)
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)

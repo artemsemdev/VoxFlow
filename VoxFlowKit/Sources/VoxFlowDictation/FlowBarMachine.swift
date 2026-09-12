@@ -28,7 +28,8 @@ public struct Preflight: Sendable, Equatable {
 public enum FlowBarTimer: Sendable, Hashable { case hold, doubleTap, silence, cap, takingLonger, processingTimeout, dismiss, modelLoad, pauseEnd }
 
 public enum FlowBarEvent: Sendable, Equatable {
-    case fnDown(Preflight), fnUp, escape, anyKey
+    /// A continuation/stop may omit preflight; starting capture always requires fresh checks.
+    case fnDown(Preflight?), fnUp, escape, anyKey
     /// A separately assigned shortcut has no ambiguous hold/double-tap gesture to resolve.
     /// Missing preflight permits stopping only; it can never start a capture.
     case shortcutDown(HotkeyMode, Preflight?), pushToTalkReleased
@@ -40,6 +41,8 @@ public enum FlowBarEvent: Sendable, Equatable {
     case transcriptReady(text: String, lowConfidence: Bool)
     case transcriptionFailed(String)
     case microphoneFailed(MicrophoneError)
+    /// A named replacement keeps the capture alive; nil means no input device remains.
+    case deviceChanged(name: String?)
     case insertionFinished(InsertionResult)
     case copyRawRequested
     case reinsertionFinished(text: String, result: InsertionResult), reinsertionBlocked(String)
@@ -105,7 +108,7 @@ public enum FlowBarState: Sendable, Equatable {
     case listening(Listening)
     case processing(Processing)
     case inserted(appName: String?, words: Int, limitReached: Bool)
-    case copied
+    case copied(CopyReason)
     case didntCatch(rawAvailable: Bool)
     case discarded
     case micUnavailable(MicrophoneAccess)
@@ -156,9 +159,9 @@ public struct FlowBarMachine: Sendable, Equatable {
             case .inserted(let app):
                 state = .inserted(appName: app, words: Self.wordCount(text), limitReached: false)
                 return [.cancelTimer(.dismiss), .startTimer(.dismiss, seconds: config.dismissInserted)]
-            case .copiedToClipboard:
-                state = .copied
-                return [.cancelTimer(.dismiss), .startTimer(.dismiss, seconds: config.dismissCopied)]
+            case .copiedToClipboard(let reason):
+                state = .copied(reason)
+                return [.cancelTimer(.dismiss), .startTimer(.dismiss, seconds: reason == .accessibilityDenied ? config.dismissError : config.dismissCopied)]
             }
         case (let s, .reinsertionBlocked(let app)) where s == .idle || s.isDismissable:
             state = .excluded(app: app)
@@ -181,9 +184,9 @@ public struct FlowBarMachine: Sendable, Equatable {
             return []
 
         // ── fn-down: from idle or any dismissable state ──
-        case (.idle, .fnDown(let p)):
+        case (.idle, .fnDown(let p?)):
             return begin(p, now: now, cancelDismiss: false)
-        case (let s, .fnDown(let p)) where s.isDismissable:
+        case (let s, .fnDown(let p?)) where s.isDismissable:
             return begin(p, now: now, cancelDismiss: true)
         case (let s, .anyKey) where s.isDismissable:
             state = .idle
@@ -297,6 +300,10 @@ public struct FlowBarMachine: Sendable, Equatable {
         case (.listening, .microphoneFailed(let e)), (.armed, .microphoneFailed(let e)), (.loadingModel, .microphoneFailed(let e)), (.tapped, .microphoneFailed(let e)):
             state = .micUnavailable(Self.access(for: e))
             return [.cancelTimer(.cap), .cancelTimer(.silence), .abortCapture, .startTimer(.dismiss, seconds: config.dismissError)]
+        case (.listening, .deviceChanged(name: nil)), (.armed, .deviceChanged(name: nil)),
+             (.loadingModel, .deviceChanged(name: nil)), (.tapped, .deviceChanged(name: nil)):
+            state = .micUnavailable(.noDevice)
+            return [.cancelTimer(.cap), .cancelTimer(.silence), .abortCapture, .startTimer(.dismiss, seconds: config.dismissError)]
 
         // ── partial text belongs to the current dictation from the moment capture starts ──
         case (.armed, .partialText(let t)), (.tapped, .partialText(let t)), (.loadingModel, .partialText(let t)), (.listening, .partialText(let t)):
@@ -330,9 +337,9 @@ public struct FlowBarMachine: Sendable, Equatable {
             case .inserted(let app):
                 state = .inserted(appName: app, words: Self.wordCount(lastTranscript), limitReached: p.limitReached)
                 return [.saveHistory, .startTimer(.dismiss, seconds: config.dismissInserted)]
-            case .copiedToClipboard:
-                state = .copied
-                return [.saveHistory, .startTimer(.dismiss, seconds: config.dismissCopied)]
+            case .copiedToClipboard(let reason):
+                state = .copied(reason)
+                return [.saveHistory, .startTimer(.dismiss, seconds: reason == .accessibilityDenied ? config.dismissError : config.dismissCopied)]
             }
         case (.processing, .transcriptionFailed):
             state = .error("Couldn't transcribe")
@@ -348,6 +355,27 @@ public struct FlowBarMachine: Sendable, Equatable {
         default:
             return []
         }
+    }
+
+    /// Fresh checks authorize capture; gesture delays retain only the time still remaining.
+    mutating func resumeMicrophone(_ checks: Preflight, activation: MicrophoneRetryIntent.Activation,
+                                  now: TimeInterval) -> [FlowBarEffect] {
+        guard state == .idle || state.isDismissable else { return [] }
+        var effects = begin(checks, now: now, cancelDismiss: state.isDismissable, mode: activation.mode)
+        switch state {
+        case .armed(var pending), .loadingModel(var pending):
+            let loading = if case .loadingModel = state { true } else { false }
+            pending.fnIsDown = activation.fnIsDown
+            state = loading ? .loadingModel(pending) : (pending.fnIsDown ? .armed(pending) : .tapped(pending))
+            effects.removeAll {
+                if case .startTimer(let timer, _) = $0 { return timer == .hold || timer == .doubleTap }
+                return false
+            }
+            if let delay = activation.holdDelay { effects.append(.startTimer(.hold, seconds: delay)) }
+            if let delay = activation.doubleTapDelay { effects.append(.startTimer(.doubleTap, seconds: delay)) }
+        default: break
+        }
+        return effects
     }
 
     private mutating func begin(_ p: Preflight, now: TimeInterval, cancelDismiss: Bool, mode: HotkeyMode? = nil) -> [FlowBarEffect] {
@@ -387,7 +415,8 @@ public struct FlowBarMachine: Sendable, Equatable {
         switch error {
         case .accessDenied: .denied
         case .noInputDevice: .noDevice
-        case .engineFailed: .inUse(by: nil)
+        case .inUse(let app): .inUse(by: app)
+        case .engineFailed: .granted
         }
     }
 }

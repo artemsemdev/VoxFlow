@@ -14,6 +14,7 @@ struct QueueRowView: View {
         Group {
             switch item.status {
             case .queued: queuedRow
+            case .loadingModel: loadingModelRow
             case .running(let progress): runningRow(progress)
             case .done: doneRow
             case .failed(let error): failedRow(error)
@@ -25,6 +26,25 @@ struct QueueRowView: View {
         .contentShape(Rectangle())
         .onTapGesture {
             if case .done = item.status { model.open(item) }
+        }
+    }
+
+    private var loadingModelRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                nameLine
+                Spacer()
+                Text("\(durationText) · first use")
+                    .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                Button("Stop") { Task { await model.requestStop(item) } }
+                    .buttonStyle(.bordered).controlSize(.small)
+            }
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text("Loading into memory…")
+            }
+            .font(.caption).foregroundStyle(.secondary)
+            .accessibilityElement(children: .combine)
         }
     }
 
@@ -44,13 +64,18 @@ struct QueueRowView: View {
     private var durationText: String { item.duration.map(TimeCode.short) ?? "--:--" }
 
     private var queuedRow: some View {
-        HStack {
-            nameLine
-            Spacer()
-            Text("\(durationText) · queued")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                nameLine
+                Spacer()
+                Text("\(durationText) · queued")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+            RoundedRectangle(cornerRadius: 3)
+                .fill(Color.secondary.opacity(0.1))
+                .frame(height: 5)
         }
     }
 
@@ -96,6 +121,9 @@ struct QueueRowView: View {
             if let error = model.exportError(for: item) {
                 Text(error).font(.caption).foregroundStyle(.orange)
             }
+            RoundedRectangle(cornerRadius: 3)
+                .fill(Color.green)
+                .frame(height: 5)
         }
     }
 

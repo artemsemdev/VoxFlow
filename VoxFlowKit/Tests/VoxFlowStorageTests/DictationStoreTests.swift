@@ -1,6 +1,7 @@
 import CryptoKit
 import Foundation
 import Testing
+import VoxFlowCore
 import VoxFlowTestSupport
 @testable import VoxFlowStorage
 
@@ -16,6 +17,48 @@ struct FakeKeyProvider: HistoryKeyProviding {
 
 @Suite("DictationStore")
 struct DictationStoreTests {
+    private func annotations(for raw: String) -> DictationAnnotations {
+        let fillerRange = (raw as NSString).range(of: "um")
+        let uncertainRange = (raw as NSString).range(of: "finance")
+        return DictationAnnotations(
+            removedFillerSpans: [RawTextSpan(location: fillerRange.location, length: fillerRange.length)!],
+            wordConfidences: [WordConfidence(
+                span: RawTextSpan(location: uncertainRange.location, length: uncertainRange.length)!, confidence: 0.78)!])
+    }
+
+    @Test("annotations round-trip with encrypted text and stay anchored to the raw transcript")
+    func annotationsRoundTrip() throws {
+        let raw = "um ask finance"
+        let expected = annotations(for: raw)
+        let store = try DictationStore(inMemoryWith: FakeKeyProvider())
+        _ = try store.insert(DictationDraft(text: "Ask finance.", rawText: raw, appName: "Mail", style: "formal",
+                                           language: "en", duration: 1, createdAt: Date(), annotations: expected))
+        #expect(try store.fetch(limit: 1).first?.annotations == expected)
+    }
+
+    @Test("manual edit clears cleanup provenance but preserves confidence anchored to unchanged raw text")
+    func editAnnotationPolicy() throws {
+        let raw = "um ask finance"
+        let store = try DictationStore(inMemoryWith: nil)
+        let inserted = try store.insert(DictationDraft(text: "Ask finance.", rawText: raw, appName: nil, style: nil,
+                                                       language: nil, duration: 1, createdAt: Date(), annotations: annotations(for: raw)))
+        let updated = try store.updateText(id: inserted.id, text: "Email finance.")
+        #expect(updated?.annotations?.removedFillerSpans == nil)
+        #expect(updated?.annotations?.wordConfidences == inserted.annotations?.wordConfidences)
+    }
+
+    @Test("restyle replaces cleanup provenance and preserves raw confidence")
+    func restyleAnnotationPolicy() throws {
+        let raw = "um ask finance"
+        let store = try DictationStore(inMemoryWith: nil)
+        let inserted = try store.insert(DictationDraft(text: "Ask finance.", rawText: raw, appName: nil, style: nil,
+                                                       language: nil, duration: 1, createdAt: Date(), annotations: annotations(for: raw)))
+        let newFillers: [RawTextSpan] = []
+        let updated = try store.updateStyled(id: inserted.id, text: raw, style: "verbatim", removedFillerSpans: newFillers)
+        #expect(updated?.annotations?.removedFillerSpans == newFillers)
+        #expect(updated?.annotations?.wordConfidences == inserted.annotations?.wordConfidences)
+    }
+
     private func fileStore(in directory: TemporaryDirectory, keyProvider: (any HistoryKeyProviding)?) throws -> DictationStore {
         try DictationStore(database: VoxFlowDatabase(url: directory.file("voxflow.sqlite"), retaining: { withExtendedLifetime(directory) {} }), keyProvider: keyProvider)
     }

@@ -20,7 +20,7 @@ struct GeneralSoundCoordinatorTests {
         h.coordinator.stateChanged(to: .inserted(appName: nil, words: 3, limitReached: false))
         h.coordinator.stateChanged(to: .idle)
         h.coordinator.stateChanged(to: .listening(Listening(mode: .pushToTalk, startedAt: 0, language: nil)))
-        h.coordinator.stateChanged(to: .copied)
+        h.coordinator.stateChanged(to: .copied(.noTextField))
         #expect(h.player.played == [.start, .end, .start, .end])
     }
 

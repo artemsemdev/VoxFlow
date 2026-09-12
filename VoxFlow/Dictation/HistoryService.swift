@@ -166,6 +166,26 @@ final class HistoryService {
         return updated
     }
 
+    func updateStyled(id: Int64, text: String, style: String,
+                      removedFillerSpans: [RawTextSpan]?) async -> DictationRecord? {
+        ensureOpened()
+        await openTask?.value
+        guard let store else { return nil }
+        let log = Self.log
+        let updated: DictationRecord? = await Task.detached(priority: .userInitiated) { () -> DictationRecord? in
+            do {
+                if let removedFillerSpans {
+                    return try store.updateStyled(id: id, text: text, style: style,
+                                                  removedFillerSpans: removedFillerSpans)
+                }
+                return try store.updateStyled(id: id, text: text, style: style)
+            }
+            catch { log.error("history updateStyled failed: \(String(describing: error))"); return nil }
+        }.value
+        if updated != nil { notifyChanged() }
+        return updated
+    }
+
     /// Inline correction: notify Home/menu-bar statistics only after a successful persisted edit.
     func updateText(id: Int64, text: String) async -> DictationRecord? {
         ensureOpened()
@@ -198,7 +218,8 @@ final class HistoryService {
         await openTask?.value
         guard let store else { return nil }
         let draft = DictationDraft(text: record.text, rawText: record.rawText, appName: record.appName, style: record.style,
-                                   language: record.language, duration: record.duration, createdAt: record.createdAt)
+                                   language: record.language, duration: record.duration, createdAt: record.createdAt,
+                                   annotations: record.annotations)
         let log = Self.log
         let inserted: DictationRecord? = await Task.detached(priority: .userInitiated) { () -> DictationRecord? in
             do { return try store.insert(draft) }

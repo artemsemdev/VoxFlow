@@ -6,8 +6,19 @@ versioning.
 ## Unreleased
 
 ### Added
+- Microphone changes reach dictation and Settings › Audio live. Missing input stops capture;
+  switching devices preserves pending audio and transcript timing across the restart gap.
+- Expanded History highlights the actual removed fillers and low-confidence raw words, with
+  persisted cleanup counts and token-derived confidence; older rows show only available metadata.
+- Name a reported exclusive microphone owner in the Flow Bar and automatically retry a still-active
+  dictation gesture when the device is released, with fresh privacy and target checks. Cancel,
+  push-to-talk release, and re-insertion stop the wait; another dictation shortcut supersedes it.
 - Right-click an inserted History transcript word to add it to Dictionary, with the same validation
   and case/diacritic-insensitive duplicate handling as the Dictionary page.
+- Accessibility-denied dictation keeps text on the clipboard and shows “Can't type here” with
+  a direct Open Settings action; missing fields and failed insertion have distinct clipboard hints.
+- History groups entries by local calendar day, keeps active edits visible across midnight, and
+  matches the canvas day surfaces and Mail, Slack, Notes and Xcode tile colors.
 - Record Push-to-talk, Hands-free, Cancel and Re-insert last shortcuts in Settings, with saved
   bindings, system/VoxFlow conflict checks, and live keyboard monitoring suspended while recording.
 - Re-insert the last dictation into a fresh privacy-checked target without adding duplicate history;
@@ -78,8 +89,9 @@ versioning.
   Casual and Very casual tones are rewritten by a local LLM on top of the existing rule pass
   (fillers, auto-punctuation), with deterministic (greedy) sampling and automatic fallback to
   rule-based styling whenever the model is absent, still loading, the text is too long, generation
-  is slow, or the output fails validation. The model loads lazily and warms up once at launch,
-  off the critical path of the first dictation. See
+  is slow, or the output fails validation. The model loads lazily, warms up once at launch, and
+  releases its memory after five idle minutes or macOS memory pressure; the next styled request
+  reloads it automatically. See
   [ADR-007](docs/adr/007-llm-styling-on-llama-cpp.md).
 - "Re-style ▾" on History rows: pick Formal, Casual, Very casual or Verbatim from a popover to
   rewrite a past dictation into another tone without re-recording; the row updates in place and
@@ -102,6 +114,16 @@ versioning.
   [docs/runbooks/connect-an-mcp-client.md](docs/runbooks/connect-an-mcp-client.md).
 
 ### Fixed
+- Live dictation limits model readiness and styling to the remaining processing time, falling back
+  to rule cleanup after a slow final speech window instead of adding a fresh eight-second wait.
+- Models settings and download hints share the same decimal size labels, including 480 MB for Small.
+- Snippets preserve authored spacing, clipboard indentation and attachment characters while keeping
+  cursor offsets correct. Dictionary usage counts symbol names and flexible phrase spacing, and
+  vocabulary ranking favors user entries over contacts when usage is tied.
+- File decoding reports progress and responds to Stop between read/conversion chunks instead of
+  finishing the entire decode before observing cancellation.
+- Long files decode on demand with bounded detection/window buffers; full recordings no longer
+  accumulate as PCM in memory, and no temporary audio file is written.
 - MCP startup and stop races: concurrent first callers share initialization, and an older operation
   cannot restart a disabled server or overwrite a newer endpoint and setting.
 - Stopping the MCP listener cancels pending binding; old waiting callers cannot restart it or
@@ -113,6 +135,8 @@ versioning.
   backend, avoiding unnecessary GPU initialization and Metal compiler warnings in failure-path tests.
 - Long file jobs yield the speech engine between bounded windows, with queued dictation taking
   priority instead of waiting for the entire file to finish.
+- Files and Settings show “Loading into memory…” while the shared speech model prepares for first
+  use, before transcription progress begins; concurrent Files and dictation callers share one load.
 - Settings › General's appearance and Flow Bar position now apply at launch, not only once
   Settings has been opened at least once.
 - The Flow Bar HUD and the menu bar's "Paused until 10:41" now read the same clock instead of two

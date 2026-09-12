@@ -39,11 +39,13 @@ public struct RuleStyler: TextStyler, Sendable {
 
         var text = Self.collapseWhitespace(raw)
         var fillersRemoved = 0
+        var removedFillerSpans: [RawTextSpan]?
 
         if options.removeFillers {
-            let (stripped, removed) = FillerWords.strip(text)
-            text = stripped
-            fillersRemoved = removed
+            let result = FillerWords.stripWithSpans(raw)
+            text = result.text
+            fillersRemoved = result.removed
+            removedFillerSpans = result.removedFillerSpans
         }
 
         if options.autoPunctuate {
@@ -64,7 +66,8 @@ public struct RuleStyler: TextStyler, Sendable {
             break // unreachable: handled by the early return above.
         }
 
-        return StyledText(text: text, fillersRemoved: fillersRemoved, cursorOffset: nil)
+        return StyledText(text: text, fillersRemoved: fillersRemoved,
+                          removedFillerSpans: removedFillerSpans, cursorOffset: nil)
     }
 
     // MARK: - Auto-punctuate

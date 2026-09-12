@@ -34,6 +34,13 @@ final class SequentialClock: Sendable {
 
 @Suite("ModelsViewModel") @MainActor
 struct ModelsViewModelTests {
+    @Test("loading row exposes the ST-03v first-use copy")
+    func loadingRowCopy() {
+        let row = ModelsViewModel.Row(model: Self.big, state: .installed, isDefault: true, isLoadingIntoMemory: true)
+        #expect(row.statusSubtitle == "Loading into memory…")
+        #expect(row.statusContext == "first use")
+    }
+
     static func payload(_ seed: UInt8, count: Int) -> Data { Data((0..<count).map { UInt8(($0 &+ Int(seed)) % 256) }) }
     static let bigPayload = payload(1, count: 300_000)
     static let smallPayload = payload(2, count: 100_000)
@@ -84,8 +91,8 @@ struct ModelsViewModelTests {
     @Test("gigabytes formats decimal GB/MB per the design examples")
     func gigabytes() {
         #expect(ModelsViewModel.gigabytes(1_624_555_275) == "1.6 GB")
-        #expect(ModelsViewModel.gigabytes(487_601_967) == "488 MB")
-        #expect(ModelsViewModel.gigabytes(744_000_000) == "744 MB")
+        #expect(ModelsViewModel.gigabytes(487_601_967) == "480 MB")
+        #expect(ModelsViewModel.gigabytes(744_000_000) == "740 MB")
     }
 
     // MARK: 1. refreshReflectsDisk
@@ -198,7 +205,7 @@ struct ModelsViewModelTests {
 
     // MARK: 4. checksumMismatch
 
-    @Test("a checksum mismatch reports downloadFailed and leaves the row not installed")
+    @Test("a checksum mismatch stays inline and Retry installs the replacement download")
     func checksumMismatch() async throws {
         let h = Harness()
         await h.downloader.serve(Self.smallPayload, at: Self.big.downloadURL)   // wrong bytes for "big"
@@ -206,8 +213,15 @@ struct ModelsViewModelTests {
 
         await model.download(Self.big)
 
-        #expect(model.alert == .downloadFailed(Self.big, reason: "The download didn't verify (checksum mismatch). Nothing was installed and the file was deleted."))
-        #expect(model.speechRows.first { $0.id == "big" }?.state == .notInstalled)
+        #expect(model.alert == nil)
+        #expect(model.speechRows.first { $0.id == "big" }?.failureReason
+                == ModelsViewModel.checksumFailureMessage)
+
+        await h.downloader.serve(Self.bigPayload, at: Self.big.downloadURL)
+        await model.retry(Self.big)
+
+        #expect(model.speechRows.first { $0.id == "big" }?.state == .installed)
+        #expect(model.speechRows.first { $0.id == "big" }?.failureReason == nil)
     }
 
     // MARK: 5. offlineThenResume

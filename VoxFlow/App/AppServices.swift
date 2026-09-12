@@ -239,12 +239,15 @@ final class AppServices {
                                         exporter: { TranscriptExporter(directory: filesSettings.outputFolder) })
         let filesViewModel = FilesViewModel(queue: queue, settings: filesSettings, modelStore: modelStore,
                                             durations: durations, exports: exports)
-        let modelsViewModel = ModelsViewModel(store: modelStore)
+        let modelsViewModel = ModelsViewModel(store: modelStore, modelLoader: modelLoader)
         let navigation = Navigation()
 
         let dictationSettings = DictationSettings(store: settingsStore)
         let permissions = SystemPermissions()
         let frontmost = WorkspaceFrontmostApp()
+        let microphoneUse = CoreAudioMicrophoneUseMonitor { pid in
+            NSRunningApplication(processIdentifier: pid)?.localizedName
+        }
         let inserter = AccessibilityTextInserter(permissions: permissions, pasteboard: SystemPasteboard())
 
         // `HistoryService` owns opening/reopening the store (and its `RetentionRunner`) off the main
@@ -291,6 +294,7 @@ final class AppServices {
         // very same styler instance dictation does.
         let styleEngine = LlamaEngine()
         let styleModelLoader = StyleModelLoader(store: modelStore, engine: styleEngine)
+        Task { await styleModelLoader.observeMemoryPressure(MemoryPressureEvents.system()) }
         let styler = LlamaStyler(backend: styleModelLoader, clock: clock)
         let restyler = Restyler(styler: styler, settings: stylingSettings.box)
         let styledTranscriber = StyledTranscriber(base: WindowedTranscriber(engine: engine), styler: styler,
@@ -303,6 +307,7 @@ final class AppServices {
             let builder = PreflightBuilder(frontmost: frontmost, permissions: permissions,
                                            readiness: { await modelLoader.readiness() },
                                            settings: dictationSettings.box.current,
+                                           microphoneUse: microphoneUse,
                                            captureFocus: { app in await inserter.captureFocus(app: app) },
                                            onFrontmostCaptured: { app in frontmostBox.set(app) })
             return await builder.preflight()
@@ -319,7 +324,7 @@ final class AppServices {
         let ephemeralScope = EphemeralScope()
         let dictationController = DictationController(
             config: dictationSettings.flowBarConfig,
-            microphone: MeteredMicrophone(base: MicrophoneSource()) { rms in levelSink.report(rms) },
+            microphone: MeteredMicrophone(base: MicrophoneSource(microphoneUse: microphoneUse)) { rms in levelSink.report(rms) },
             transcriber: styledTranscriber,
             inserter: inserter,
             clock: clock,
@@ -332,7 +337,8 @@ final class AppServices {
             },
             onSave: { result, appName in await historyWriter.save(result, appName: appName) },
             copyToClipboard: { SystemPasteboard().setString($0) },
-            ephemeral: { ephemeralScope.isActive }
+            ephemeral: { ephemeralScope.isActive },
+            microphoneUse: microphoneUse
         )
         let dictation = DictationCoordinator(controller: dictationController, settings: dictationSettings,
                                              permissions: permissions, navigation: navigation, clock: clock)

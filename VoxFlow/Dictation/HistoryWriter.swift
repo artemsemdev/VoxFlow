@@ -30,7 +30,8 @@ struct HistoryWriter: Sendable {
 
     static func draft(from result: DictationResult, appName: String?, now: Date) -> DictationDraft {
         DictationDraft(text: result.text, rawText: result.rawText, appName: appName, style: result.style,
-                       language: result.language?.code, duration: result.duration, createdAt: now)
+                       language: result.language?.code, duration: result.duration, createdAt: now,
+                       annotations: result.annotations)
     }
 
     /// No-op when history is off or there's no store (Privacy toggle / storage unavailable). The
