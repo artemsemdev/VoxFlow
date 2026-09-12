@@ -3,11 +3,14 @@ import Foundation
 /// A slice of microphone audio in the internal format (16 kHz mono Float32) with its loudness.
 public struct AudioChunk: Sendable, Equatable {
     public var samples: [Float]
+    /// Monotonic capture time elapsed immediately before these samples, without synthesising silence.
+    public var precedingGap: TimeInterval
     /// Root mean square of `samples`, 0 for an empty chunk. Drives the 14-bar waveform and silence detection.
     public var rms: Float
 
-    public init(samples: [Float]) {
+    public init(samples: [Float], precedingGap: TimeInterval = 0) {
         self.samples = samples
+        self.precedingGap = max(0, precedingGap)
         rms = samples.isEmpty ? 0 : (samples.reduce(0) { $0 + $1 * $1 } / Float(samples.count)).squareRoot()
     }
 

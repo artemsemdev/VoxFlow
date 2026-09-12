@@ -37,6 +37,18 @@ struct WindowedTranscriberTests {
                                          .partialText("hello world"), .partialText("hello world hello world")])
     }
 
+    @Test("a switch gap shifts later segments and duration without inserting samples")
+    func switchGap() async throws {
+        let engine = FakeSpeechEngine(script: [.segment(TranscriptSegment(start: 0, end: 0.25, text: "word", confidence: 0.9)!)])
+        try await engine.load(modelAt: URL(fileURLWithPath: "/dev/null"))
+        let chunks = [voiced(0.5), AudioChunk(samples: voiced(0.5).samples, precedingGap: 2)]
+        let result = try await WindowedTranscriber(engine: engine).transcribe(feed(chunks), options: TranscriptionOptions(language: "en")) { _ in }
+
+        #expect(result.segments.map(\.start) == [0, 2.5])
+        #expect(abs(result.duration - 3) < 0.001)
+        #expect(await engine.transcribeCalls == 2)
+    }
+
     @Test("short feed below 0.3 s produces an empty result without calling the engine")
     func tooShort() async throws {
         let engine = FakeSpeechEngine(script: [])

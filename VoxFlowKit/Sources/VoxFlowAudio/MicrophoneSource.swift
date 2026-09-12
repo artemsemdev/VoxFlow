@@ -1,4 +1,5 @@
 @preconcurrency import AVFoundation
+import Darwin
 import Foundation
 import Synchronization
 import VoxFlowCore
@@ -18,17 +19,8 @@ public final class MicrophoneSource: MicrophoneCapturing, Sendable {
     }
 }
 
-/// Everything AVFoundation-side for one capture. All members are touched only on `queue` (setup, restart, stop)
-/// or inside the tap block, which AVAudioEngine serialises on its own render thread — the same confinement
-/// argument as `ContextBox` in `WhisperCppEngine`; hence the one permitted `@unchecked Sendable`.
-///
-/// One handoff is narrower than that confinement claim: `restart()` calls `removeTap` and then
-/// `installTapAndRun()` reassigns `chunker` on `queue`, but a tap callback already in flight when
-/// `removeTap` runs is still executing concurrently on the render thread and may still be reading the
-/// old `chunker` — `removeTap` does not join it. The window is tiny (only opens on a device switch)
-/// and the in-flight callback always finishes against the *old* chunker's state, never a torn one, so
-/// nothing is corrupted — but it means "touched only on `queue` or inside the tap block" is not quite
-/// "never touched from two places at once" across a `restart()`.
+/// Everything mutable for one capture is confined to `queue`. The render callback only converts its
+/// immutable input and hands samples back to that queue; each installed tap owns a separate chunker.
 private final class CaptureSession: @unchecked Sendable {
     private let queue = DispatchQueue(label: "dev.artemsem.voxflow.microphone")
     private let engine = AVAudioEngine()
@@ -36,33 +28,36 @@ private final class CaptureSession: @unchecked Sendable {
     private let continuation: AsyncThrowingStream<MicrophoneEvent, Error>.Continuation
     private var observer: NSObjectProtocol?
     private var stopped = false
-    private var chunker: AudioChunker
+    private var gapTracker = CaptureGapTracker()
+    private var currentTap: CaptureAudioTapBox?
 
     init(chunkSeconds: Double, continuation: AsyncThrowingStream<MicrophoneEvent, Error>.Continuation) {
         self.chunkSeconds = chunkSeconds
         self.continuation = continuation
-        self.chunker = AudioChunker(seconds: chunkSeconds)
     }
 
     func start() {
         queue.async { [self] in
             observer = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil) { [weak self] _ in
                 guard let self else { return }
-                self.queue.async { self.restart() }
+                let interruptedAt = AVAudioTime.seconds(forHostTime: mach_absolute_time())
+                self.queue.async { self.restart(interruptedAt: interruptedAt) }
             }
-            do { try installTapAndRun() } catch { fail(error) }
+            do { try installTapAndRun(generation: gapTracker.activeToken) } catch { fail(error) }
         }
     }
 
-    private func installTapAndRun() throws {
+    private func installTapAndRun(generation: UInt64) throws {
         let input = engine.inputNode
         let inputFormat = input.inputFormat(forBus: 0)
         guard inputFormat.channelCount > 0, inputFormat.sampleRate > 0 else { throw MicrophoneError.noInputDevice }
         let target = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: AudioSamples.sampleRate, channels: 1, interleaved: false)!
         guard let converter = AVAudioConverter(from: inputFormat, to: target) else { throw MicrophoneError.engineFailed("no converter \(inputFormat) → 16 kHz mono") }
-        chunker = AudioChunker(seconds: chunkSeconds)
+        let tap = CaptureAudioTapBox(token: generation,
+                                     chunkSamples: Int(chunkSeconds * AudioSamples.sampleRate))
+        currentTap = tap
         let continuation = continuation
-        input.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [self] buffer, _ in
+        input.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [self] buffer, time in
             let ratio = target.sampleRate / inputFormat.sampleRate
             let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 16
             guard let out = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: capacity) else { return }
@@ -84,20 +79,34 @@ private final class CaptureSession: @unchecked Sendable {
             }
             guard error == nil, out.frameLength > 0, let data = out.floatChannelData else { return }
             let samples = Array(UnsafeBufferPointer(start: data[0], count: Int(out.frameLength)))
-            for chunk in chunker.append(samples) { continuation.yield(.chunk(chunk)) }
+            let resumedAt = if time.isHostTimeValid {
+                AVAudioTime.seconds(forHostTime: time.hostTime)
+            } else {
+                AVAudioTime.seconds(forHostTime: mach_absolute_time()) - Double(out.frameLength) / target.sampleRate
+            }
+            queue.async { [self] in
+                guard !stopped, gapTracker.isActive(generation) else { return }
+                let chunks = tap.append(samples, resumedAt: resumedAt, tracker: &gapTracker)
+                for chunk in chunks { continuation.yield(.chunk(chunk)) }
+            }
         }
         engine.prepare()
         do { try engine.start() } catch { throw MicrophoneError.engineFailed(error.localizedDescription) }
     }
 
-    private func restart() {
+    private func restart(interruptedAt: TimeInterval) {
         guard !stopped else { return }
+        if let tail = currentTap?.flush(tracker: &gapTracker) {
+            continuation.yield(.chunk(tail))
+        }
+        let resumeToken = gapTracker.begin(at: interruptedAt)
+        currentTap = nil
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
         let format = engine.inputNode.inputFormat(forBus: 0)
         guard format.channelCount > 0 else { fail(MicrophoneError.noInputDevice); return }
         continuation.yield(.deviceChanged(name: AVCaptureDevice.default(for: .audio)?.localizedName))
-        do { try installTapAndRun() } catch { fail(error) }
+        do { try installTapAndRun(generation: resumeToken) } catch { fail(error) }
     }
 
     private func fail(_ error: Error) {
@@ -110,6 +119,8 @@ private final class CaptureSession: @unchecked Sendable {
     private func stopInternal() {
         guard !stopped else { return }
         stopped = true
+        gapTracker.reset()
+        currentTap = nil
         if let observer { NotificationCenter.default.removeObserver(observer) }
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()

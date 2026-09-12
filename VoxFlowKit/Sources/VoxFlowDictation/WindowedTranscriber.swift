@@ -48,7 +48,10 @@ public struct WindowedTranscriber: DictationTranscribing {
 
         do {
             for await chunk in chunks {
-                duration += chunk.duration
+                if let interrupted = planner.interrupt(by: chunk.precedingGap) {
+                    try await run(interrupted)
+                }
+                duration += chunk.precedingGap + chunk.duration
                 if let window = planner.append(chunk) { try await run(window) }
             }
             if let rest = planner.flush() { try await run(rest) }
