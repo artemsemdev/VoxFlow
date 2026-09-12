@@ -187,6 +187,20 @@ struct RangeResumingDownloaderTests {
         #expect(DownloadURLProtocol.rangeHeaders == ["bytes=11-"])
     }
 
+    @Test("a truncated success remains resumable and reports its exact durable byte count")
+    func truncated() async throws {
+        DownloadURLProtocol.install(.init(status: 200, headers: ["Content-Length": "10"],
+                                          chunks: [Data("abc".utf8)]))
+        let directory = TemporaryDirectory()
+        let destination = directory.file("model.partial")
+
+        await #expect(throws: DownloadError.offline(bytesWritten: 3)) {
+            try await downloader().download(URL(string: "https://example.com/model.bin")!,
+                                            to: destination) { _, _ in }
+        }
+        #expect(try Data(contentsOf: destination) == Data("abc".utf8))
+    }
+
     @Test("an HTTP rejection preserves the existing partial")
     func httpFailure() async throws {
         DownloadURLProtocol.install(.init(status: 416, headers: [:], chunks: []))
@@ -206,4 +220,54 @@ struct RangeResumingDownloaderTests {
         #expect(DownloadURLProtocol.rangeHeaders == ["bytes=7-"])
     }
 
+    @Test("transport failure keeps chunks already written")
+    func transportFailure() async throws {
+        let chunk = Data(repeating: 4, count: 131_072)
+        DownloadURLProtocol.install(.init(status: 200, headers: ["Content-Length": "262144"],
+                                          chunks: [chunk],
+                                          completion: .controlledFail(URLError(.networkConnectionLost))))
+        let directory = TemporaryDirectory()
+        let destination = directory.file("model.partial")
+
+        await #expect(throws: DownloadError.offline(bytesWritten: 131_072)) {
+            try await downloader().download(URL(string: "https://example.com/model.bin")!,
+                                            to: destination) { _, _ in DownloadURLProtocol.triggerFailure() }
+        }
+        #expect(try Data(contentsOf: destination) == chunk)
+    }
+
+    @Test("cancellation before task installation reports cancelled without starting a request")
+    func cancelledBeforeStart() async {
+        DownloadURLProtocol.install(.init(status: 200, headers: ["Content-Length": "1"],
+                                          chunks: [Data([1])]))
+        let directory = TemporaryDirectory()
+        let task = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            try await downloader().download(URL(string: "https://example.com/model.bin")!,
+                                            to: directory.file("model.partial")) { _, _ in }
+        }
+
+        await #expect(throws: DownloadError.cancelled) { try await task.value }
+        #expect(DownloadURLProtocol.rangeHeaders.isEmpty)
+    }
+
+    @Test("cancellation after a chunk keeps that partial and closes the transfer")
+    func cancelledInFlight() async throws {
+        let chunk = Data(repeating: 7, count: 1_048_576)
+        DownloadURLProtocol.install(.init(status: 200, headers: ["Content-Length": "2097152"],
+                                          chunks: [chunk], completion: .hold))
+        let directory = TemporaryDirectory()
+        let destination = directory.file("model.partial")
+        let progress = DownloadProgressRecorder()
+        let task = Task {
+            try await downloader().download(URL(string: "https://example.com/model.bin")!,
+                                            to: destination, progress: progress.append)
+        }
+        let receivedProgress = await progress.waitForFirst()
+        #expect(receivedProgress)
+        task.cancel()
+
+        await #expect(throws: DownloadError.cancelled) { try await task.value }
+        #expect(try Data(contentsOf: destination) == chunk)
+    }
 }
