@@ -28,7 +28,8 @@ public struct Preflight: Sendable, Equatable {
 public enum FlowBarTimer: Sendable, Hashable { case hold, doubleTap, silence, cap, takingLonger, processingTimeout, dismiss, modelLoad, pauseEnd }
 
 public enum FlowBarEvent: Sendable, Equatable {
-    case fnDown(Preflight), fnUp, escape, anyKey
+    /// A continuation/stop may omit preflight; starting capture always requires fresh checks.
+    case fnDown(Preflight?), fnUp, escape, anyKey
     /// A separately assigned shortcut has no ambiguous hold/double-tap gesture to resolve.
     /// Missing preflight permits stopping only; it can never start a capture.
     case shortcutDown(HotkeyMode, Preflight?), pushToTalkReleased
@@ -181,9 +182,9 @@ public struct FlowBarMachine: Sendable, Equatable {
             return []
 
         // ── fn-down: from idle or any dismissable state ──
-        case (.idle, .fnDown(let p)):
+        case (.idle, .fnDown(let p?)):
             return begin(p, now: now, cancelDismiss: false)
-        case (let s, .fnDown(let p)) where s.isDismissable:
+        case (let s, .fnDown(let p?)) where s.isDismissable:
             return begin(p, now: now, cancelDismiss: true)
         case (let s, .anyKey) where s.isDismissable:
             state = .idle

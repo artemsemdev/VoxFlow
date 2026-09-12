@@ -166,7 +166,7 @@ public actor DictationController {
         // Preflight captures the insertion target. Only a start may replace that target; a stop
         // or an ignored dedicated shortcut must preserve the current capture's focus snapshot.
         var checks: Preflight?
-        if mode == nil || canReinsert {
+        if canReinsert {
             isPreparingCapture = true
             let id = captureID
             checks = await preflight()
@@ -174,7 +174,7 @@ public actor DictationController {
             guard id == captureID, !Task.isCancelled else { return }
         }
         if let mode { handle(.shortcutDown(mode, checks)) }
-        else if let checks { handle(.fnDown(checks)) }
+        else { handle(.fnDown(checks)) }
     }
     public func pushToTalkReleased() { handle(.pushToTalkReleased) }
     public func escape() {
