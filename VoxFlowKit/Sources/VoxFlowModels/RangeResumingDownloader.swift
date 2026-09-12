@@ -6,8 +6,12 @@ import VoxFlowCore
 /// writes them directly to the resumable partial file without a per-byte async sequence.
 public struct RangeResumingDownloader: ModelDownloading {
     private let session: URLSession
+    private let requestBytes: ModelRequestByteCounter?
 
-    public init(session: URLSession = .shared) { self.session = session }
+    public init(session: URLSession = .shared, requestBytes: ModelRequestByteCounter? = nil) {
+        self.session = session
+        self.requestBytes = requestBytes
+    }
 
     public func download(_ url: URL, to destination: URL,
                          progress: @Sendable @escaping (Int64, Int64) -> Void) async throws {
@@ -16,7 +20,8 @@ public struct RangeResumingDownloader: ModelDownloading {
         var request = URLRequest(url: url)
         if existing > 0 { request.setValue("bytes=\(existing)-", forHTTPHeaderField: "Range") }
 
-        let delegate = ChunkedDownloadDelegate(destination: destination, existing: existing, progress: progress)
+        let delegate = ChunkedDownloadDelegate(destination: destination, existing: existing,
+                                               requestBytes: requestBytes, progress: progress)
         let delegateQueue = OperationQueue()
         delegateQueue.maxConcurrentOperationCount = 1
         let transferSession = URLSession(configuration: session.configuration, delegate: delegate,
@@ -26,7 +31,7 @@ public struct RangeResumingDownloader: ModelDownloading {
     }
 }
 
-private final class ChunkedDownloadDelegate: NSObject, URLSessionDataDelegate, Sendable {
+final class ChunkedDownloadDelegate: NSObject, URLSessionDataDelegate, Sendable {
     private struct State: Sendable {
         var continuation: CheckedContinuation<Void, any Error>?
         var task: URLSessionDataTask?
@@ -41,13 +46,26 @@ private final class ChunkedDownloadDelegate: NSObject, URLSessionDataDelegate, S
     private let destination: URL
     private let existing: Int64
     private let progress: @Sendable (Int64, Int64) -> Void
+    private let metrics: ModelRequestMetricsDelegate?
     private let state: Mutex<State>
 
-    init(destination: URL, existing: Int64, progress: @Sendable @escaping (Int64, Int64) -> Void) {
+    init(destination: URL, existing: Int64, requestBytes: ModelRequestByteCounter? = nil,
+         progress: @Sendable @escaping (Int64, Int64) -> Void) {
         self.destination = destination
         self.existing = existing
         self.progress = progress
+        metrics = requestBytes.map(ModelRequestMetricsDelegate.init(counter:))
         state = Mutex(State(written: existing))
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didFinishCollecting metrics: URLSessionTaskMetrics) {
+        recordRequestMetrics(metrics.transactionMetrics)
+    }
+
+    // Metrics belong to the request, independent of partial-file progress or transfer outcome.
+    // Keep accepting callbacks even after cancellation/failure has finished the continuation.
+    func recordRequestMetrics(_ transactions: [any SentRequestMetrics]) {
+        metrics?.recordTransactions(transactions)
     }
 
     func run(_ task: URLSessionDataTask) async throws {

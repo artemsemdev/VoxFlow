@@ -70,6 +70,7 @@ final class AppServices {
     static let shared = AppServices.live()
 
     let modelStore: ModelStore
+    let requestBytes: ModelRequestByteCounter
     let engine: WhisperCppEngine
     let queue: FileQueue
     let filesSettings: FilesSettings
@@ -163,7 +164,7 @@ final class AppServices {
     /// not here, same reasoning as `dictation.start()`/`fnMonitor.start()`.
     let notifications: NotificationCoordinator
 
-    private init(modelStore: ModelStore, engine: WhisperCppEngine, queue: FileQueue, filesSettings: FilesSettings,
+    private init(modelStore: ModelStore, requestBytes: ModelRequestByteCounter, engine: WhisperCppEngine, queue: FileQueue, filesSettings: FilesSettings,
                  durations: AudioDurationReader, exports: ExportCoordinator, navigation: Navigation,
                  filesViewModel: FilesViewModel, modelsViewModel: ModelsViewModel, audioViewModel: AudioViewModel,
                  privacyViewModel: PrivacyViewModel, dictationSettings: DictationSettings, shortcutRecorder: ShortcutRecorderModel,
@@ -179,6 +180,7 @@ final class AppServices {
                  mcpViewModel: MCPViewModel, mcpServerService: MCPServerService, soundCoordinator: SoundCoordinator,
                  menuBarViewModel: MenuBarViewModel, notifications: NotificationCoordinator) {
         self.modelStore = modelStore
+        self.requestBytes = requestBytes
         self.engine = engine
         self.queue = queue
         self.filesSettings = filesSettings
@@ -224,7 +226,8 @@ final class AppServices {
     static func live() -> AppServices {
         precondition(!LaunchEnvironment.isRunningTests(), "Test hosts must not construct live app services")
         let settingsStore = UserDefaultsKeyValueStore()
-        let modelStore = ModelStore(directory: ModelStore.defaultDirectory, downloader: RangeResumingDownloader(),
+        let requestBytes = ModelRequestByteCounter(store: settingsStore)
+        let modelStore = ModelStore(directory: ModelStore.defaultDirectory, downloader: RangeResumingDownloader(requestBytes: requestBytes),
                                     freeSpace: VolumeFreeSpace(), settings: settingsStore)
         let engine = WhisperCppEngine()
         let filesSettings = FilesSettings(store: settingsStore)
@@ -463,7 +466,7 @@ final class AppServices {
                                                      filesViewModel: filesViewModel)
         routeSink.attach(notifications)
 
-        return AppServices(modelStore: modelStore, engine: engine, queue: queue, filesSettings: filesSettings,
+        return AppServices(modelStore: modelStore, requestBytes: requestBytes, engine: engine, queue: queue, filesSettings: filesSettings,
                            durations: durations, exports: exports, navigation: navigation, filesViewModel: filesViewModel,
                            modelsViewModel: modelsViewModel, audioViewModel: audioViewModel, privacyViewModel: privacyViewModel,
                            dictationSettings: dictationSettings, shortcutRecorder: shortcutRecorder, modelLoader: modelLoader,
