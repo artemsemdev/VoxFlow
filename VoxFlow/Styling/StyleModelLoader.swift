@@ -17,6 +17,8 @@ actor StyleModelLoader: LLMBackend {
     private let idleTaskFactory: IdleTaskFactory
     private(set) var idleTimerRevision = 0
     private var idleTask: Task<Void, Never>?
+    private var pressureTask: Task<Void, Never>?
+    private var pressurePending = false
     private(set) var loadedModelID: String?
     private var loadTask: Task<Void, Never>?
     private(set) var loadingModelID: String?
@@ -41,6 +43,11 @@ actor StyleModelLoader: LLMBackend {
         self.clock = clock
         self.idleInterval = idleInterval
         self.idleTaskFactory = idleTaskFactory
+    }
+
+    deinit {
+        idleTask?.cancel()
+        pressureTask?.cancel()
     }
 
     func isReady() async -> Bool {
@@ -72,7 +79,12 @@ actor StyleModelLoader: LLMBackend {
         idleTask = nil
         defer {
             generationInFlight = false
-            armIdleTimer()
+            if pressurePending {
+                pressurePending = false
+                scheduleUnloadIfNeeded()
+            } else {
+                armIdleTimer()
+            }
         }
         return try await engine.generate(prompt, maxNewTokens: maxNewTokens)
     }
@@ -171,5 +183,28 @@ actor StyleModelLoader: LLMBackend {
         guard revision == idleTimerRevision, !generationInFlight, loadedModelID != nil else { return }
         idleTask = nil
         scheduleUnloadIfNeeded()
+    }
+
+    func memoryPressureReceived() {
+        if generationInFlight {
+            pressurePending = true
+        } else {
+            scheduleUnloadIfNeeded()
+        }
+    }
+
+    func observeMemoryPressure(_ events: AsyncStream<Void>) {
+        pressureTask?.cancel()
+        pressureTask = Task { [weak self] in
+            for await _ in events {
+                guard !Task.isCancelled else { return }
+                await self?.memoryPressureReceived()
+            }
+        }
+    }
+
+    func stopObservingMemoryPressure() {
+        pressureTask?.cancel()
+        pressureTask = nil
     }
 }

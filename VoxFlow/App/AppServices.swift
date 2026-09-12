@@ -291,6 +291,7 @@ final class AppServices {
         // very same styler instance dictation does.
         let styleEngine = LlamaEngine()
         let styleModelLoader = StyleModelLoader(store: modelStore, engine: styleEngine)
+        Task { await styleModelLoader.observeMemoryPressure(MemoryPressureEvents.system()) }
         let styler = LlamaStyler(backend: styleModelLoader, clock: clock)
         let restyler = Restyler(styler: styler, settings: stylingSettings.box)
         let styledTranscriber = StyledTranscriber(base: WindowedTranscriber(engine: engine), styler: styler,

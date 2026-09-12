@@ -77,8 +77,8 @@ any app, style cleanup with a local LLM and an MCP server follow in 2.x (see the
   Models) rewrites the tone step for Formal/Casual/Very casual on top of the same rule pass, with
   automatic fallback to rule-based styling whenever the model is absent, still loading, too slow
   or produces a bad answer. Live dictation bounds styling by the time left after speech recognition,
-  reserving one second for completion. The style model unloads after five idle minutes, then
-  reloads lazily on the next styled request. "Re-style ▾" on
+  reserving one second for completion. The style model unloads after five idle minutes or macOS
+  memory pressure, then reloads lazily on the next styled request. "Re-style ▾" on
   a History row rewrites a past dictation into another tone without re-recording and copies the
   result; Files' result view can "Apply {Style} cleanup" to instantly rewrite every segment of a
   finished transcript (rule-based only, no re-processing) — see

@@ -209,6 +209,7 @@ struct StyleModelLoaderTests {
         let firstLoadEntered = Gate()
         let secondLoadEntered = Gate()
         let releaseFirstLoad = Gate()
+        let unloadCalled = Gate()
         private(set) var ready = false
         private(set) var loadCount = 0
         private(set) var unloadCount = 0
@@ -228,7 +229,7 @@ struct StyleModelLoaderTests {
             }
             ready = true
         }
-        func unload() async { unloadCount += 1; ready = false }
+        func unload() async { unloadCount += 1; ready = false; await unloadCalled.open() }
     }
 
     @Test("a cancelled load cleans up before its replacement takes ownership")
@@ -428,6 +429,107 @@ struct StyleModelLoaderTests {
         await clock.advance(by: 10)
         await engine.unloadCalled.wait()
         #expect(await engine.unloadCount == 1)
+    }
+
+    @Test("memory pressure releases an idle model and the next request reloads it")
+    func memoryPressureUnloadsIdleModel() async throws {
+        let dir = TemporaryDirectory()
+        try installStyleModelFile(in: dir)
+        let engine = HangingLoadEngine()
+        await engine.release()
+        let loader = StyleModelLoader(store: store(dir: dir), engine: engine, clock: FakeClock())
+        await loader.warmUp()
+        #expect(await loader.loadedModelID != nil)
+
+        let pressure = AsyncStream<Void>.makeStream()
+        await loader.observeMemoryPressure(pressure.stream)
+        pressure.continuation.yield(())
+        await engine.waitForUnload()
+        #expect(await loader.loadedModelID == nil)
+        #expect(await loader.isReady() == false)
+        await loader.warmUp()
+        #expect(await loader.isReady())
+        #expect(await engine.loadedURLs.count == 2)
+    }
+
+    @Test("repeated pressure during generation coalesces into one unload after generation")
+    func memoryPressureWaitsForGeneration() async throws {
+        let dir = TemporaryDirectory()
+        try installStyleModelFile(in: dir)
+        let engine = ContendedStyleEngine()
+        let loader = StyleModelLoader(store: store(dir: dir), engine: engine, clock: FakeClock())
+        await loader.warmUp()
+        let generation = Task {
+            try await loader.generate(ChatPrompt(system: "system", user: "draft"), maxNewTokens: 8)
+        }
+        await engine.entered.wait()
+
+        await loader.memoryPressureReceived()
+        await loader.memoryPressureReceived()
+        #expect(await loader.loadedModelID != nil)
+        #expect(await engine.unloadCount == 0)
+
+        await engine.release.open()
+        #expect(try await generation.value == "styled text")
+        await engine.unloadCalled.wait()
+        #expect(await engine.unloadCount == 1)
+        #expect(await loader.loadedModelID == nil)
+
+        #expect(await loader.isReady() == false)
+        await loader.warmUp()
+        #expect(await loader.isReady())
+    }
+
+    @Test("pressure cancellation leaves in-flight load cleanup with that load")
+    func memoryPressureCancelsInFlightLoad() async throws {
+        let dir = TemporaryDirectory()
+        try installStyleModelFile(in: dir)
+        let engine = RestartedLoadEngine()
+        let loader = StyleModelLoader(store: store(dir: dir), engine: engine, clock: FakeClock())
+        #expect(await loader.isReady() == false)
+        await engine.firstLoadEntered.wait()
+
+        await loader.memoryPressureReceived()
+        #expect(await loader.loadingModelID == nil)
+        await engine.releaseFirstLoad.open()
+        await engine.unloadCalled.wait()
+        #expect(await engine.unloadCount == 1)
+        #expect(await loader.loadedModelID == nil)
+
+        await loader.warmUp()
+        #expect(await engine.loadCount == 2)
+        #expect(await loader.isReady())
+    }
+
+    @Test("stopping pressure observation terminates its event stream")
+    func pressureObservationCleanup() async throws {
+        let dir = TemporaryDirectory()
+        let loader = StyleModelLoader(store: store(dir: dir), engine: FakeLLMBackend(), clock: FakeClock())
+        let terminated = Gate()
+        let pair = AsyncStream<Void>.makeStream()
+        pair.continuation.onTermination = { _ in Task { await terminated.open() } }
+
+        await loader.observeMemoryPressure(pair.stream)
+        await loader.stopObservingMemoryPressure()
+        await terminated.wait()
+    }
+
+    @Test("releasing the loader terminates pressure observation")
+    func pressureObservationEndsWithLoaderLifetime() async throws {
+        let dir = TemporaryDirectory()
+        var loader: StyleModelLoader? = StyleModelLoader(
+            store: store(dir: dir), engine: FakeLLMBackend(), clock: FakeClock()
+        )
+        weak let releasedLoader = loader
+        let terminated = Gate()
+        let pair = AsyncStream<Void>.makeStream()
+        pair.continuation.onTermination = { _ in Task { await terminated.open() } }
+
+        await loader?.observeMemoryPressure(pair.stream)
+        loader = nil
+        await terminated.wait()
+
+        #expect(releasedLoader == nil)
     }
 
     @Test("concurrent ready callers cannot queue another generation behind native work", .timeLimit(.minutes(1)))
