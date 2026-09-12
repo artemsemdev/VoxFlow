@@ -102,6 +102,9 @@ versioning.
   [docs/runbooks/connect-an-mcp-client.md](docs/runbooks/connect-an-mcp-client.md).
 
 ### Fixed
+- Snippets preserve authored spacing, clipboard indentation and attachment characters while keeping
+  cursor offsets correct. Dictionary usage counts symbol names and flexible phrase spacing, and
+  vocabulary ranking favors user entries over contacts when usage is tied.
 - MCP startup and stop races: concurrent first callers share initialization, and an older operation
   cannot restart a disabled server or overwrite a newer endpoint and setting.
 - Stopping the MCP listener cancels pending binding; old waiting callers cannot restart it or

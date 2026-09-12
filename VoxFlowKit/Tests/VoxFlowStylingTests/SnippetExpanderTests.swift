@@ -130,6 +130,27 @@ struct SnippetExpanderTests {
         #expect(result.text == "hi and hi again")
     }
 
+    @Test("snippet and clipboard whitespace are preserved when no cursor marker is removed")
+    func preservesAuthoredWhitespace() {
+        let body = "Heading  aligned\nclipboard"
+        let clipboard = "  first\n    second"
+        let result = expander(snippets: [SnippetRule(trigger: "/paste", body: body)],
+                              clipboard: clipboard).expand("/paste")
+
+        #expect(result.text == "Heading  aligned\n  first\n    second")
+        #expect(result.cursorOffset == nil)
+    }
+
+    @Test("clipboard attachment characters cannot be mistaken for the cursor marker")
+    func clipboardObjectReplacementCharacter() {
+        let clipboard = "attachment \u{FFFC}"
+        let rule = SnippetRule(trigger: "/paste", body: "clipboard\ncursor\nEnd")
+        let result = expander(snippets: [rule], clipboard: clipboard).expand("/paste")
+
+        #expect(result.text == "attachment \u{FFFC}\n\nEnd")
+        #expect(result.cursorOffset == clipboard.count + 1)
+    }
+
     @Test("app placeholder replaces every occurrence in the body")
     func appPlaceholderReplacesAllOccurrences() {
         let rule = SnippetRule(trigger: "/where", body: "app told app")
@@ -147,11 +168,38 @@ struct SnippetExpanderTests {
         #expect(result.cursorOffset == result.text.count)
     }
 
+    @Test("cursor cleanup does not collapse unrelated authored spacing")
+    func cursorCleanupIsLocal() {
+        let rule = SnippetRule(trigger: "/greet", body: "Keep  this; Best,  cursor")
+        let result = expander(snippets: [rule]).expand("/greet")
+
+        #expect(result.text == "Keep  this; Best, ")
+        #expect(result.cursorOffset == result.text.count)
+    }
+
+    @Test("the standup cursor example keeps its line layout")
+    func standupCursorLayout() {
+        let body = "Yesterday: cursor\nToday: \nBlockers: none"
+        let result = expander(snippets: [SnippetRule(trigger: "/standup", body: body)]).expand("/standup")
+
+        #expect(result.text == "Yesterday: \nToday: \nBlockers: none")
+        #expect(result.cursorOffset == "Yesterday: ".count)
+    }
+
     @Test("a second cursor occurrence is removed from the output; the first sets the offset")
     func secondCursorOccurrenceIsRemoved() {
         let rule = SnippetRule(trigger: "/greet", body: "Hi cursor, thanks cursor!")
         let result = expander(snippets: [rule]).expand("/greet")
         #expect(result.text == "Hi , thanks !")
+        #expect(result.cursorOffset == 3)
+    }
+
+    @Test("adjacent cursor words keep the first caret gap without adding space for later markers")
+    func adjacentCursorWords() {
+        let rule = SnippetRule(trigger: "/greet", body: "Hi cursor cursor there")
+        let result = expander(snippets: [rule]).expand("/greet")
+
+        #expect(result.text == "Hi  there")
         #expect(result.cursorOffset == 3)
     }
 
