@@ -7,8 +7,16 @@ import VoxFlowModels
 /// only when the default `.style` model from `ModelStore` is loaded into `engine`; an installed but
 /// unloaded model starts one background load and reports not-ready; a removed model is unloaded.
 actor StyleModelLoader: LLMBackend {
+    typealias IdleTaskFactory = @Sendable (@escaping @Sendable () async -> Void) -> Task<Void, Never>
+    static let defaultIdleInterval: TimeInterval = 5 * 60
+
     private let store: ModelStore
     private let engine: any StyleEngine
+    private let clock: any MonotonicClock
+    private let idleInterval: TimeInterval
+    private let idleTaskFactory: IdleTaskFactory
+    private(set) var idleTimerRevision = 0
+    private var idleTask: Task<Void, Never>?
     private(set) var loadedModelID: String?
     private var loadTask: Task<Void, Never>?
     private(set) var loadingModelID: String?
@@ -24,7 +32,16 @@ actor StyleModelLoader: LLMBackend {
     private var loadGeneration = 0
     private static let log = Logger(subsystem: "dev.artemsem.voxflow", category: "style-model")
 
-    init(store: ModelStore, engine: any StyleEngine) { self.store = store; self.engine = engine }
+    init(store: ModelStore, engine: any StyleEngine,
+         clock: any MonotonicClock = SystemMonotonicClock(),
+         idleInterval: TimeInterval = StyleModelLoader.defaultIdleInterval,
+         idleTaskFactory: @escaping IdleTaskFactory = { operation in Task { await operation() } }) {
+        self.store = store
+        self.engine = engine
+        self.clock = clock
+        self.idleInterval = idleInterval
+        self.idleTaskFactory = idleTaskFactory
+    }
 
     func isReady() async -> Bool {
         guard !generationInFlight else { return false }
@@ -51,7 +68,12 @@ actor StyleModelLoader: LLMBackend {
         guard loadedModelID != nil else { throw LLMError.modelNotLoaded }
         guard !generationInFlight else { throw LLMError.backendBusy }
         generationInFlight = true
-        defer { generationInFlight = false }
+        idleTask?.cancel()
+        idleTask = nil
+        defer {
+            generationInFlight = false
+            armIdleTimer()
+        }
         return try await engine.generate(prompt, maxNewTokens: maxNewTokens)
     }
 
@@ -93,6 +115,7 @@ actor StyleModelLoader: LLMBackend {
                 return
             }
             loadedModelID = model.id
+            armIdleTimer()
         } catch {
             guard loadGeneration == generation else { return }
             Self.log.error("style model load failed: \(String(describing: error))")
@@ -106,6 +129,8 @@ actor StyleModelLoader: LLMBackend {
         let cancelledLoad = loadTask != nil
         let loadedModel = loadedModelID != nil
         guard cancelledLoad || loadedModel else { return }
+        idleTask?.cancel()
+        idleTask = nil
         loadGeneration += 1
         loadTask?.cancel()
         loadTask = nil
@@ -122,5 +147,29 @@ actor StyleModelLoader: LLMBackend {
             await self.engine.unload()
         }
         lifecycleTask = task
+    }
+
+    private func armIdleTimer() {
+        guard loadedModelID != nil else { return }
+        idleTask?.cancel()
+        idleTimerRevision += 1
+        let revision = idleTimerRevision
+        let clock = clock
+        let deadline = clock.now() + idleInterval
+        idleTask = idleTaskFactory { [weak self] in
+            do {
+                let remaining = deadline - clock.now()
+                if remaining > 0 { try await clock.sleep(for: remaining) }
+            } catch {
+                return
+            }
+            await self?.idleTimerFired(revision: revision)
+        }
+    }
+
+    private func idleTimerFired(revision: Int) {
+        guard revision == idleTimerRevision, !generationInFlight, loadedModelID != nil else { return }
+        idleTask = nil
+        scheduleUnloadIfNeeded()
     }
 }

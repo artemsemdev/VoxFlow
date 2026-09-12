@@ -78,8 +78,8 @@ versioning.
   Casual and Very casual tones are rewritten by a local LLM on top of the existing rule pass
   (fillers, auto-punctuation), with deterministic (greedy) sampling and automatic fallback to
   rule-based styling whenever the model is absent, still loading, the text is too long, generation
-  is slow, or the output fails validation. The model loads lazily and warms up once at launch,
-  off the critical path of the first dictation. See
+  is slow, or the output fails validation. The model loads lazily, warms up once at launch, and
+  releases its memory after five idle minutes; the next styled request reloads it automatically. See
   [ADR-007](docs/adr/007-llm-styling-on-llama-cpp.md).
 - "Re-style ▾" on History rows: pick Formal, Casual, Very casual or Verbatim from a popover to
   rewrite a past dictation into another tone without re-recording; the row updates in place and

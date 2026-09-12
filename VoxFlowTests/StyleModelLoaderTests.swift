@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Testing
 import VoxFlowCore
 import VoxFlowModels
@@ -301,6 +302,134 @@ struct StyleModelLoaderTests {
         #expect(await loader.loadedModelID == second.id)
     }
 
+    @Test("successful load and use each arm the five-minute idle lease")
+    func successfulActivityRefreshesIdleLease() async throws {
+        let dir = TemporaryDirectory()
+        try installStyleModelFile(in: dir)
+        let clock = FakeClock()
+        let engine = FakeLLMBackend(ready: true, reply: "styled")
+        let loader = StyleModelLoader(store: store(dir: dir), engine: engine, clock: clock)
+
+        #expect(StyleModelLoader.defaultIdleInterval == 300)
+        await loader.warmUp()
+        #expect(await loader.idleTimerRevision == 1)
+
+        let prompt = ChatPrompt(system: "system", user: "draft")
+        #expect(try await loader.generate(prompt, maxNewTokens: 8) == "styled")
+        #expect(await loader.idleTimerRevision == 2)
+    }
+
+    private final class AdvancingClock: MonotonicClock, Sendable {
+        private let time = Mutex<TimeInterval>(0)
+        func now() -> TimeInterval { time.withLock { $0 } }
+        func advance(by seconds: TimeInterval) { time.withLock { $0 += seconds } }
+        func sleep(for seconds: TimeInterval) async throws {
+            try Task.checkCancellation()
+            time.withLock { $0 += seconds }
+        }
+    }
+
+    @Test("a delayed timer task still unloads at the activity's original deadline")
+    func delayedTimerStartUsesAbsoluteDeadline() async throws {
+        let dir = TemporaryDirectory()
+        try installStyleModelFile(in: dir)
+        let clock = AdvancingClock()
+        let startTimer = Gate()
+        let engine = HangingLoadEngine()
+        await engine.release()
+        let loader = StyleModelLoader(
+            store: store(dir: dir), engine: engine, clock: clock, idleInterval: 300,
+            idleTaskFactory: { operation in
+                Task { await startTimer.wait(); await operation() }
+            }
+        )
+
+        await loader.warmUp()
+        clock.advance(by: 300) // child task has not started, but the activity lease has expired
+        await startTimer.open()
+        await engine.waitForUnload()
+
+        #expect(clock.now() == 300)
+        #expect(await engine.unloadCount == 1)
+        #expect(await loader.loadedModelID == nil)
+    }
+
+    @Test("idle expiry unloads once and the next readiness check reloads lazily")
+    func idleExpiryAndLazyReload() async throws {
+        let dir = TemporaryDirectory()
+        try installStyleModelFile(in: dir)
+        let clock = FakeClock()
+        let engine = HangingLoadEngine()
+        await engine.release()
+        let loader = StyleModelLoader(
+            store: store(dir: dir), engine: engine, clock: clock, idleInterval: 10
+        )
+
+        await loader.warmUp()
+        await clock.waitForSleepers(1)
+        await clock.advance(by: 10)
+        await engine.waitForUnload()
+        #expect(await loader.loadedModelID == nil)
+
+        #expect(await loader.isReady() == false)
+        await loader.warmUp()
+        #expect(await loader.isReady())
+        #expect(await engine.loadedURLs.count == 2)
+        #expect(await engine.unloadCount == 1)
+    }
+
+    @Test("successful generation replaces the stale lease deadline")
+    func successfulGenerationRefreshesDeadline() async throws {
+        let dir = TemporaryDirectory()
+        try installStyleModelFile(in: dir)
+        let clock = FakeClock()
+        let engine = HangingLoadEngine()
+        await engine.release()
+        let loader = StyleModelLoader(
+            store: store(dir: dir), engine: engine, clock: clock, idleInterval: 10
+        )
+        await loader.warmUp()
+        await clock.waitForSleepers(1)
+        await clock.advance(by: 9)
+
+        _ = try await loader.generate(ChatPrompt(system: "system", user: "draft"), maxNewTokens: 8)
+        await clock.waitForSleepers(1)
+        await clock.advance(by: 1)
+        #expect(await engine.unloadCount == 0)
+
+        await clock.advance(by: 9)
+        await engine.waitForUnload()
+        #expect(await engine.unloadCount == 1)
+    }
+
+    @Test("idle expiry cannot unload an active generation")
+    func activeGenerationDefersIdleLease() async throws {
+        let dir = TemporaryDirectory()
+        try installStyleModelFile(in: dir)
+        let clock = FakeClock()
+        let engine = ContendedStyleEngine()
+        let loader = StyleModelLoader(
+            store: store(dir: dir), engine: engine, clock: clock, idleInterval: 10
+        )
+        await loader.warmUp()
+        await clock.waitForSleepers(1)
+
+        let generation = Task {
+            try await loader.generate(ChatPrompt(system: "system", user: "draft"), maxNewTokens: 8)
+        }
+        await engine.entered.wait()
+        #expect(clock.sleeperCount == 0)
+        await clock.advance(by: 10)
+        #expect(await engine.unloadCount == 0)
+
+        await engine.release.open()
+        #expect(try await generation.value == "styled text")
+        await clock.waitForSleepers(1)
+        await clock.advance(by: 10)
+        await engine.unloadCalled.wait()
+        #expect(await engine.unloadCount == 1)
+    }
+
     @Test("concurrent ready callers cannot queue another generation behind native work", .timeLimit(.minutes(1)))
     func busyGenerationFallsBackImmediately() async throws {
         let dir = TemporaryDirectory()
@@ -334,10 +463,12 @@ struct StyleModelLoaderTests {
     private actor ContendedStyleEngine: StyleEngine {
         let entered = Gate(), release = Gate()
         private(set) var calls = 0
+        private(set) var unloadCount = 0
+        let unloadCalled = Gate()
         private var fail = false
         func isReady() async -> Bool { true }
         func load(modelAt url: URL) async throws {}
-        func unload() async {}
+        func unload() async { unloadCount += 1; await unloadCalled.open() }
         func failNext() { fail = true }
         func generate(_ prompt: ChatPrompt, maxNewTokens: Int) async throws -> String {
             calls += 1

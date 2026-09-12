@@ -50,8 +50,8 @@ that rewrites every segment of a finished file transcript).
   kicks a background load and returns `false` immediately (that call uses rules). At real
   launch, `warmUp()` runs once, low priority, right after `dictation.start()` — the first
   Metal shader compile (~20 s) happens in the background instead of blocking the first
-  dictation. Removing the model in Settings unloads it on the next `isReady()` check; the
-  model otherwise stays resident for the process's lifetime (idle unload is a follow-up).
+  dictation. Removing the model in Settings unloads it on the next `isReady()` check. It also
+  unloads after five minutes without generation activity; the next styled request reloads lazily.
 - **Re-style semantics (MW-02s).** "Re-style ▾" on every readable History row opens a
   popover — Formal / Casual / Very casual / Verbatim, a checkmark on the row's current
   style, footer "Rewrites locally and copies the result." Picking a tone re-runs
