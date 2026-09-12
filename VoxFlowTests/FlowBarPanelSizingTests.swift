@@ -43,10 +43,11 @@ struct FlowBarPanelSizingTests {
                     return (panel.contentView?.fittingSize.width ?? 0, panel.frame.width)
                 }
                 (idealWidth, frameWidth) = widths
-            } while (panel.suppressReflow || abs(idealWidth - listeningWidth) > 1 || frameWidth < listeningWidth - 1) && ContinuousClock.now < deadline
-            #expect(abs(idealWidth - listeningWidth) <= 1, "The live view must settle on its listening content")
+            } while (panel.suppressReflow || abs(idealWidth - listeningWidth) > 2 || frameWidth < idealWidth - 1) && ContinuousClock.now < deadline
+            // Attached and unattached hosts can differ slightly in font/pixel rounding.
+            #expect(abs(idealWidth - listeningWidth) <= 2, "The live view must settle on its listening content")
             print("Flow Bar cycle \(cycle): armed=\(armedWidth), listening ideal=\(idealWidth), frame=\(frameWidth)")
-            #expect(frameWidth >= listeningWidth - 1, "The reused panel must fit its current listening content")
+            #expect(frameWidth >= idealWidth - 1, "The reused panel must fit its current listening content")
             await onRunLoop { panel.hide() }
             coordinator.escape()
             await harness.wait(coordinator) { if case .discarded = $0 { true } else { false } }
