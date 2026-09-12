@@ -6,6 +6,9 @@ versioning.
 ## Unreleased
 
 ### Added
+- Name a reported exclusive microphone owner in the Flow Bar and automatically retry a still-active
+  dictation gesture when the device is released, with fresh privacy and target checks. Cancel,
+  push-to-talk release, and re-insertion stop the wait; another dictation shortcut supersedes it.
 - Right-click an inserted History transcript word to add it to Dictionary, with the same validation
   and case/diacritic-insensitive duplicate handling as the Dictionary page.
 - Record Push-to-talk, Hands-free, Cancel and Re-insert last shortcuts in Settings, with saved

@@ -351,6 +351,27 @@ public struct FlowBarMachine: Sendable, Equatable {
         }
     }
 
+    /// Fresh checks authorize capture; gesture delays retain only the time still remaining.
+    mutating func resumeMicrophone(_ checks: Preflight, activation: MicrophoneRetryIntent.Activation,
+                                  now: TimeInterval) -> [FlowBarEffect] {
+        guard state == .idle || state.isDismissable else { return [] }
+        var effects = begin(checks, now: now, cancelDismiss: state.isDismissable, mode: activation.mode)
+        switch state {
+        case .armed(var pending), .loadingModel(var pending):
+            let loading = if case .loadingModel = state { true } else { false }
+            pending.fnIsDown = activation.fnIsDown
+            state = loading ? .loadingModel(pending) : (pending.fnIsDown ? .armed(pending) : .tapped(pending))
+            effects.removeAll {
+                if case .startTimer(let timer, _) = $0 { return timer == .hold || timer == .doubleTap }
+                return false
+            }
+            if let delay = activation.holdDelay { effects.append(.startTimer(.hold, seconds: delay)) }
+            if let delay = activation.doubleTapDelay { effects.append(.startTimer(.doubleTap, seconds: delay)) }
+        default: break
+        }
+        return effects
+    }
+
     private mutating func begin(_ p: Preflight, now: TimeInterval, cancelDismiss: Bool, mode: HotkeyMode? = nil) -> [FlowBarEffect] {
         let prefix: [FlowBarEffect] = cancelDismiss ? [.cancelTimer(.dismiss)] : []
         partialText = ""

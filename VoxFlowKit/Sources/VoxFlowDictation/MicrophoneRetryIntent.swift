@@ -47,6 +47,13 @@ struct MicrophoneRetryIntent: Sendable {
         if gesture != previous { rearm() }
     }
 
+    /// Dedicated shortcuts for another mode replace the blocked gesture; repeats and hands-free
+    /// stop presses still belong to the current gesture.
+    func isReplacementShortcut(_ mode: HotkeyMode) -> Bool {
+        guard case .resolved(let current) = gesture else { return true }
+        return current != mode
+    }
+
     /// A fresh busy result may rearm the same still-live gesture after a consumed retry.
     /// Repeated free notifications must not call this: they share one offer and one ticket.
     mutating func rearm() { offered = false; pendingClaim = nil }
@@ -64,8 +71,13 @@ struct MicrophoneRetryIntent: Sendable {
     /// The driver starts capture at its current time and schedules only these remaining delays.
     mutating func consume(_ ticket: Ticket, at now: TimeInterval) -> Activation? {
         expire(at: now)
-        guard pendingClaim == ticket.id, let gesture else { return nil }
+        guard pendingClaim == ticket.id else { return nil }
         pendingClaim = nil
+        return activation(at: now)
+    }
+
+    func activation(at now: TimeInterval) -> Activation? {
+        guard let gesture, expiresAt.map({ now < $0 }) ?? true else { return nil }
         switch gesture {
         case .resolved(let mode):
             return Activation(mode: mode, fnIsDown: mode == .pushToTalk, holdDelay: nil, doubleTapDelay: nil)

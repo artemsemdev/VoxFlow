@@ -32,6 +32,10 @@ any app, style cleanup with a local LLM and an MCP server follow in 2.x (see the
   processing and the result. Recognized text is inserted into the focused field via Accessibility,
   or copied to the clipboard when there isn't a text field; finished dictations save to encrypted
   history unless the Privacy toggle turns that off.
+- The Flow Bar names an app holding exclusive access to the microphone when macOS reports its
+  owner. When that app releases the device, a still-active dictation gesture retries with fresh
+  permission and target checks. Releasing push-to-talk, cancelling, or re-inserting the last
+  dictation cancels that wait; a different dictation shortcut replaces it.
 - File transcription yields the shared speech engine between ten-second windows; pending
   dictation takes priority over the next file window. One model remains loaded for both paths.
 - Needs Microphone and Accessibility permission, and Contacts (optional — only prompted if you turn

@@ -14,6 +14,7 @@ public actor DictationController {
 
     private var machine: FlowBarMachine
     private let microphone: any MicrophoneCapturing
+    private let microphoneUse: any MicrophoneUseMonitoring
     private let transcriber: any DictationTranscribing
     private let inserter: any TextInserting
     private let clock: any MonotonicClock
@@ -22,6 +23,7 @@ public actor DictationController {
     private let options: @Sendable () -> TranscriptionOptions
     private let onSave: SaveHandler
     private let copyToClipboard: @Sendable (String) -> Void
+    private let retryExpiryTaskFactory: @Sendable (@escaping @Sendable () async -> Void) -> Task<Void, Never>
     /// Decides, once per capture, whether that capture's result should be treated as ephemeral (e.g.
     /// onboarding's Try It step or a History "scratchpad") — an ephemeral capture's `.saveHistory`
     /// effect is a no-op. Read exactly once, in `startCapture()`, and cached in `captureIsEphemeral`:
@@ -33,6 +35,8 @@ public actor DictationController {
     private var feed: AsyncStream<AudioChunk>.Continuation?
     private var captureTask: Task<Void, Never>?
     private var transcribeTask: Task<Void, Never>?
+    private var modelLoadTask: (capture: UInt64, generation: UInt64, task: Task<Void, Never>)?
+    private var nextModelLoadGeneration: UInt64 = 0
     /// Bumped by `teardown()` (so also by `startCapture()`, which calls it first): invalidates every
     /// callback still in flight from a torn-down capture, so a stale mic chunk, transcript, insertion,
     /// or mic/transcription failure from an aborted dictation can never reach a newer one.
@@ -50,6 +54,12 @@ public actor DictationController {
     private var lastCompletedResult: DictationResult?
     private var isReinserting = false
     private var isPreparingCapture = false
+    private var retryIntent: MicrophoneRetryIntent
+    private var retryWatch: Task<Void, Never>?
+    private var retryExpiry: Task<Void, Never>?
+    private var retryGeneration: UInt64 = 0
+    private var waitingForMicrophone = false
+    private var pendingActivationID: UInt64?
     private var lastAppName: String?
     /// A config set mid-dictation (`updateConfig` while not `.idle`) waits here rather than
     /// mutating the running machine's timers out from under it — applied the moment the machine
@@ -68,9 +78,17 @@ public actor DictationController {
                 options: @escaping @Sendable () -> TranscriptionOptions,
                 onSave: @escaping SaveHandler,
                 copyToClipboard: @escaping @Sendable (String) -> Void,
-                ephemeral: @escaping @Sendable () -> Bool = { false }) {
+                ephemeral: @escaping @Sendable () -> Bool = { false },
+                microphoneUse: any MicrophoneUseMonitoring = UnmonitoredMicrophoneUse(),
+                retryExpiryTaskFactory: @escaping @Sendable (
+                    @escaping @Sendable () async -> Void
+                ) -> Task<Void, Never> = { operation in
+                    Task { await operation() }
+                }) {
         machine = FlowBarMachine(config: config)
+        retryIntent = MicrophoneRetryIntent(config: config)
         self.microphone = microphone
+        self.microphoneUse = microphoneUse
         self.transcriber = transcriber
         self.inserter = inserter
         self.clock = clock
@@ -80,9 +98,12 @@ public actor DictationController {
         self.onSave = onSave
         self.copyToClipboard = copyToClipboard
         self.ephemeral = ephemeral
+        self.retryExpiryTaskFactory = retryExpiryTaskFactory
     }
 
     public var state: FlowBarState { machine.state }
+    /// A causal barrier for lifecycle tests; callers cannot replace or cancel the task.
+    var activeModelLoadTask: Task<Void, Never>? { modelLoadTask?.task }
     /// Exposed for tests and live-settings callers (`updateConfig` below is the only writer).
     public var config: FlowBarConfig { machine.config }
 
@@ -92,6 +113,7 @@ public actor DictationController {
     public func updateConfig(_ config: FlowBarConfig) {
         if machine.state == .idle {
             machine.config = config
+            retryIntent = MicrophoneRetryIntent(config: config)
         } else {
             pendingConfig = config
         }
@@ -158,30 +180,80 @@ public actor DictationController {
     }
     private func removeResultSubscriber(_ id: UUID) { resultSubscribers[id] = nil }
 
-    public func fnDown() async { await activate(mode: nil) }
-    public func fnUp() { handle(.fnUp) }
-    public func shortcutDown(_ mode: HotkeyMode) async { await activate(mode: mode) }
+    public func fnDown() async {
+        if updateWaitingInput(.fnDown) { return }
+        await activate(mode: nil)
+    }
+    public func fnUp() {
+        let waiting = updateWaitingInput(.fnUp)
+        if !waiting { handle(.fnUp) }
+    }
+    public func shortcutDown(_ mode: HotkeyMode) async {
+        if hasBlockedGesture, retryIntent.isReplacementShortcut(mode) {
+            stopMicrophoneWait(clearIntent: true)
+            captureID &+= 1
+            retryIntent.begin(mode: mode, at: clock.now())
+            if isPreparingCapture { pendingActivationID = captureID }
+            else { await prepareCapture() }
+            return
+        }
+        if updateWaitingInput(.shortcutDown(mode)) { return }
+        await activate(mode: mode)
+    }
     private func activate(mode: HotkeyMode?) async {
         guard !isReinserting, !isPreparingCapture else { return }
-        // Preflight captures the insertion target. Only a start may replace that target; a stop
-        // or an ignored dedicated shortcut must preserve the current capture's focus snapshot.
-        var checks: Preflight?
+        // Only a start may replace the insertion target; continuations preserve its snapshot.
         if canReinsert {
-            isPreparingCapture = true
-            let id = captureID
-            checks = await preflight()
-            isPreparingCapture = false
-            guard id == captureID, !Task.isCancelled else { return }
-        }
-        if let mode { handle(.shortcutDown(mode, checks)) }
-        else { handle(.fnDown(checks)) }
+            captureID &+= 1
+            pendingActivationID = nil
+            retryIntent.begin(mode: mode, at: clock.now())
+            await prepareCapture()
+        } else if let mode { handle(.shortcutDown(mode, nil)) }
+        else { handle(.fnDown(nil)) }
     }
-    public func pushToTalkReleased() { handle(.pushToTalkReleased) }
+    private func prepareCapture() async {
+        isPreparingCapture = true
+        let id = captureID
+        let checks = await preflight()
+        finishPreparingCapture()
+        guard id == captureID, !Task.isCancelled,
+              let activation = retryIntent.activation(at: clock.now()) else { return }
+        resumeMicrophone(checks, activation: activation)
+    }
+
+    private func finishPreparingCapture() {
+        isPreparingCapture = false
+        guard let id = pendingActivationID else { return }
+        // The old preflight may ignore cancellation. Drain it before preparing a new target,
+        // then use a new task so its cancellation cannot cancel the replacement activation.
+        Task {
+            guard self.pendingActivationID == id, self.captureID == id,
+                  !self.isPreparingCapture, !self.isReinserting else { return }
+            self.pendingActivationID = nil
+            await self.prepareCapture()
+        }
+    }
+
+    private var hasBlockedGesture: Bool {
+        if waitingForMicrophone || pendingActivationID != nil { return true }
+        if case .micUnavailable(.inUse) = machine.state { return isPreparingCapture }
+        return false
+    }
+
+    public func pushToTalkReleased() {
+        let waiting = updateWaitingInput(.pushToTalkReleased)
+        if !waiting { handle(.pushToTalkReleased) }
+    }
     public func escape() {
         if isReinserting || isPreparingCapture { captureID &+= 1 }
-        handle(.escape)
+        if !updateWaitingInput(.cancel) { handle(.escape) }
     }
-    public func anyKey() { handle(.anyKey) }
+    public func anyKey() {
+        if hasBlockedGesture || machine.state.isDismissable {
+            if updateWaitingInput(.cancel) { return }
+        }
+        handle(.anyKey)
+    }
     public func copyRaw() { handle(.copyRawRequested) }
     /// Escape can invalidate storage/target preparation. Dispatching `insert` is the commit point:
     /// the insertion protocol cannot roll back an edit already handed to the target application.
@@ -191,7 +263,11 @@ public actor DictationController {
         guard canReinsert, !isReinserting, !isPreparingCapture else { return nil }
         isReinserting = true
         defer { isReinserting = false }
+        let watch = retryWatch
+        stopMicrophoneWait(clearIntent: true)
+        captureID &+= 1
         let id = captureID
+        await watch?.value // No preflight is running: only drain cancellation of the observer.
         let cachedResult: DictationResult?
         if let lastCompletedResult { cachedResult = lastCompletedResult }
         else { cachedResult = await lastSaved() }
@@ -207,7 +283,13 @@ public actor DictationController {
     }
     private var canReinsert: Bool { machine.state == .idle || machine.state.isDismissable }
     /// FB-09: pause dictation from the menu bar or the Flow Bar pill.
-    public func pause(for seconds: TimeInterval) { handle(.pause(seconds: seconds)) }
+    public func pause(for seconds: TimeInterval) {
+        if machine.state == .idle || machine.state.isDismissable {
+            retryIntent.update(.cancel, at: clock.now())
+            stopMicrophoneWait(clearIntent: true)
+        }
+        handle(.pause(seconds: seconds))
+    }
     public func resume() { handle(.resume) }
     /// This controller's (monotonic) clock's "until" — `nil` outside `.paused`.
     public var pausedUntil: TimeInterval? {
@@ -217,14 +299,130 @@ public actor DictationController {
     private func handle(_ event: FlowBarEvent) {
         let before = machine.state
         let effects = machine.handle(event, now: clock.now())
+        publish(effects, from: before)
+    }
+
+    private func resumeMicrophone(_ checks: Preflight, activation: MicrophoneRetryIntent.Activation) {
+        let before = machine.state
+        let effects = machine.resumeMicrophone(checks, activation: activation, now: clock.now())
+        publish(effects, from: before)
+    }
+
+    private func publish(_ effects: [FlowBarEffect], from before: FlowBarState) {
         if machine.state != before {
             if machine.state == .idle, let pendingConfig {
                 machine.config = pendingConfig
+                retryIntent = MicrophoneRetryIntent(config: pendingConfig)
                 self.pendingConfig = nil
             }
             for c in subscribers.values { c.yield(machine.state) }
         }
         for effect in effects { run(effect) }
+        if case .micUnavailable(.inUse) = machine.state { beginMicrophoneWait() }
+    }
+
+    /// Returns whether this input belongs to an existing blocked gesture, including its stop.
+    private func updateWaitingInput(_ input: MicrophoneRetryIntent.Input) -> Bool {
+        let wasWaiting = hasBlockedGesture
+        retryIntent.update(input, at: clock.now())
+        guard wasWaiting else { return false }
+        guard retryIntent.activation(at: clock.now()) != nil else {
+            stopMicrophoneWait(clearIntent: true)
+            handle(.anyKey)
+            return true
+        }
+        scheduleRetryExpiry()
+        return true
+    }
+
+    private func beginMicrophoneWait() {
+        guard retryIntent.activation(at: clock.now()) != nil else { return }
+        run(.cancelTimer(.dismiss)) // A live retry must not outlast an invisible error pill.
+        guard !waitingForMicrophone else { return }
+        waitingForMicrophone = true
+        retryGeneration &+= 1
+        let generation = retryGeneration
+        let stream = microphoneUse.changes() // Subscribe before the snapshot to avoid a release gap.
+        let initial = microphoneUse.currentState()
+        retryWatch = Task {
+            await self.microphoneUseChanged(initial, generation: generation)
+            for await value in stream {
+                guard self.waitingForMicrophone, self.retryGeneration == generation, !Task.isCancelled else { break }
+                await self.microphoneUseChanged(value, generation: generation)
+            }
+            if self.waitingForMicrophone, self.retryGeneration == generation {
+                self.stopMicrophoneWait(clearIntent: true)
+                self.run(.startTimer(.dismiss, seconds: self.machine.config.dismissError))
+            }
+        }
+        scheduleRetryExpiry()
+    }
+
+    private func scheduleRetryExpiry() {
+        retryExpiry?.cancel()
+        retryExpiry = nil
+        guard let deadline = retryIntent.expiresAt else { return }
+        let generation = retryGeneration
+        retryExpiry = retryExpiryTaskFactory {
+            let delay = deadline - self.clock.now()
+            if delay > 0 {
+                do { try await self.clock.sleep(for: delay) } catch { return }
+            }
+            await self.retryExpiryFired(deadline: deadline, generation: generation)
+        }
+    }
+
+    private func retryExpiryFired(deadline: TimeInterval, generation: UInt64) {
+        guard waitingForMicrophone, retryGeneration == generation,
+              retryIntent.expiresAt == deadline else { return }
+        stopMicrophoneWait(clearIntent: true)
+        handle(.anyKey)
+    }
+
+    private func stopMicrophoneWait(clearIntent: Bool) {
+        waitingForMicrophone = false
+        retryGeneration &+= 1
+        retryWatch?.cancel(); retryWatch = nil
+        retryExpiry?.cancel(); retryExpiry = nil
+        if clearIntent {
+            pendingActivationID = nil
+            retryIntent.update(.cancel, at: clock.now())
+        }
+    }
+
+    private func microphoneUseChanged(_ value: MicrophoneUseState, generation: UInt64) async {
+        guard waitingForMicrophone, retryGeneration == generation, !Task.isCancelled else { return }
+        if case .inUse(let name) = value {
+            let before = machine.state
+            machine.state = .micUnavailable(.inUse(by: name))
+            publish([], from: before)
+            return
+        }
+        guard value == .available, !isPreparingCapture,
+              let ticket = retryIntent.claim(at: clock.now()) else { return }
+        isPreparingCapture = true
+        let id = captureID
+        let checks = await preflight()
+        finishPreparingCapture()
+        guard waitingForMicrophone, retryGeneration == generation, id == captureID, !Task.isCancelled else { return }
+        guard let activation = retryIntent.consume(ticket, at: clock.now()) else {
+            if retryIntent.activation(at: clock.now()) == nil {
+                stopMicrophoneWait(clearIntent: true)
+                handle(.anyKey)
+            } else {
+                // A second tap may have superseded the suspended claim without another hardware
+                // notification. Retry its new intent after the earlier preflight has drained.
+                await microphoneUseChanged(microphoneUse.freshState(), generation: generation)
+            }
+            return
+        }
+        if case .inUse = checks.microphone {
+            retryIntent.rearm() // A new busy result permits the next real holder release.
+            resumeMicrophone(checks, activation: activation)
+            return
+        }
+        stopMicrophoneWait(clearIntent: false)
+        resumeMicrophone(checks, activation: activation)
     }
 
     private func run(_ effect: FlowBarEffect) {
@@ -233,10 +431,18 @@ public actor DictationController {
         case .finishCapture: captureTask?.cancel(); captureTask = nil; feed?.finish(); feed = nil
         case .abortCapture: teardown(); lastResult = nil
         case .loadModel:
-            Task {
-                do { try await self.loadModel(); self.handle(.modelLoaded) }
-                catch { self.handle(.modelLoadFailed(String(describing: error))) }
+            let capture = captureID
+            let generation = nextModelLoadGeneration
+            nextModelLoadGeneration &+= 1
+            let task = Task {
+                do {
+                    try await self.loadModel()
+                    self.modelLoaded(capture: capture, generation: generation)
+                } catch {
+                    self.modelLoadFailed(error, capture: capture, generation: generation)
+                }
             }
+            modelLoadTask = (capture, generation, task)
         case .startTimer(let id, let seconds):
             timers[id]?.task.cancel()
             let generation = nextTimerGeneration
@@ -340,11 +546,29 @@ public actor DictationController {
         handle(.transcriptionFailed(description))
     }
 
+    private func claimModelLoad(capture: UInt64, generation: UInt64) -> Bool {
+        guard capture == captureID,
+              let active = modelLoadTask,
+              active.capture == capture,
+              active.generation == generation else { return false }
+        modelLoadTask = nil
+        return true
+    }
+    private func modelLoaded(capture: UInt64, generation: UInt64) {
+        guard claimModelLoad(capture: capture, generation: generation) else { return }
+        handle(.modelLoaded)
+    }
+    private func modelLoadFailed(_ error: any Error, capture: UInt64, generation: UInt64) {
+        guard claimModelLoad(capture: capture, generation: generation) else { return }
+        handle(.modelLoadFailed(String(describing: error)))
+    }
+
     private func teardown() {
         captureID &+= 1   // invalidates every callback still in flight from the old capture
         captureIsEphemeral = false
         captureTask?.cancel(); captureTask = nil
         transcribeTask?.cancel(); transcribeTask = nil
+        modelLoadTask?.task.cancel(); modelLoadTask = nil
         feed?.finish(); feed = nil
     }
 }

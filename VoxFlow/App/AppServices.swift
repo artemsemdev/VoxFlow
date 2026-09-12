@@ -336,7 +336,8 @@ final class AppServices {
             },
             onSave: { result, appName in await historyWriter.save(result, appName: appName) },
             copyToClipboard: { SystemPasteboard().setString($0) },
-            ephemeral: { ephemeralScope.isActive }
+            ephemeral: { ephemeralScope.isActive },
+            microphoneUse: microphoneUse
         )
         let dictation = DictationCoordinator(controller: dictationController, settings: dictationSettings,
                                              permissions: permissions, navigation: navigation, clock: clock)
