@@ -107,6 +107,34 @@ public actor DictationController {
         self.retryExpiryTaskFactory = retryExpiryTaskFactory
     }
 
+    private var terminationPending = false
+
+    /// Atomically reports pending work and prevents a suspended preflight or a fresh hotkey/MCP
+    /// request from starting another recording while the user is deciding or files are draining.
+    public func beginTermination() -> Bool {
+        let busy = machine.state.hasUnfinishedCapture || isPreparingCapture || isReinserting || !historySaves.isEmpty
+        terminationPending = true
+        if isPreparingCapture || isReinserting { captureID &+= 1 }
+        stopMicrophoneWait(clearIntent: true)
+        return busy
+    }
+
+    public func cancelTermination() { terminationPending = false }
+
+    private var historySaves: [UUID: Task<Void, Never>] = [:]
+
+    /// Flushes the active recording and waits for insertion and durable history before quit.
+    public func finishForTermination() async {
+        let changes = currentAndChanges()
+        handle(.finishRequested)
+        for await state in changes {
+            if !state.hasUnfinishedCapture { break }
+        }
+        for save in historySaves.values { await save.value }
+    }
+
+    public var hasPendingHistorySave: Bool { !historySaves.isEmpty }
+
     public var state: FlowBarState { machine.state }
     /// A causal barrier for lifecycle tests; callers cannot replace or cancel the task.
     var activeModelLoadTask: Task<Void, Never>? { modelLoadTask?.task }
@@ -198,6 +226,7 @@ public actor DictationController {
     private func removeDeviceSubscriber(_ id: UUID) { deviceSubscribers[id] = nil }
 
     public func fnDown() async {
+        guard !terminationPending else { return }
         if updateWaitingInput(.fnDown) { return }
         await activate(mode: nil)
     }
@@ -206,6 +235,7 @@ public actor DictationController {
         if !waiting { handle(.fnUp) }
     }
     public func shortcutDown(_ mode: HotkeyMode) async {
+        guard !terminationPending else { return }
         if hasBlockedGesture, retryIntent.isReplacementShortcut(mode) {
             stopMicrophoneWait(clearIntent: true)
             captureID &+= 1
@@ -277,7 +307,7 @@ public actor DictationController {
     @discardableResult
     public func reinsertLast(prepare: @Sendable () async -> ReinsertionTarget,
                              lastSaved: @Sendable () async -> DictationResult? = { nil }) async -> InsertionResult? {
-        guard canReinsert, !isReinserting, !isPreparingCapture else { return nil }
+        guard !terminationPending, canReinsert, !isReinserting, !isPreparingCapture else { return nil }
         isReinserting = true
         defer { isReinserting = false }
         let watch = retryWatch
@@ -499,7 +529,11 @@ public actor DictationController {
                 // second call site — this is the one place a finished, non-ephemeral capture's
                 // result is known.
                 for c in resultSubscribers.values { c.yield(result) }
-                Task { await self.onSave(result, appName) }
+                let saveID = UUID()
+                historySaves[saveID] = Task {
+                    await self.onSave(result, appName)
+                    self.historySaves[saveID] = nil
+                }
             }
         }
     }

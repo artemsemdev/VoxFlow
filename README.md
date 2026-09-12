@@ -13,6 +13,8 @@ any app, style cleanup with a local LLM and an MCP server follow in 2.x (see the
 
 ## What works today (2.0.0)
 
+- Quitting during file transcription or dictation asks whether to finish and save first, quit immediately, or cancel.
+
 - Drop audio or video files on the window or the Dock icon, use Finder's Open With, or File › Open.
   MP3, WAV, M4A/AAC, FLAC, AIFF, CAF, MP4, MOV are accepted; anything else is rejected on drop.
 - A queue with progress and an ETA, Stop with a confirmation above 10 %, a confirmation for drops

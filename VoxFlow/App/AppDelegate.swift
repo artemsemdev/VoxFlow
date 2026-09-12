@@ -3,6 +3,52 @@ import SwiftUI
 
 /// Dock-icon drops and Finder "Open With" (design MW-06: "drop on Dock icon").
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private var quitCoordinator: QuitCoordinator?
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard !LaunchEnvironment.isRunningTests() else { return .terminateNow }
+        if quitCoordinator?.allowsTermination == true { return .terminateNow }
+        if quitCoordinator == nil {
+            let services = AppServices.shared
+            quitCoordinator = QuitCoordinator(snapshot: {
+                let pendingDictation = await services.dictationController.beginTermination()
+                await services.queue.setTerminationPending(true)
+                let items = await services.queue.items
+                let pendingExport = items.contains { item in
+                    if case .done = item.status {
+                        return services.exports.url(for: item.id) == nil
+                    }
+                    return false
+                }
+                let running = await services.queue.isRunning || pendingExport
+                let item = items.first {
+                    switch $0.status { case .running, .loadingModel: true; default: false }
+                }
+                let progress: Double? = if case .running(let value)? = item?.status { value } else { nil }
+                return QuitActivity(queueRunning: running, fileName: item?.url.lastPathComponent,
+                                    progress: progress, dictation: await services.dictationController.state,
+                                    pendingDictationWork: pendingDictation,
+                                    hasUnsavedTranscript: items.contains { services.exports.error(for: $0.id) != nil })
+            }, present: QuitCoordinator.present, finish: {
+                // Keep the app's menu bar and event loop alive until all current work is durable.
+                async let dictation: Void = services.dictationController.finishForTermination()
+                await services.queue.waitUntilIdle()
+                let exported = await services.exports.waitForExports(of: services.queue.items)
+                await dictation
+                if !exported {
+                    services.navigation.page = .files
+                    services.navigation.requestMainWindow = true
+                }
+                return exported
+            }, resume: {
+                await services.dictationController.cancelTermination()
+                await services.queue.setTerminationPending(false)
+            }, quit: { sender.terminate(nil) })
+        }
+        Task { await quitCoordinator?.request() }
+        return .terminateCancel
+    }
+
     /// Starts the dictation loop exactly once: `dictation.start()` begins mirroring controller state,
     /// `flowBar.bind(to:)` shows/hides the HUD off that state, `fnMonitor.start()` arms the global
     /// fn/esc/any-key monitors (design 3e — needs Accessibility trust to see events at all).

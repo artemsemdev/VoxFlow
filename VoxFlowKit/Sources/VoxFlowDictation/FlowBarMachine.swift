@@ -30,6 +30,7 @@ public enum FlowBarTimer: Sendable, Hashable { case hold, doubleTap, silence, ca
 public enum FlowBarEvent: Sendable, Equatable {
     /// A continuation/stop may omit preflight; starting capture always requires fresh checks.
     case fnDown(Preflight?), fnUp, escape, anyKey
+    case finishRequested
     /// A separately assigned shortcut has no ambiguous hold/double-tap gesture to resolve.
     /// Missing preflight permits stopping only; it can never start a capture.
     case shortcutDown(HotkeyMode, Preflight?), pushToTalkReleased
@@ -120,6 +121,13 @@ public enum FlowBarState: Sendable, Equatable {
     /// rather than treated as a retry (only `.resume` or the `.pauseEnd` timer clears it).
     case paused(until: TimeInterval)
 
+    public var hasUnfinishedCapture: Bool {
+        switch self {
+        case .armed, .tapped, .loadingModel, .listening, .processing: true
+        default: false
+        }
+    }
+
     public var isProcessing: Bool { if case .processing = self { true } else { false } }
 
     /// States that auto-dismiss and treat fn-down as a retry.
@@ -154,6 +162,12 @@ public struct FlowBarMachine: Sendable, Equatable {
 
     public mutating func handle(_ event: FlowBarEvent, now: TimeInterval) -> [FlowBarEffect] {
         switch (state, event) {
+        case (.armed, .finishRequested), (.tapped, .finishRequested), (.listening, .finishRequested):
+            return startProcessing(now: now, limitReached: false, cancelling: [.hold, .doubleTap, .cap, .silence])
+        case (.loadingModel(var pending), .finishRequested):
+            pending.stopRequested = true
+            state = .loadingModel(pending)
+            return [.cancelTimer(.hold), .cancelTimer(.doubleTap)]
         case (let s, .reinsertionFinished(let text, let result)) where s == .idle || s.isDismissable:
             switch result {
             case .inserted(let app):
