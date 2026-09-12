@@ -29,6 +29,8 @@ public struct MCPRouter: Sendable {
 
     public func route(_ request: JSONRPCRequest, context: MCPRequestContext) -> MCPRouted {
         switch request.method {
+        case "ping":
+            return .result(.object([:]))
         case "server/discover":
             return .result(discoverResult(context: context))
         case "initialize":

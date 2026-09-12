@@ -187,6 +187,25 @@ whole stack over a real socket, and records the resulting design as this ADR.
 
 ## Related
 
+### Native stdio addition (#165)
+
+The signed app supports `--mcp-stdio` before constructing production SwiftUI scenes. Its
+client owns the subprocess and its approvals; no HTTP listener, bearer token, peer discovery
+or persisted HTTP approval is created. The existing router and tool bodies retain enabled-tool,
+path, history and dictation privacy policies. Settings are sampled at process startup; restart
+the client after changing tool choices. Each subprocess owns its own model instances.
+
+The transport accepts bounded newline-delimited UTF-8 JSON-RPC, sends only protocol responses
+on its preserved stdout pipe, and redirects native diagnostics to stderr. EOF cancels pending
+requests and tears down capture. Handshakes do not open the history database or Keychain.
+This removes the Node bridge requirement for Claude Desktop; the original HTTP path and its
+approval behavior remain available. See the [client runbook](../runbooks/connect-an-mcp-client.md).
+
+The Settings empty-client and token-regeneration copy now explicitly describes HTTP clients;
+native stdio revocation belongs to the launching client. The regeneration explanation in the
+authoritative canvas was updated accordingly. Earlier bridge-only statements in this ADR
+describe the original HTTP transport decision and are superseded for native stdio.
+
 - [ADR-002](002-whisper-cpp-speech-engine.md) — the whisper.cpp engine `transcribe_file` and
   dictation both queue against (Consequences, #145).
 - `docs/superpowers/plans/2026-09-10-phase6-mcp-server.md` — the ten binding rulings this ADR

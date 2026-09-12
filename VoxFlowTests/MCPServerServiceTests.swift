@@ -87,6 +87,38 @@ struct MCPServerServiceTests {
         }
     }
 
+    @Test("stdio handshake and notifications need no transport, token, database or approval")
+    func stdioHandshake() async throws {
+        let h = try Harness()
+        defer { h.databaseGate.finish() }
+        let data = try #require(await h.service.handleStdio(JSONRPCRequest(id: .number(1), method: "initialize")))
+        let response = try JSONDecoder().decode(JSONRPCResponse.self, from: data)
+        #expect(response.id == .number(1))
+        #expect(response.result?["serverInfo"]?["version"]?.stringValue == "test")
+        #expect(await h.service.handleStdio(JSONRPCRequest(method: "notifications/initialized")) == nil)
+        #expect(h.probe.databaseLoads == 0 && h.probe.transports.isEmpty && h.approvals.calls == 0)
+        let invalidVersion = try #require(await h.service.handleStdio(JSONRPCRequest(id: .number(4), method: "tools/list",
+            params: .object(["_meta": .object([MCPMetaKey.protocolVersion: .string("unsupported")])]))))
+        #expect(try JSONDecoder().decode(JSONRPCResponse.self, from: invalidVersion).error != nil)
+    }
+
+    @Test("stdio retains disabled-tool and file-path policies without creating an HTTP grant")
+    func stdioToolPolicies() async throws {
+        let h = try Harness()
+        defer { h.databaseGate.finish() }
+        h.settings.toolSearchHistory = false
+        let disabled = try #require(await h.service.handleStdio(JSONRPCRequest(id: .number(2), method: "tools/call",
+            params: .object(["name": .string("search_history")]))))
+        #expect(try JSONDecoder().decode(JSONRPCResponse.self, from: disabled).error != nil)
+        #expect(h.probe.databaseLoads == 0)
+        h.databaseGate.release()
+        let invalid = try #require(await h.service.handleStdio(JSONRPCRequest(id: .number(3), method: "tools/call",
+            params: .object(["name": .string("transcribe_file"),
+                "arguments": .object(["path": .string("/etc/passwd")])]))))
+        #expect(try JSONDecoder().decode(JSONRPCResponse.self, from: invalid).error != nil)
+        #expect(h.probe.transports.isEmpty && h.approvals.calls == 0)
+    }
+
     @Test("stop during lazy resolution prevents an old start from binding or enabling settings",
           arguments: [false, true])
     func stoppedResolution(restart: Bool) async throws {

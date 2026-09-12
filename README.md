@@ -30,6 +30,10 @@ any app, style cleanup with a local LLM and an MCP server follow in 2.x (see the
 
 ### Dictation (`develop`, in progress toward 2.2.0)
 
+- Claude Desktop can launch the signed app with `--mcp-stdio`, using its own client approvals
+  without Node, a bearer token or an HTTP listener. See the MCP client runbook for configuration
+  and the distinction from HTTP Connected clients and revocation.
+
 - Hold fn anywhere to dictate (double-tap for hands-free); a floating Flow Bar HUD shows listening,
   processing and the result. Recognized text is inserted into the focused field via Accessibility,
   or copied to the clipboard when there isn't a text field; finished dictations save to encrypted

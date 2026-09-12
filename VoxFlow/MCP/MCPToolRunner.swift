@@ -167,6 +167,20 @@ final class MCPToolRunner: MCPRequestHandling, Sendable {
         guard await authorize(identity, toolNames: toolNames) else {
             return (MCPError.unauthorized.httpStatus, Self.encode(JSONRPCResponse(id: id, error: MCPError.unauthorized.jsonRPCError())))
         }
+        return await executeTool(toolID, arguments: arguments, id: id)
+    }
+
+    /// The stdio entry point is explicitly launched by its client; HTTP callers must first pass
+    /// the bearer-token and client-approval path above. Tool/path/privacy policies remain shared.
+    func executeStdioTool(_ toolID: MCPToolID, arguments: JSONValue, id: JSONRPCID) async -> Data? {
+        guard !Task.isCancelled else { return nil }
+        guard enabledTools.contains(toolID) else {
+            return Self.encode(JSONRPCResponse(id: id, error: MCPError.methodNotFound.jsonRPCError()))
+        }
+        return await executeTool(toolID, arguments: arguments, id: id).body
+    }
+
+    private func executeTool(_ toolID: MCPToolID, arguments: JSONValue, id: JSONRPCID?) async -> (status: Int, body: Data?) {
         let outcome: ToolOutcome
         switch toolID {
         case .transcribeFile: outcome = await transcribeFile(arguments)
