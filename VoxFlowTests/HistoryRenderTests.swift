@@ -27,7 +27,8 @@ struct HistoryRenderTests {
                        duration: duration, createdAt: Date().addingTimeInterval(-minutesAgo * 60))
     }
 
-    private func makeBundle(keepHistory: Bool = true, saveFails: Bool = false) -> Bundle {
+    private func makeBundle(keepHistory: Bool = true, saveFails: Bool = false,
+                            pasteboard: any VoxFlow.Pasteboard = FakePasteboard()) -> Bundle {
         let dir = TemporaryDirectory()
         let clock = FakeClock()
         let settings = DictationSettings(store: InMemoryKeyValueStore())
@@ -39,7 +40,7 @@ struct HistoryRenderTests {
                                      keyProvider: { InsecureHistoryKeyProvider() }, clock: clock)
         let updateText: ((Int64, String) async -> DictationRecord?)? = saveFails ? { _, _ in nil } : nil
         let vm = HistoryViewModel(service: service, settings: settings, navigation: navigation, clock: clock,
-                                  initialDateRange: .thisWeek, updateText: updateText)
+                                  pasteboard: pasteboard, initialDateRange: .thisWeek, updateText: updateText)
         return Bundle(vm: vm, service: service, settings: settings, clock: clock)
     }
 
@@ -114,6 +115,28 @@ struct HistoryRenderTests {
             let url = directory.appendingPathComponent("History-\(testCase.name).png")
             try Self.writePNG(image, to: url)
         }
+    }
+
+    @Test("renders source-specific copy feedback in narrow expanded history",
+          arguments: ["original", "inserted"], [false, true])
+    func copiedTranscript(sourceName: String, dark: Bool) async throws {
+        let pasteboard = FakePasteboard()
+        let bundle = makeBundle(pasteboard: pasteboard)
+        _ = await bundle.service.count()
+        let store = try #require(bundle.service.store)
+        let record = try store.insert(draft("Please send the updated invoice before Thursday.",
+            raw: "um please send the updated invoice before thursday", appName: "Mail", style: "formal",
+            language: "en", duration: 8, minutesAgo: 1))
+        await bundle.vm.load()
+        bundle.vm.toggleExpanded(id: record.id)
+        let source: HistoryViewModel.CopySource = sourceName == "original" ? .original : .inserted
+        bundle.vm.copy(record, source: source)
+        #expect(pasteboard.strings == [source == .original ? record.rawText : record.text])
+        let directory = Self.rendersDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let host = NativeRenderHost(HistoryPageBody(viewModel: bundle.vm, ephemeralScope: EphemeralScope())
+            .background(Color(nsColor: .windowBackgroundColor)), size: NSSize(width: 640, height: 640), dark: dark)
+        try await host.captureSettled(to: directory.appendingPathComponent("History-copy-\(sourceName)-\(dark).png"))
     }
 
     /// Renders `RestyleMenuView` on its own (design 2e's open "Re-style ▾" popover) for a record with

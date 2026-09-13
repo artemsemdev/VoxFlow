@@ -103,6 +103,9 @@ final class HistoryViewModel {
     /// isolation assertion — same pattern as `FilesViewModel.eventTask`.
     private nonisolated let searchTask = Mutex<Task<Void, Never>?>(nil)
     private nonisolated let undoTask = Mutex<Task<Void, Never>?>(nil)
+    private nonisolated let copyTask = Mutex<Task<Void, Never>?>(nil)
+    private var copiedReceipt: CopyReceipt?
+    private var copyGeneration = 0
 
     init(service: HistoryService, settings: DictationSettings, navigation: Navigation, clock: any MonotonicClock,
          pasteboard: any Pasteboard = SystemPasteboard(),
@@ -131,6 +134,7 @@ final class HistoryViewModel {
     deinit {
         searchTask.withLock { $0?.cancel() }
         undoTask.withLock { $0?.cancel() }
+        copyTask.withLock { $0?.cancel() }
     }
 
     // MARK: Derived state
@@ -218,8 +222,51 @@ final class HistoryViewModel {
         expandedID = expandedID == id ? nil : id
     }
 
-    func copy(_ record: DictationRecord) {
-        pasteboard.setString(record.text)
+    enum CopySource: Sendable {
+        case original, inserted
+        var title: String { self == .original ? "Copy original" : "Copy inserted" }
+    }
+    static let copiedTitle = "✓ Copied"
+    static let copyFeedbackDuration: TimeInterval = 2
+
+    private struct CopyReceipt: Equatable {
+        let id: Int64
+        let source: CopySource
+        let text: String
+    }
+
+    private func copyText(_ record: DictationRecord, source: CopySource) -> String {
+        source == .original ? record.rawText : record.text
+    }
+
+    func canCopy(_ record: DictationRecord, source: CopySource) -> Bool {
+        !record.isUnreadable && !copyText(record, source: source).isEmpty
+            && !(source == .inserted && editingID == record.id)
+            && restylingID == nil && !isSavingEdit
+    }
+
+    func copyTitle(for record: DictationRecord, source: CopySource, compact: Bool = false) -> String {
+        if canCopy(record, source: source),
+           copiedReceipt == CopyReceipt(id: record.id, source: source, text: copyText(record, source: source)) {
+            return Self.copiedTitle
+        }
+        return compact ? "Copy" : source.title
+    }
+
+    func copy(_ record: DictationRecord, source: CopySource = .inserted) {
+        guard canCopy(record, source: source) else { return }
+        let text = copyText(record, source: source)
+        pasteboard.setString(text)
+        copyTask.withLock { $0?.cancel() }
+        copiedReceipt = CopyReceipt(id: record.id, source: source, text: text)
+        copyGeneration += 1
+        let generation = copyGeneration
+        let task = Task { [weak self, clock] in
+            do { try await clock.sleep(for: Self.copyFeedbackDuration) } catch { return }
+            guard !Task.isCancelled, let self, self.copyGeneration == generation else { return }
+            self.copiedReceipt = nil
+        }
+        copyTask.withLock { $0 = task }
     }
 
     /// Removes the row locally right away (design T-01: "row collapses immediately"), issues the
@@ -348,6 +395,8 @@ final class HistoryViewModel {
         guard let updated = await service.updateStyled(id: record.id, text: styled.text, style: style.rawValue,
                                                        removedFillerSpans: styled.removedFillerSpans) else { return }
         pasteboard.setString(updated.text)
+        copiedReceipt = nil
+        copyTask.withLock { $0?.cancel(); $0 = nil }
         await refresh()
     }
 

@@ -53,7 +53,7 @@ struct HistoryRowView: View {
 
     private var actions: some View {
         HStack(spacing: 6) {
-            Button("Copy") { model.copy(record) }
+            HistoryCopyButton(record: record, model: model, source: .inserted)
                 .buttonStyle(HistoryRowActionStyle(background: colors.neutralAction))
             // Re-style (design 2e, MW-02s): opens a popover of the four styles under the button.
             // SwiftUI's `.popover` already fades in/out and dismisses on outside click/Esc — no
