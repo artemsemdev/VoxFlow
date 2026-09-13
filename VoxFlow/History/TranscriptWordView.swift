@@ -45,11 +45,18 @@ struct TranscriptWordView: NSViewRepresentable {
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: ContextWordTextView, context: Context) -> CGSize? {
-        guard let width = proposal.width, let textContainer = nsView.textContainer,
-              let layoutManager = nsView.layoutManager else { return nil }
-        textContainer.containerSize = NSSize(width: width, height: .greatestFiniteMagnitude)
+        guard let width = proposal.width, width.isFinite else { return nil }
+        // SwiftUI probes candidate widths without necessarily changing the final frame. Measuring
+        // in the live container leaves the displayed text wrapped at the last rejected proposal.
+        // Use a separate TextKit layout; the live container tracks only its actual NSTextView.
+        let storage = NSTextStorage(attributedString: nsView.attributedString())
+        let layoutManager = NSLayoutManager()
+        let textContainer = NSTextContainer(size: NSSize(width: max(0, width), height: .greatestFiniteMagnitude))
+        textContainer.lineFragmentPadding = 0
+        storage.addLayoutManager(layoutManager)
+        layoutManager.addTextContainer(textContainer)
         layoutManager.ensureLayout(for: textContainer)
-        return CGSize(width: width, height: ceil(layoutManager.usedRect(for: textContainer).height))
+        return CGSize(width: max(0, width), height: ceil(layoutManager.usedRect(for: textContainer).height))
     }
 }
 
