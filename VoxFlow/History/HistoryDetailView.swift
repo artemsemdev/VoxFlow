@@ -17,12 +17,13 @@ struct HistoryDetailView: View {
         HStack(alignment: .top, spacing: 0) {
             rawColumn
             VStack(alignment: .leading, spacing: 8) {
-                HStack {
+                HStack(spacing: 8) {
                     Text(HistoryViewModel.detailHeader(for: record))
                         .font(.system(size: 11.5, weight: .semibold))
                         .tracking(0.46)
                         .foregroundStyle(colors.secondaryText)
-                    Spacer()
+                    Spacer(minLength: 4)
+                    copyButton(.inserted)
                     editActions
                 }
                 if model.editingID == record.id {
@@ -76,12 +77,23 @@ struct HistoryDetailView: View {
         .foregroundStyle(.tint)
     }
 
+    private func copyButton(_ source: HistoryViewModel.CopySource) -> some View {
+        HistoryCopyButton(record: record, model: model, source: source, compact: true)
+            .buttonStyle(.plain)
+            .font(.system(size: 11.5, weight: .medium))
+            .foregroundStyle(.tint)
+    }
+
     private var rawColumn: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("WHAT YOU SAID")
-                .font(.system(size: 11.5, weight: .semibold))
-                .tracking(0.46)
-                .foregroundStyle(colors.secondaryText)
+            HStack(spacing: 8) {
+                Text("WHAT YOU SAID")
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .tracking(0.46)
+                    .foregroundStyle(colors.secondaryText)
+                Spacer(minLength: 4)
+                copyButton(.original)
+            }
             Text(annotationPresentation.attributedRawText(
                 displayText: HistoryViewModel.displayRawText(for: record),
                 rawColor: colors.rawText,

@@ -466,6 +466,85 @@ struct HistoryViewModelTests {
         #expect(pasteboard.strings == [vm.records[0].text])
     }
 
+    @Test("copy distinguishes original and saved inserted text and marks only the copied source")
+    func copySourcesAndFeedback() async throws {
+        let h = Harness()
+        let records = await h.seed(2)
+        let record = try #require(records.first)
+        let pasteboard = FakePasteboard()
+        let vm = h.vm(pasteboard: pasteboard)
+        vm.copy(record, source: .original)
+        #expect(pasteboard.strings == [record.rawText])
+        #expect(vm.copyTitle(for: record, source: .original) == HistoryViewModel.copiedTitle)
+        #expect(vm.copyTitle(for: record, source: .inserted) == "Copy inserted")
+        #expect(vm.copyTitle(for: records[1], source: .original) == "Copy original")
+        vm.copy(record)
+        #expect(pasteboard.strings.last == record.text)
+        #expect(vm.copyTitle(for: record, source: .inserted, compact: true) == HistoryViewModel.copiedTitle)
+        #expect(vm.copyTitle(for: record, source: .original, compact: true) == "Copy")
+    }
+
+    @Test("copy never silently substitutes a saved result for the visible unsaved editor")
+    func copyDuringEdit() async throws {
+        let h = Harness()
+        let record = try #require(await h.seed(1).first)
+        let pasteboard = FakePasteboard()
+        let vm = h.vm(pasteboard: pasteboard)
+        await vm.load()
+        vm.beginEditing(record)
+        vm.editedText = "Unsaved correction"
+        #expect(!vm.canCopy(record, source: .inserted))
+        vm.copy(record)
+        #expect(pasteboard.strings.isEmpty)
+        #expect(vm.canCopy(record, source: .original))
+        vm.copy(record, source: .original)
+        #expect(pasteboard.strings == [record.rawText])
+    }
+
+    @Test("copy feedback expires after the most recent copy and does not retain the model")
+    func copyFeedbackTimer() async throws {
+        let h = Harness()
+        let record = try #require(await h.seed(1).first)
+        var vm: HistoryViewModel? = h.vm()
+        weak let weakModel = vm
+        vm?.copy(record)
+        await h.clock.waitForSleepers(1)
+        await h.clock.advance(by: 1)
+        vm?.copy(record, source: .original)
+        await h.clock.waitForSleepers(1)
+        await h.clock.advance(by: 1)
+        #expect(vm?.copyTitle(for: record, source: .original) == HistoryViewModel.copiedTitle)
+        await h.clock.advance(by: 1)
+        await waitFor { vm?.copyTitle(for: record, source: .original) == "Copy original" }
+        #expect(vm?.copyTitle(for: record, source: .original) == "Copy original")
+        vm?.copy(record)
+        await h.clock.waitForSleepers(1)
+        vm = nil
+        #expect(weakModel == nil)
+        #expect(h.clock.sleeperCount == 0)
+    }
+
+    @Test("unreadable and empty sources cannot copy, and changed payload loses old feedback")
+    func invalidCopySources() async throws {
+        let h = Harness()
+        var record = try #require(await h.seed(1).first)
+        let pasteboard = FakePasteboard()
+        let vm = h.vm(pasteboard: pasteboard)
+        vm.copy(record)
+        record.text = "Saved correction"
+        #expect(vm.copyTitle(for: record, source: .inserted) == "Copy inserted")
+        vm.copy(record)
+        #expect(pasteboard.strings.last == "Saved correction")
+        record.isUnreadable = true
+        #expect(!vm.canCopy(record, source: .original))
+        vm.copy(record, source: .original)
+        #expect(pasteboard.strings.count == 2)
+        record.isUnreadable = false
+        record.rawText = ""
+        #expect(!vm.canCopy(record, source: .original))
+        #expect(vm.canCopy(record, source: .inserted))
+    }
+
     @Test("openPrivacySettings navigates to Settings › Privacy")
     func opensPrivacySettings() {
         let h = Harness()

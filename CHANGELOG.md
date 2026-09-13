@@ -7,6 +7,8 @@ versioning.
 
 ### Added
 
+- Copy original or inserted History text explicitly, with shared two-second Copied feedback and stable button widths.
+
 - Settings → General offers a live 20–100% main-window opacity slider, saved across relaunches.
 - Choose and remember a microphone in Settings → Audio for dictation and microphone tests.
   System Default follows macOS; an unavailable selected device requires reconnecting or choosing another.
