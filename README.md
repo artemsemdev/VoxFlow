@@ -13,6 +13,8 @@ any app, style cleanup with a local LLM and an MCP server follow in 2.x (see the
 
 ## What works today (2.0.0)
 
+- Expanded History keeps inserted text inside its column during layout measurement and resizing.
+
 - Settings → General offers a live 20–100% main-window opacity slider, saved across relaunches.
 
 - Files and settings controls share consistent alignment; Home adapts to narrow windows and card

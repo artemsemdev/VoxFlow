@@ -132,6 +132,8 @@ versioning.
   [docs/runbooks/connect-an-mcp-client.md](docs/runbooks/connect-an-mcp-client.md).
 
 ### Fixed
+
+- Keep History transcript measurements separate from the live text container so layout probes cannot corrupt wrapping or overflow adjacent rows.
 - Align Files controls, Audio/General/Privacy settings and Snippets/Styles cards; keep the Home
   scratchpad readable when the window is narrow, and show the audio meter in both appearances.
 - Deliver final dictation through guarded Unicode input in Chromium/Electron editors whose Accessibility setter silently ignores text; keep native live previews and clipboard fallback on lost focus.
