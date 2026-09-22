@@ -135,6 +135,8 @@ versioning.
 
 ### Fixed
 
+- Snippets now expand when typed in other apps, including app scopes and placeholders; previously
+  expansion ran only after dictation. Shared trigger prefixes wait for a space to disambiguate.
 - Keep History transcript measurements separate from the live text container so layout probes cannot corrupt wrapping or overflow adjacent rows.
 - Align Files controls, Audio/General/Privacy settings and Snippets/Styles cards; keep the Home
   scratchpad readable when the window is narrow, and show the audio meter in both appearances.
