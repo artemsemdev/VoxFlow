@@ -4,6 +4,12 @@ import Foundation
 import Synchronization
 import VoxFlowCore
 
+/// A copyable reference for the Objective-C converter block; the Mutex still protects its state.
+/// Capturing the noncopyable Mutex directly triggers a Swift 6.4 block-bridging compiler error.
+private final class ConverterInputState: Sendable {
+    let consumed = Mutex(false)
+}
+
 /// `AVAudioEngine` input tap → 16 kHz mono chunks with RMS (design §4 `MicrophoneSource`, ST-04n, FB-07).
 public final class MicrophoneSource: MicrophoneCapturing, Sendable {
     private let chunkSeconds: Double
@@ -130,10 +136,10 @@ private final class CaptureSession: @unchecked Sendable {
             // synchronously and repeatedly on the calling (audio render) thread — never concurrently —
             // but the block's type is still checked as @Sendable, so the flag is boxed in a `Mutex`
             // (Sendable, no `@unchecked`/`nonisolated(unsafe)`) rather than captured as a plain `var`.
-            let consumed = Mutex(false)
+            let inputState = ConverterInputState()
             var error: NSError?
             converter.convert(to: out, error: &error) { _, status in
-                let alreadyConsumed = consumed.withLock { flag -> Bool in
+                let alreadyConsumed = inputState.consumed.withLock { flag -> Bool in
                     let was = flag
                     flag = true
                     return was
