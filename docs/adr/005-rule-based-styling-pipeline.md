@@ -32,6 +32,10 @@ ripple through storage, History or the dictation path.
   in {app}" scopes a snippet to a bundle id; unmatched snippets are left untouched in the text.
   The "Say 'snippet' before the trigger" toggle requires the spoken word "snippet" immediately
   before the trigger to count as a match.
+- Keyboard expansion runs separately: `TypedSnippetMonitor` checks the focused text field after
+  key-up in another app and replaces a complete literal trigger through Accessibility. Shared
+  prefixes wait for a space; the spoken-prefix toggle does not apply. App scopes, placeholders
+  and usage counters are shared with dictation. Secure fields and excluded apps are skipped.
 - `StyleResolver.resolve(default:overrides:bundleID:)` — precedence is override > default: a
   per-app override (keyed by bundle id, `app_style_overrides`) wins when one exists for the
   frontmost app; otherwise the global default style applies (Casual out of the box).

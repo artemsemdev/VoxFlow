@@ -3,6 +3,12 @@ import Foundation
 import Synchronization
 import VoxFlowCore
 
+/// Keep the noncopyable Mutex behind a Sendable reference when captured by an Objective-C block.
+/// Swift 6.4 otherwise consumes the captured mutex when bridging AVAudioConverter's input block.
+private final class ConverterReadError: Sendable {
+    let value = Mutex<(any Error)?>(nil)
+}
+
 /// All AVFoundation cursor/converter access is confined to state’s mutex. The caller consumes
 /// sequentially; its progress callback runs after unlocking, so it can cancel or inspect the reader.
 final class AudioFileReader: AudioSampleReading {
@@ -73,7 +79,7 @@ final class AudioFileReader: AudioSampleReading {
             let capacity = AVAudioFrameCount(min(sampleCount, Int(maximumOutputFrames)))
             let buffer = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: capacity)!
             let file = file, input = input, fileRead = fileRead
-            let readError = Mutex<(any Error)?>(nil)
+            let readError = ConverterReadError()
             var conversionError: NSError?
             let status = converter.convert(to: buffer, error: &conversionError) { _, outStatus in
                 guard file.framePosition < file.length else {
@@ -85,7 +91,7 @@ final class AudioFileReader: AudioSampleReading {
                     try fileRead(file, input, Self.inputFrames)
                     try Task.checkCancellation()
                 } catch {
-                    readError.withLock { $0 = error }
+                    readError.value.withLock { $0 = error }
                     outStatus.pointee = .endOfStream
                     return nil
                 }
@@ -93,7 +99,7 @@ final class AudioFileReader: AudioSampleReading {
                 return input.frameLength > 0 ? input : nil
             }
             try Task.checkCancellation()
-            if let error = readError.withLock({ $0 }) {
+            if let error = readError.value.withLock({ $0 }) {
                 if error is CancellationError { throw error }
                 throw AudioDecodingError.decodeFailed(error.localizedDescription)
             }

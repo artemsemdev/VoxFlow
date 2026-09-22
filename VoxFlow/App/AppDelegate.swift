@@ -4,6 +4,7 @@ import SwiftUI
 /// Dock-icon drops and Finder "Open With" (design MW-06: "drop on Dock icon").
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var quitCoordinator: QuitCoordinator?
+    private var typedSnippets: TypedSnippetMonitor?
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard !LaunchEnvironment.isRunningTests() else { return .terminateNow }
@@ -98,7 +99,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // meaning the first dictation of every cold launch ignored the dictionary, snippets and
             // per-app overrides. Opening it here, in parallel with history, means its snapshot boxes
             // are already populated (or racing to be) before fn is ever pressed.
-            Task { await AppServices.shared.contentService.ready() }
+            Task {
+                let services = AppServices.shared
+                await services.contentService.ready()
+                let monitor = TypedSnippetMonitor(content: services.contentService, settings: services.dictationSettings)
+                typedSnippets = monitor
+                monitor.start()
+            }
 
             // Phase 6 (ST-06): starts the real MCP server at launch when the user already had it
             // enabled last session. A failure here (ports 7331–7340 all busy) is silently logged,
