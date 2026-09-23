@@ -135,6 +135,8 @@ versioning.
 
 ### Fixed
 
+- Release the local style model before application exit to prevent a llama.cpp Metal-resource
+  assertion when quitting; drain pending warm-up or generation before allowing termination.
 - Dictation rejects near-silent windows and filters background noise with a bundled local speech
   detector before recognition, preventing the reproduced spurious subtitle-credit insertion.
 

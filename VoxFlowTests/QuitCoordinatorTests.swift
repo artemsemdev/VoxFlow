@@ -25,9 +25,10 @@ struct QuitCoordinatorTests {
                 #expect(activity.title == "A file is still transcribing")
                 #expect(activity.message.contains("72% done (about 3 min left)"))
                 events.append("prompt"); return choice
-            }, finish: { events.append("finish"); return true }, quit: { events.append("quit") })
+            }, finish: { events.append("finish"); return true },
+            shutdown: { events.append("shutdown") }, quit: { events.append("quit") })
         await coordinator.request()
-        #expect(events == (choice == .cancel ? ["prompt"] : choice == .quitAnyway ? ["prompt", "quit"] : ["prompt", "finish", "quit"]))
+        #expect(events == (choice == .cancel ? ["prompt"] : choice == .quitAnyway ? ["prompt", "shutdown", "quit"] : ["prompt", "finish", "shutdown", "quit"]))
         #expect(coordinator.allowsTermination == (choice != .cancel))
     }
 
@@ -94,10 +95,42 @@ struct QuitCoordinatorTests {
         #expect(QuitActivity(queueRunning: false, fileName: nil, progress: nil, dictation: .idle, hasUnsavedTranscript: true).isBusy)
         var resumed = false
         let coordinator = QuitCoordinator(snapshot: { QuitActivity(queueRunning: true, fileName: nil, progress: nil, dictation: .idle) },
-            present: { _ in .finish }, finish: { false }, resume: { resumed = true }, quit: { Issue.record("must retain failed export") })
+            present: { _ in .finish }, finish: { false }, resume: { resumed = true },
+            shutdown: { Issue.record("must retain native services after failed finish") }, quit: { Issue.record("must retain failed export") })
         await coordinator.request()
         #expect(resumed)
         #expect(!coordinator.allowsTermination)
+    }
+
+    @Test("idle quit drains native resources once before allowing AppKit termination")
+    func idleShutdown() async {
+        var events: [String] = []
+        let coordinator = QuitCoordinator(
+            snapshot: { QuitActivity(queueRunning: false, fileName: nil, progress: nil, dictation: .idle) },
+            present: { _ in .cancel }, finish: { true },
+            shutdown: { events.append("shutdown") }, quit: { events.append("quit") })
+        await coordinator.request()
+        await coordinator.request()
+        #expect(events == ["shutdown", "quit"])
+        #expect(coordinator.allowsTermination)
+    }
+
+    @Test("another quit cannot bypass suspended native cleanup")
+    func shutdownBarrier() async {
+        let entered = Gate(), release = Gate()
+        var quits = 0
+        let coordinator = QuitCoordinator(
+            snapshot: { QuitActivity(queueRunning: false, fileName: nil, progress: nil, dictation: .idle) },
+            present: { _ in .cancel }, finish: { true },
+            shutdown: { await entered.open(); await release.wait() }, quit: { quits += 1 })
+        let request = Task { await coordinator.request() }
+        await entered.wait()
+        await coordinator.request()
+        #expect(!coordinator.allowsTermination)
+        #expect(quits == 0)
+        await release.open()
+        await request.value
+        #expect(quits == 1)
     }
 
     @Test("termination invalidates suspended preflight and blocks new starts until cancellation")

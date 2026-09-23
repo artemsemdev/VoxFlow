@@ -53,6 +53,12 @@ that rewrites every segment of a finished file transcript).
   dictation. Removing the model in Settings unloads it on the next `isReady()` check. It also
   unloads after five minutes without generation activity or on macOS memory pressure; pressure
   during generation is coalesced until ownership releases. The next styled request reloads lazily.
+- **Application exit.** After the quit decision and any requested save complete, `QuitCoordinator`
+  awaits `StyleModelLoader.shutdown()` before allowing AppKit termination. This terminal barrier
+  rejects new readiness/warm-up/generation requests, cancels an active generation, then drains the
+  native lifecycle chain. An unfinished warm-up owns the cleanup of its late result. Repeated quit
+  requests cannot bypass the barrier; cancelling quit leaves the loader usable. Swift singleton
+  lifetime is insufficient: llama.cpp's process destructor asserts if Metal residency sets remain.
 - **Re-style semantics (MW-02s).** "Re-style ▾" on every readable History row opens a
   popover — Formal / Casual / Very casual / Verbatim, a checkmark on the row's current
   style, footer "Rewrites locally and copies the result." Picking a tone re-runs
