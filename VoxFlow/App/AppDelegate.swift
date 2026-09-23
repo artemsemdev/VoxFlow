@@ -46,7 +46,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 await services.dictationController.cancelTermination()
                 await services.queue.setTerminationPending(false)
             }, shutdown: {
-                await services.styleModelLoader.shutdown()
+                async let speech: Void = services.engine.shutdown()
+                async let style: Void = services.styleModelLoader.shutdown()
+                _ = await (speech, style)
             }, quit: { sender.terminate(nil) })
         }
         Task { await quitCoordinator?.request() }

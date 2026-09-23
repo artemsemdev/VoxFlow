@@ -4,10 +4,38 @@ import whisper
 
 /// `SpeechEngine` over whisper.cpp. Native calls stay serial; pending dictation runs before file work.
 public actor WhisperCppEngine: SpeechEngine {
-    private let queue = WhisperWorkQueue()
+    private let queue: WhisperWorkQueue
+    private let makeContext: @Sendable (URL, WhisperWorkQueue) throws -> ContextBox
     private var context: ContextBox?
+    private var loads: [UUID: Task<Void, Error>] = [:]
+    private var runs: [UUID: CancelFlag] = [:]
+    private var shutdownTask: Task<Void, Never>?
+    var isShuttingDown: Bool { shutdownTask != nil }
 
-    public init() {}
+    public init() { queue = WhisperWorkQueue(); makeContext = Self.loadNativeContext }
+
+    init(queue: WhisperWorkQueue, makeContext: @escaping @Sendable (URL, WhisperWorkQueue) throws -> ContextBox) {
+        self.queue = queue
+        self.makeContext = makeContext
+    }
+
+    /// Terminal cleanup for application exit. A plain unload cannot cover an in-flight load
+    /// that has not published its context yet, or cleanup already queued by an earlier unload.
+    public func shutdown() async {
+        if let shutdownTask { await shutdownTask.value; return }
+        let pendingLoads = Array(loads.values)
+        pendingLoads.forEach { $0.cancel() }
+        runs.values.forEach { $0.set() }
+        let loadedContext = context
+        context = nil
+        let task = Task {
+            for load in pendingLoads { _ = await load.result }
+            await loadedContext?.release()
+            await self.queue.drain()
+        }
+        shutdownTask = task
+        await task.value
+    }
 
     static func wordConfidences(tokenTexts: [String], probabilities: [Double], segmentText: String) -> [WordConfidence]? {
         guard tokenTexts.count == probabilities.count,
@@ -107,18 +135,35 @@ public actor WhisperCppEngine: SpeechEngine {
     }
 
     public func load(modelAt url: URL) async throws {
-        let path = url.path
+        guard !isShuttingDown else { throw SpeechEngineError.cancelled }
         let nativeQueue = queue
-        let box: ContextBox = try await onQueue {
-            var params = whisper_context_default_params()
-            params.use_gpu = true
-            params.flash_attn = true
-            guard let pointer = whisper_init_from_file_with_params(path, params) else {
-                throw SpeechEngineError.modelLoadFailed(path)
+        let makeContext = makeContext
+        let task = Task {
+            let box = try await self.onQueue { try makeContext(url, nativeQueue) }
+            guard !self.isShuttingDown else {
+                await box.release()
+                throw SpeechEngineError.cancelled
             }
-            return ContextBox(pointer, queue: nativeQueue)
+            let previous = self.context
+            self.context = box
+            await previous?.release()
         }
-        context = box
+        let id = UUID()
+        loads[id] = task
+        defer { loads[id] = nil }
+        try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: { task.cancel() }
+    }
+
+    private static func loadNativeContext(_ url: URL, queue: WhisperWorkQueue) throws -> ContextBox {
+        var params = whisper_context_default_params()
+        params.use_gpu = true
+        params.flash_attn = true
+        guard let pointer = whisper_init_from_file_with_params(url.path, params) else {
+            throw SpeechEngineError.modelLoadFailed(url.path)
+        }
+        return ContextBox(pointer, queue: queue)
     }
 
     /// Releases the loaded model after all previously submitted native work has completed.
@@ -184,6 +229,9 @@ public actor WhisperCppEngine: SpeechEngine {
         // reaches it through continuation.onTermination → task.cancel(). See #125 for the stream-side
         // caveat.
         let cancelFlag = CancelFlag()
+        let runID = UUID()
+        runs[runID] = cancelFlag
+        defer { runs[runID] = nil }
         let runState = RunState(continuation: continuation, isCancelled: { cancelFlag.isSet })
 
         try await withTaskCancellationHandler {

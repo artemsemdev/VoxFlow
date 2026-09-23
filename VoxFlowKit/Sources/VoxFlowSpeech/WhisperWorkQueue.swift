@@ -15,6 +15,13 @@ final class WhisperWorkQueue: Sendable {
     private let queue = DispatchQueue(label: "dev.artemsem.voxflow.whisper", qos: .userInitiated)
     var pendingCount: Int { state.withLock { $0.pending.count } }
 
+    /// Non-cancellable barrier after earlier work at both priorities, including native frees.
+    func drain() async {
+        await withCheckedContinuation { continuation in
+            enqueue(priority: .file) { continuation.resume() }
+        }
+    }
+
     func enqueue(priority: Priority, _ body: @escaping @Sendable () -> Void) {
         let work = Work(priority: priority, body: body)
         let startNow = state.withLock { state in
