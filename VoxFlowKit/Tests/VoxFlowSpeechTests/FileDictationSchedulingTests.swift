@@ -23,7 +23,8 @@ struct FileDictationSchedulingTests {
         #expect(await events.next() == "file started")
         let started = native.elapsed
         let dictation = Task {
-            let chunks = AsyncStream<AudioChunk> { c in c.yield(AudioChunk(samples: [Float](repeating: 0, count: 16_000))); c.finish() }
+            // Scheduling needs an audible fixture; silence is intentionally never decoded.
+            let chunks = AsyncStream<AudioChunk> { c in c.yield(AudioChunk(samples: [Float](repeating: 0.1, count: 16_000))); c.finish() }
             return try await WindowedTranscriber(engine: Lane(native: native, priority: .dictation))
                 .transcribe(chunks, options: TranscriptionOptions(language: automaticLanguage ? nil : "en")) { _ in }
         }

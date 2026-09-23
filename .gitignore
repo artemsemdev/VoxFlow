@@ -41,6 +41,7 @@ TestResults/
 # ── Models and media (downloaded at runtime, never committed) ───────────────
 # Speech/LLM model files live in ~/Library/Application Support/VoxFlow/Models, not in the repo.
 *.bin
+!VoxFlowKit/Sources/VoxFlowSpeech/Resources/ggml-silero-v6.2.0.bin
 *.gguf
 *.mlmodelc
 *.mlpackage
