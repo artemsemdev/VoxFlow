@@ -198,6 +198,23 @@ public actor WhisperCppEngine: SpeechEngine {
                 params.no_speech_thold = mapped.noSpeechThreshold
                 params.single_segment = false
 
+                // Whisper can confidently turn background noise into subtitle credits, even
+                // with a near-zero no_speech probability. Use a separate local speech detector
+                // for microphone dictation; file transcription keeps its existing behavior.
+                let vadC: UnsafeMutablePointer<CChar>?
+                if priority == .dictation {
+                    guard let model = Bundle.module.url(forResource: "ggml-silero-v6.2.0", withExtension: "bin",
+                                                        subdirectory: "Resources") else {
+                        throw SpeechEngineError.modelLoadFailed("Bundled speech activity detector is missing")
+                    }
+                    vadC = strdup(model.path)
+                    params.vad = true
+                    params.vad_model_path = vadC.map { UnsafePointer($0) }
+                } else {
+                    vadC = nil
+                }
+                defer { free(vadC) }
+
                 let languageC = mapped.language.flatMap { strdup($0) }
                 let promptC = mapped.initialPrompt.flatMap { strdup($0) }
                 defer { free(languageC); free(promptC) }

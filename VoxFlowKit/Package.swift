@@ -28,7 +28,7 @@ let package = Package(
         // Keep shared support independent of app-linked implementation modules. The dictation
         // fake is compiled from one shared source by its package and hosted test targets.
         .target(name: "VoxFlowTestSupport", dependencies: ["VoxFlowCore"]),
-        .target(name: "VoxFlowSpeech", dependencies: ["VoxFlowCore", "whisper"]),
+        .target(name: "VoxFlowSpeech", dependencies: ["VoxFlowCore", "whisper"], resources: [.copy("Resources")]),
         .target(name: "VoxFlowModels", dependencies: ["VoxFlowCore"]),
         .target(name: "VoxFlowFiles", dependencies: ["VoxFlowCore"]),
         .target(name: "VoxFlowDictation", dependencies: ["VoxFlowCore"]),

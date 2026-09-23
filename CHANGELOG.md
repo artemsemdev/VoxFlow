@@ -135,6 +135,9 @@ versioning.
 
 ### Fixed
 
+- Dictation rejects near-silent windows and filters background noise with a bundled local speech
+  detector before recognition, preventing the reproduced spurious subtitle-credit insertion.
+
 - Snippets now expand when typed in other apps, including app scopes and placeholders; previously
   expansion ran only after dictation. Shared trigger prefixes wait for a space to disambiguate.
 - Keep History transcript measurements separate from the live text container so layout probes cannot corrupt wrapping or overflow adjacent rows.

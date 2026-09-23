@@ -99,6 +99,15 @@ state with I/O.
 
 ## Consequences
 
+- Dictation skips near-silent windows before language detection and decoding, using 20 ms RMS
+  frames with a conservative -60 dBFS floor. This is deliberately below the silence-stop threshold
+  to preserve quiet speech. Capture duration and window offsets still include skipped pauses.
+  Microphone recognition also uses bundled Silero VAD through whisper.cpp before decoding;
+  the speech detector maps retained segments back to the original audio timeline. A window with
+  no recognized segments cannot latch an auto-detected language or emit a live preview.
+  This reduces silence/noise hallucinations without a phrase blacklist; it does not guarantee
+  perfect recognition. File transcription retains its previous decoding behavior.
+
 - The whole FB-01…FB-12 transition table is tested as pure `handle` calls with a
   fake clock; no sleeps, no real microphone, no real engine.
 - Live insertion while speaking (streaming Flow Bar text into the focused app) is

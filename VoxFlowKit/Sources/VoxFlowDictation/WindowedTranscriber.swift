@@ -25,16 +25,19 @@ public struct WindowedTranscriber: DictationTranscribing {
         var text = ""
 
         func run(_ window: WindowPlanner.Window) async throws {
+            // A silent remainder must not ask Whisper to continue the preceding text. In
+            // particular, hands-free's stop delay can otherwise become a second "utterance".
+            guard DictationAudioActivity.hasSignal(window.samples) else { return }
             var windowOptions = options
+            var detected: LanguageDetection?
             if options.language == nil {
                 if language == nil {
-                    let detected = try await engine.detectLanguage(in: window.samples)
-                    language = detected
-                    await onEvent(.language(detected))
+                    detected = try await engine.detectLanguage(in: window.samples)
                 }
-                windowOptions.language = language?.code
+                windowOptions.language = language?.code ?? detected?.code
             }
             windowOptions.promptContext = Self.promptContext(from: text)
+            let previousSegmentCount = segments.count
             for try await event in engine.transcribe(window.samples, options: windowOptions) {
                 guard case .segment(let s) = event else { continue }
                 let words = s.wordConfidences.flatMap {
@@ -46,6 +49,12 @@ public struct WindowedTranscriber: DictationTranscribing {
                 segments.append(shifted)
             }
             if Task.isCancelled { throw DictationError.cancelled }    // #125: the stream may end silently
+            // A rejected noise window must not lock in a guessed language or emit a preview.
+            guard segments.count > previousSegmentCount else { return }
+            if let detected {
+                language = detected
+                await onEvent(.language(detected))
+            }
             text = Self.join(segments)
             await onEvent(.partialText(text))
         }
