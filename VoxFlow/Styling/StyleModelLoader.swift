@@ -29,6 +29,8 @@ actor StyleModelLoader: LLMBackend {
     // Do not queue a short-budget dictation behind another native generation: a queued native
     // continuation cannot observe cancellation until the older operation leaves the serial queue.
     private var generationInFlight = false
+    private var generationTask: Task<String, Error>?
+    private var shutdownTask: Task<Void, Never>?
     /// Captured by each load. Cancellation advances it immediately, so stale completions cannot
     /// clear or publish ownership while their cleanup and replacement remain queued.
     private var loadGeneration = 0
@@ -50,10 +52,28 @@ actor StyleModelLoader: LLMBackend {
         pressureTask?.cancel()
     }
 
+    /// Terminal barrier: reject new work, cancel generation, and await native context/model
+    /// release even if warm-up or an earlier unload is still running. AppKit exits only afterward.
+    func shutdown() async {
+        if let shutdownTask { await shutdownTask.value; return }
+        idleTask?.cancel()
+        idleTask = nil
+        stopObservingMemoryPressure()
+        let generation = generationTask
+        generation?.cancel()
+        let task = Task {
+            _ = await generation?.result
+            self.scheduleUnloadIfNeeded()
+            await self.lifecycleTask?.value
+        }
+        shutdownTask = task
+        await task.value
+    }
+
     func isReady() async -> Bool {
-        guard !generationInFlight else { return false }
+        guard shutdownTask == nil, !generationInFlight else { return false }
         let model = await store.defaultModel(role: .style)
-        guard !generationInFlight else { return false }
+        guard shutdownTask == nil, !generationInFlight else { return false }
         guard let model else {
             scheduleUnloadIfNeeded()
             return false
@@ -66,27 +86,37 @@ actor StyleModelLoader: LLMBackend {
     /// Launch hook: same as `isReady()` but awaited, so the first dictation after launch can already
     /// use the LLM once the Metal shaders and weights are in memory.
     func warmUp() async {
-        guard let model = await store.defaultModel(role: .style), loadedModelID != model.id else { return }
+        guard shutdownTask == nil else { return }
+        guard let model = await store.defaultModel(role: .style), shutdownTask == nil,
+              loadedModelID != model.id else { return }
         ensureLoad(of: model)
         await loadTask?.value
     }
 
     func generate(_ prompt: ChatPrompt, maxNewTokens: Int) async throws -> String {
-        guard loadedModelID != nil else { throw LLMError.modelNotLoaded }
+        guard shutdownTask == nil, loadedModelID != nil else { throw LLMError.modelNotLoaded }
         guard !generationInFlight else { throw LLMError.backendBusy }
         generationInFlight = true
         idleTask?.cancel()
         idleTask = nil
         defer {
             generationInFlight = false
-            if pressurePending {
+            generationTask = nil
+            if shutdownTask != nil {
+                pressurePending = false
+            } else if pressurePending {
                 pressurePending = false
                 scheduleUnloadIfNeeded()
             } else {
                 armIdleTimer()
             }
         }
-        return try await engine.generate(prompt, maxNewTokens: maxNewTokens)
+        let engine = engine
+        let task = Task { try await engine.generate(prompt, maxNewTokens: maxNewTokens) }
+        generationTask = task
+        return try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: { task.cancel() }
     }
 
     private func ensureLoad(of model: ModelDescriptor) {
@@ -186,6 +216,7 @@ actor StyleModelLoader: LLMBackend {
     }
 
     func memoryPressureReceived() {
+        guard shutdownTask == nil else { return }
         if generationInFlight {
             pressurePending = true
         } else {
@@ -194,6 +225,7 @@ actor StyleModelLoader: LLMBackend {
     }
 
     func observeMemoryPressure(_ events: AsyncStream<Void>) {
+        guard shutdownTask == nil else { return }
         pressureTask?.cancel()
         pressureTask = Task { [weak self] in
             for await _ in events {

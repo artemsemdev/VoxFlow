@@ -39,15 +39,18 @@ struct QuitActivity {
     private let present: (QuitActivity) async -> Choice
     private let finish: () async -> Bool
     private let resume: () async -> Void
+    private let shutdown: () async -> Void
     private let quit: () -> Void
 
     init(snapshot: @escaping () async -> QuitActivity, present: @escaping (QuitActivity) async -> Choice,
-         finish: @escaping () async -> Bool, resume: @escaping () async -> Void = {}, quit: @escaping () -> Void) {
+         finish: @escaping () async -> Bool, resume: @escaping () async -> Void = {},
+         shutdown: @escaping () async -> Void = {}, quit: @escaping () -> Void) {
         self.snapshot = snapshot; self.present = present; self.finish = finish; self.resume = resume; self.quit = quit
+        self.shutdown = shutdown
     }
 
     func request() async {
-        guard !pending else { return }
+        guard !pending, !allowsTermination else { return }
         pending = true
         defer { pending = false }
         let activity = await snapshot()
@@ -59,6 +62,9 @@ struct QuitActivity {
             case .quitAnyway: break
             }
         }
+        // C++ process destructors require every model's Metal resources to be gone first.
+        // Keep termination blocked while asynchronous native cleanup drains.
+        await shutdown()
         allowsTermination = true
         quit()
     }

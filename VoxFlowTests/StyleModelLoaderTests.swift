@@ -564,6 +564,7 @@ struct StyleModelLoaderTests {
 
     private actor ContendedStyleEngine: StyleEngine {
         let entered = Gate(), release = Gate()
+        let cancellationObserved = Gate()
         private(set) var calls = 0
         private(set) var unloadCount = 0
         let unloadCalled = Gate()
@@ -575,9 +576,108 @@ struct StyleModelLoaderTests {
         func generate(_ prompt: ChatPrompt, maxNewTokens: Int) async throws -> String {
             calls += 1
             if fail { fail = false; throw LLMError.cancelled }
-            if calls == 1 { await entered.open(); await release.wait() }
-            return "styled text"
+            return await withTaskCancellationHandler {
+                if calls == 1 { await entered.open(); await release.wait() }
+                return "styled text"
+            } onCancel: { Task { await self.cancellationObserved.open() } }
         }
+    }
+
+    @Test("shutdown frees a loaded model once and permanently prevents another warm-up")
+    func shutdownLoadedModel() async throws {
+        let dir = TemporaryDirectory()
+        try installStyleModelFile(in: dir)
+        let engine = FakeLLMBackend(ready: true)
+        let loader = StyleModelLoader(store: store(dir: dir), engine: engine, clock: FakeClock())
+        await loader.warmUp()
+        await loader.shutdown()
+        await loader.shutdown()
+        await loader.warmUp()
+        #expect(await loader.isReady() == false)
+        #expect(await loader.loadedModelID == nil)
+        #expect(await engine.loadedURLs.count == 1)
+        #expect(await engine.unloadCount == 1)
+        await #expect(throws: LLMError.modelNotLoaded) {
+            _ = try await loader.generate(ChatPrompt(system: "system", user: "text"), maxNewTokens: 8)
+        }
+    }
+
+    @Test("shutdown awaits an in-flight warm-up and releases its late native result")
+    func shutdownDuringLoad() async throws {
+        let dir = TemporaryDirectory()
+        try installStyleModelFile(in: dir)
+        let engine = RestartedLoadEngine()
+        let loader = StyleModelLoader(store: store(dir: dir), engine: engine, clock: FakeClock())
+        _ = await loader.isReady()
+        await engine.firstLoadEntered.wait()
+        // A cancelled caller must still drain the non-cancellation-aware native load.
+        let shutdown = Task { await loader.shutdown() }
+        shutdown.cancel()
+        await engine.releaseFirstLoad.open()
+        await shutdown.value
+        #expect(await engine.unloadCount == 1)
+        #expect(await engine.ready == false)
+        #expect(await loader.loadedModelID == nil)
+        await loader.warmUp()
+        #expect(await engine.loadCount == 1)
+    }
+
+    @Test("shutdown waits until native unload really completes")
+    func shutdownWaitsForUnload() async throws {
+        let dir = TemporaryDirectory()
+        try installStyleModelFile(in: dir)
+        let engine = HangingUnloadEngine()
+        let loader = StyleModelLoader(store: store(dir: dir), engine: engine, clock: FakeClock())
+        await loader.warmUp()
+        let completed = Mutex(false)
+        let shutdown = Task { await loader.shutdown(); completed.withLock { $0 = true } }
+        await engine.unloadEntered.wait()
+        #expect(completed.withLock { $0 } == false)
+        #expect(await loader.isReady() == false)
+        await engine.releaseUnload.open()
+        await shutdown.value
+        #expect(await engine.ready == false)
+    }
+
+    @Test("shutdown cancels generation but waits for its native work before unloading")
+    func shutdownDuringGeneration() async throws {
+        let dir = TemporaryDirectory()
+        try installStyleModelFile(in: dir)
+        let engine = ContendedStyleEngine()
+        let loader = StyleModelLoader(store: store(dir: dir), engine: engine, clock: FakeClock())
+        await loader.warmUp()
+        let generation = Task {
+            try await loader.generate(ChatPrompt(system: "system", user: "text"), maxNewTokens: 8)
+        }
+        await engine.entered.wait()
+        let shutdown = Task { await loader.shutdown() }
+        await engine.cancellationObserved.wait()
+        #expect(await loader.isReady() == false)
+        #expect(await engine.unloadCount == 0)
+        await engine.release.open()
+        _ = try await generation.value
+        await shutdown.value
+        #expect(await engine.unloadCount == 1)
+        #expect(await loader.loadedModelID == nil)
+    }
+
+    @Test("generation still forwards caller cancellation to the native engine")
+    func generationForwardsCancellation() async throws {
+        let dir = TemporaryDirectory()
+        try installStyleModelFile(in: dir)
+        let engine = ContendedStyleEngine()
+        let loader = StyleModelLoader(store: store(dir: dir), engine: engine, clock: FakeClock())
+        await loader.warmUp()
+        let generation = Task {
+            try await loader.generate(ChatPrompt(system: "system", user: "text"), maxNewTokens: 8)
+        }
+        await engine.entered.wait()
+        generation.cancel()
+        await engine.cancellationObserved.wait()
+        await engine.release.open()
+        _ = try await generation.value
+        #expect(await loader.isReady())
+        await loader.shutdown()
     }
 
     @Test("generate before a model is loaded throws modelNotLoaded; once loaded it forwards the prompt")
