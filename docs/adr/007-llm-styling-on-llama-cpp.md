@@ -54,7 +54,8 @@ that rewrites every segment of a finished file transcript).
   unloads after five minutes without generation activity or on macOS memory pressure; pressure
   during generation is coalesced until ownership releases. The next styled request reloads lazily.
 - **Application exit.** After the quit decision and any requested save complete, `QuitCoordinator`
-  awaits `StyleModelLoader.shutdown()` before allowing AppKit termination. This terminal barrier
+  awaits both `StyleModelLoader.shutdown()` and `WhisperCppEngine.shutdown()` before allowing
+  AppKit termination. The style loader's terminal barrier
   rejects new readiness/warm-up/generation requests, cancels an active generation, then drains the
   native lifecycle chain. An unfinished warm-up owns the cleanup of its late result. Repeated quit
   requests cannot bypass the barrier; cancelling quit leaves the loader usable. Swift singleton

@@ -23,7 +23,7 @@ any app, style cleanup with a local LLM and an MCP server follow in 2.x (see the
   rows stay aligned. See the [visual alignment audit](docs/validation/alignment-2026-09-12/README.md).
 
 - Quitting during file transcription or dictation asks whether to finish and save first, quit immediately, or cancel.
-  Confirmed exit waits for the local style model's native resources to be released, including pending warm-up.
+  Confirmed exit waits for both speech and style models to release native resources, including pending loads.
 
 - Drop audio or video files on the window or the Dock icon, use Finder's Open With, or File › Open.
   MP3, WAV, M4A/AAC, FLAC, AIFF, CAF, MP4, MOV are accepted; anything else is rejected on drop.

@@ -12,6 +12,12 @@ speaking, and no network use except model downloads. Candidates: whisper.cpp, Wh
   version and checksum pinned in `Package.swift`; updates are deliberate `chore:` PRs).
 - `WhisperCppEngine` is an actor that runs the C API on a private serial queue and streams
   final segments via `new_segment_callback`; cancellation goes through `abort_callback`.
+- Application exit awaits terminal `shutdown()` for both Whisper and the style-model loader.
+  Whisper rejects new loads, cancels active recognition, waits for late load results to be freed,
+  releases its current context and drains queued native cleanup at both file/dictation priorities.
+  Ordinary `unload()` remains reusable; it alone cannot cover a not-yet-published load or an
+  already-detached context whose release is still queued. A separate-process native probe keeps
+  both owners alive through exit to exercise GGML's C++ destructors after actual recognition.
 - Models are ggml files downloaded on user action only, checksum-verified, stored in
   `~/Library/Application Support/VoxFlow/Models`.
 - Dictation (phase 3) streams: turbo transcribes 16× faster than real time on an M1 Max, so a
