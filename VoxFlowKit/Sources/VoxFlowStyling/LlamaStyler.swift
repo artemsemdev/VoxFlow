@@ -85,7 +85,7 @@ public struct LlamaStyler: TextStyler, Sendable {
         }
 
         let cleaned = OutputValidator.clean(output)
-        guard OutputValidator.isAcceptable(cleaned, input: prepass.text) else {
+        guard OutputValidator.isAcceptable(cleaned, input: prepass.text, preserveWords: options.style == .casual) else {
             Self.logger.notice("styling: LLM output failed validation, falling back to rules")
             return fallback
         }

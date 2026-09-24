@@ -49,13 +49,18 @@ struct StyledTranscriberTests {
         #expect(result.text == "We are going to push the meeting.")
     }
 
-    @Test("a translated Casual reply cannot replace a Russian transcript before insertion")
-    func translatedReplyKeepsRussian() async throws {
+    @Test("a translated or embellished Casual reply cannot replace the dictated words before insertion",
+          arguments: [
+            "The meeting is scheduled for tomorrow and everyone has received an invitation.",
+            "Встреча уже definitely запланирована на завтра и все участники получили приглашения, так удобнее.",
+            "Встреча уже запланирована на завтра и все участники получили приглашения, так удобнее."
+          ])
+    func translatedReplyKeepsRussian(reply: String) async throws {
         let raw = "встреча уже запланирована на завтра и все участники получили приглашения"
         let language = LanguageDetection(code: "ru", confidence: 0.95)
         let base = FakeDictationTranscriber(result: DictationResult(text: raw, rawText: raw,
             segments: [], language: language, duration: 6, lowConfidence: false))
-        let backend = FakeLLMBackend(ready: true, reply: "The meeting is scheduled for tomorrow and everyone has received an invitation.")
+        let backend = FakeLLMBackend(ready: true, reply: reply)
         let transcriber = StyledTranscriber(base: base, styler: LlamaStyler(backend: backend, clock: FakeClock()),
             settings: StylingSettingsBox(StylingSettingsSnapshot(defaultStyle: .casual, removeFillers: true,
                 autoPunctuate: true, snippetSayPrefix: false)), content: snapshots(),

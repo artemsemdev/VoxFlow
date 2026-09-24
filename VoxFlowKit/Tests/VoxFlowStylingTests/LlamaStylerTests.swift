@@ -31,7 +31,7 @@ struct LlamaStylerTests {
 
     @Test("casual prompt uses StylePrompts.system(for: .casual); the reply is used as the result")
     func casualPromptIsExact() async throws {
-        let reply = "hey, can we push the meeting to thursday afternoon?"
+        let reply = "Can we push the meeting to Thursday?"
         let backend = FakeLLMBackend(ready: true, reply: reply)
         let styler = makeStyler(backend: backend)
 

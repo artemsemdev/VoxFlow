@@ -130,8 +130,10 @@ any app, style cleanup with a local LLM and an MCP server follow in 2.x (see the
 - On-device style cleanup: an optional local LLM (Qwen2.5 3B Instruct via llama.cpp, Settings ›
   Models) rewrites the tone step for Formal/Casual/Very casual on top of the same rule pass, with
   automatic fallback to rule-based styling whenever the model is absent, still loading, too slow
-  or produces a bad answer. Rewrites must retain the recognized text's language; a detected language
-  change or unidentifiable language falls back to rules instead of inserting a translation.
+  or produces a bad answer. Formal and Very casual compare the source and reply languages; a
+  detected language change or unidentifiable language falls back to rules instead of a translation.
+  Casual preserves the exact word order after configured filler removal: only punctuation and
+  capitalization may change; added, removed or replaced words fall back to rule cleanup.
   Live dictation bounds styling by the time left after speech recognition,
   reserving one second for completion. The style model unloads after five idle minutes or macOS
   memory pressure, then reloads lazily on the next styled request. "Re-style ▾" on
