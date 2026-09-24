@@ -49,6 +49,27 @@ struct StyledTranscriberTests {
         #expect(result.text == "We are going to push the meeting.")
     }
 
+    @Test("a translated Casual reply cannot replace a Russian transcript before insertion")
+    func translatedReplyKeepsRussian() async throws {
+        let raw = "встреча уже запланирована на завтра и все участники получили приглашения"
+        let language = LanguageDetection(code: "ru", confidence: 0.95)
+        let base = FakeDictationTranscriber(result: DictationResult(text: raw, rawText: raw,
+            segments: [], language: language, duration: 6, lowConfidence: false))
+        let backend = FakeLLMBackend(ready: true, reply: "The meeting is scheduled for tomorrow and everyone has received an invitation.")
+        let transcriber = StyledTranscriber(base: base, styler: LlamaStyler(backend: backend, clock: FakeClock()),
+            settings: StylingSettingsBox(StylingSettingsSnapshot(defaultStyle: .casual, removeFillers: true,
+                autoPunctuate: true, snippetSayPrefix: false)), content: snapshots(),
+            frontmost: FrontmostBox(), clipboard: { nil }, now: Date.init)
+
+        let result = try await transcriber.transcribe(emptyFeed(), options: TranscriptionOptions()) { _ in }
+
+        #expect(await backend.prompts.count == 1)
+        #expect(result.text == "Встреча уже запланирована на завтра и все участники получили приглашения.")
+        #expect(result.rawText == raw)
+        #expect(result.language == language)
+        #expect(result.style == "casual")
+    }
+
     @Test("no override for the frontmost app falls back to the default style")
     func noOverrideFallsBackToDefault() async throws {
         let content = snapshots(overrides: ["com.apple.mail": .formal])

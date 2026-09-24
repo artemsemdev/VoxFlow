@@ -135,6 +135,9 @@ versioning.
 
 ### Fixed
 
+- Reject style-model translations and keep rule-cleaned text in its original language during
+  dictation, History re-styling and file cleanup. Strengthen the shared no-translation instruction.
+
 - Release both speech and style models before application exit to prevent GGML Metal-resource
   assertions when quitting after dictation or file transcription; drain pending loads and native work.
 - Dictation rejects near-silent windows and filters background noise with a bundled local speech

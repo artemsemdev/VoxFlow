@@ -33,7 +33,11 @@ that rewrites every segment of a finished file transcript).
   requested tone instead of the LLM's: the backend isn't ready (model absent or still
   loading), the pre-passed text exceeds 150 words, generation throws, generation exceeds
   the remaining processing budget (at most 8 s), or the output fails validation (empty; under 30% or over 300% of the input's word
-  count; identical to the prompt; contains `<|im_`). A dictation — or a Re-style, or a
+  count; identical to the prompt; contains `<|im_`; changes or cannot identify the text's
+  dominant language). Apple's on-device `NLLanguageRecognizer` compares source and reply;
+  the prompt's no-translation instruction alone is insufficient. Short or mixed-language text
+  may conservatively retain rule cleanup when language classifications differ.
+  A dictation — or a Re-style, or a
   Files cleanup — is never lost to a model problem; it degrades to the same deterministic
   output ADR-005 already shipped.
 - **Determinism.** Greedy sampling (`llama_sampler_init_greedy`, no temperature), `n_ctx

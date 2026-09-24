@@ -59,7 +59,7 @@ let package = Package(
         .testTarget(name: "VoxFlowStorageTests", dependencies: ["VoxFlowStorage", "VoxFlowCore", "VoxFlowTestSupport"]),
         .testTarget(name: "VoxFlowStylingTests", dependencies: ["VoxFlowStyling", "VoxFlowTestSupport"]),
         .testTarget(name: "VoxFlowMCPTests", dependencies: ["VoxFlowMCP", "VoxFlowTestSupport"]),
-        .testTarget(name: "VoxFlowLLMTests", dependencies: ["VoxFlowLLM", "VoxFlowTestSupport"]),
+        .testTarget(name: "VoxFlowLLMTests", dependencies: ["VoxFlowLLM", "VoxFlowStyling", "VoxFlowTestSupport"]),
     ],
     swiftLanguageModes: [.v6]
 )
