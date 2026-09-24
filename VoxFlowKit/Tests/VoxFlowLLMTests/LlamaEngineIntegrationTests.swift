@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 import VoxFlowCore
+import VoxFlowStyling
 @testable import VoxFlowLLM
 
 extension Tag { @Tag static var requiresModel: Self }
@@ -43,5 +44,25 @@ struct LlamaEngineIntegrationTests {
     func notLoaded() async {
         let engine = LlamaEngine()
         await #expect(throws: LLMError.modelNotLoaded) { try await engine.generate(ChatPrompt(system: "a", user: "b"), maxNewTokens: 8) }
+    }
+
+    @Test("Russian dictation stays Russian after every tone (real model)",
+          .enabled(if: Self.modelURL != nil, "Install the style model or set VOXFLOW_STYLE_MODEL to run real language validation"))
+    func russianStylesKeepLanguage() async throws {
+        let engine = LlamaEngine()
+        do {
+            try await engine.load(modelAt: #require(Self.modelURL))
+            let styler = LlamaStyler(backend: engine, clock: SystemMonotonicClock())
+            let raw = "встреча уже запланирована на завтра и все участники получили приглашения"
+            for style: TextStyle in [.formal, .casual, .veryCasual] {
+                let result = try await styler.style(raw, options: StylingOptions(style: style, removeFillers: true, autoPunctuate: true))
+                #expect(result.text.range(of: "[А-Яа-яЁё]", options: .regularExpression) != nil)
+                #expect(result.text.range(of: "[A-Za-z]", options: .regularExpression) == nil)
+            }
+        } catch {
+            await engine.unload()
+            throw error
+        }
+        await engine.unload()
     }
 }

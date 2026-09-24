@@ -1,4 +1,5 @@
 import Foundation
+import NaturalLanguage
 import VoxFlowCore
 
 /// Maximum LLM work per call. Live dictation also supplies the remaining processing deadline,
@@ -27,6 +28,13 @@ public enum OutputValidator {
         let outWords = output.wordCount, inWords = max(1, input.wordCount)
         guard outWords > 0, !output.contains("<|im_") else { return false }
         guard output != input else { return false }
-        return Double(outWords) >= 0.3 * Double(inWords) && Double(outWords) <= 3.0 * Double(inWords)
+        guard Double(outWords) >= 0.3 * Double(inWords), Double(outWords) <= 3.0 * Double(inWords) else { return false }
+        // A prompt is not a guarantee: the local model can translate while rewriting a tone.
+        // Compare the actual texts, independently of Whisper's audio-language guess. A changed
+        // or unidentifiable language falls back to rules; this check runs entirely on-device.
+        guard let sourceLanguage = NLLanguageRecognizer.dominantLanguage(for: input),
+              sourceLanguage != .undetermined,
+              let outputLanguage = NLLanguageRecognizer.dominantLanguage(for: output) else { return false }
+        return sourceLanguage == outputLanguage
     }
 }
