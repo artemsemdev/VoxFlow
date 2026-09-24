@@ -30,8 +30,8 @@ final class StylesViewModel {
     static let cards: [StyleCard] = [
         StyleCard(style: .formal, sample: "Could we move the meeting to Thursday afternoon?",
                  description: "Full sentences, no contractions. Good for Mail and documents."),
-        StyleCard(style: .casual, sample: "Can we push the meeting to Thursday afternoon?",
-                 description: "Your voice, tidied up. Fillers removed, punctuation added."),
+        StyleCard(style: .casual, sample: "So yeah, can we push the meeting to like Thursday afternoon?",
+                 description: "Your words, kept in order. Punctuation and capitalization, no rephrasing."),
         StyleCard(style: .veryCasual, sample: "can we push the meeting to thurs afternoon",
                  description: "Lowercase, light touch. Feels like a quick text."),
     ]

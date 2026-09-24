@@ -9,7 +9,7 @@ public enum StylePrompts {
         case .formal:
             "You clean up dictated speech. Rewrite the user's text as clear, polite, professional language suitable for a work email: complete sentences, no contractions, correct punctuation and capitalization. " + tail
         case .casual:
-            "You clean up dictated speech. Rewrite the user's text as natural, friendly everyday language, the way a person types a quick message to a colleague: light punctuation, contractions are fine, fix grammar and remove hesitations. " + tail
+            "You clean up dictated speech by changing only punctuation, whitespace and capitalization. Keep every word in exactly the same order. Do not add, remove, replace or rephrase any words. Fillers have already been handled. Do not add explanations, reasons or conclusions. " + tail
         case .veryCasual:
             "You clean up dictated speech. Rewrite the user's text as a short, relaxed chat message: lowercase is fine, minimal punctuation, contractions, brief and informal. " + tail
         case .verbatim:

@@ -52,7 +52,7 @@ struct StylesViewModelTests {
     func cardsAreFixedCanvasCopy() {
         #expect(StylesViewModel.cards.map(\.style) == [.formal, .casual, .veryCasual])
         #expect(StylesViewModel.cards[0].sample == "Could we move the meeting to Thursday afternoon?")
-        #expect(StylesViewModel.cards[1].sample == "Can we push the meeting to Thursday afternoon?")
+        #expect(StylesViewModel.cards[1].sample == "So yeah, can we push the meeting to like Thursday afternoon?")
         #expect(StylesViewModel.cards[2].sample == "can we push the meeting to thurs afternoon")
         #expect(StylesViewModel.saidSample == "um so yeah can we uh push the meeting to like thursday afternoon")
     }

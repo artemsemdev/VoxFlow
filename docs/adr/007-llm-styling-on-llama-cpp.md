@@ -29,12 +29,19 @@ that rewrites every segment of a finished file transcript).
   `autoPunctuate` toggles, and supplies `fillersRemoved`; the LLM receives that pre-passed
   text and rewrites only the tone. Verbatim never reaches the LLM at all — it is the
   rule pipeline's early-return case, unchanged since ADR-005.
+- **Casual preserves words (2026-09-24 follow-up).** Casual only adjusts punctuation, whitespace
+  and capitalization after configured rule-based filler removal. Its validator compares ordered,
+  case-normalized content tokens, preserving contractions, signed/decimal numbers and symbols.
+  New, replaced, repeated, reordered or missing words reject the entire model reply and keep rules.
+  This catches isolated foreign words and invented same-language clauses that dominant-language
+  detection cannot catch. Formal and Very casual remain explicit tone rewrites with language validation.
 - **Fallback matrix.** Every one of the following returns the rule-based result for the
   requested tone instead of the LLM's: the backend isn't ready (model absent or still
   loading), the pre-passed text exceeds 150 words, generation throws, generation exceeds
   the remaining processing budget (at most 8 s), or the output fails validation (empty; under 30% or over 300% of the input's word
   count; identical to the prompt; contains `<|im_`; changes or cannot identify the text's
-  dominant language). Apple's on-device `NLLanguageRecognizer` compares source and reply;
+  dominant language for Formal/Very casual; changes Casual's content tokens).
+  Apple's on-device `NLLanguageRecognizer` compares source and reply for free tone rewrites;
   the prompt's no-translation instruction alone is insufficient. Short or mixed-language text
   may conservatively retain rule cleanup when language classifications differ.
   A dictation — or a Re-style, or a

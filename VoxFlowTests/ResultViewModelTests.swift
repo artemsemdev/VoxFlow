@@ -261,7 +261,9 @@ struct ShortFileCleanupTests {
     func shortCleanup() async throws {
         let backend = FakeLLMBackend(reply: "A polished result.")
         let clock = SystemMonotonicClock()
-        let vm = ResultViewModelTests.makeVM(cleanupStyler: LlamaStyler(backend: backend, clock: clock), cleanupClock: clock)
+        let options = StylingOptions(style: .formal, removeFillers: false, autoPunctuate: false)
+        let vm = ResultViewModelTests.makeVM(cleanupStyle: .formal, cleanupOptions: options,
+            cleanupStyler: LlamaStyler(backend: backend, clock: clock), cleanupClock: clock)
         let original = vm.activeDocument
         vm.applyCleanup = true
         #expect(vm.isCleaning)
@@ -312,7 +314,9 @@ struct ShortFileCleanupTests {
     func retryWithoutModel() async {
         let backend = FakeLLMBackend(reply: "A polished result.")
         let clock = SystemMonotonicClock()
-        let vm = ResultViewModelTests.makeVM(cleanupStyler: LlamaStyler(backend: backend, clock: clock), cleanupClock: clock)
+        let options = StylingOptions(style: .formal, removeFillers: false, autoPunctuate: false)
+        let vm = ResultViewModelTests.makeVM(cleanupStyle: .formal, cleanupOptions: options,
+            cleanupStyler: LlamaStyler(backend: backend, clock: clock), cleanupClock: clock)
         vm.applyCleanup = true
         let rules = vm.activeDocument
         await vm.waitForCleanup()
@@ -321,6 +325,20 @@ struct ShortFileCleanupTests {
         await backend.set(ready: false)
         vm.applyCleanup = true
         await vm.waitForCleanup()
+        #expect(vm.activeDocument == rules)
+    }
+
+    @Test("Casual file cleanup retains source words when the model invents a sentence")
+    func casualRejectsNewWords() async {
+        let backend = FakeLLMBackend(reply: "A polished result.")
+        let clock = SystemMonotonicClock()
+        let vm = ResultViewModelTests.makeVM(cleanupStyler: LlamaStyler(backend: backend, clock: clock), cleanupClock: clock)
+        vm.applyCleanup = true
+        let rules = vm.activeDocument
+
+        await vm.waitForCleanup()
+
+        #expect(await backend.prompts.count == 3)
         #expect(vm.activeDocument == rules)
     }
 

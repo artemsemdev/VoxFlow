@@ -135,6 +135,10 @@ versioning.
 
 ### Fixed
 
+- Casual now preserves dictated words in order after configured filler removal. Reject individual
+  foreign words, invented explanations, substitutions and omissions even when the overall language
+  stays the same; retain punctuation and capitalization cleanup.
+
 - Reject style-model translations and keep rule-cleaned text in its original language during
   dictation, History re-styling and file cleanup. Strengthen the shared no-translation instruction.
 

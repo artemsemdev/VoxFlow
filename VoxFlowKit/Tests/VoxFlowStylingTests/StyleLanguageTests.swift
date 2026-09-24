@@ -22,7 +22,7 @@ struct StyleLanguageTests {
     @Test("Russian cleanup can retain English product names")
     func russianCleanupIsAccepted() async throws {
         let raw = "отправь пожалуйста ссылку на встречу в Zoom через Telegram"
-        let reply = "Пожалуйста, отправь ссылку на встречу в Zoom через Telegram."
+        let reply = "Отправь, пожалуйста, ссылку на встречу в Zoom через Telegram!"
         let backend = FakeLLMBackend(ready: true, reply: reply)
         let styler = LlamaStyler(backend: backend, clock: FakeClock())
 

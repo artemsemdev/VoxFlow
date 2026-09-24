@@ -24,11 +24,19 @@ public enum OutputValidator {
         return text.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }.joined(separator: "\n")
     }
 
-    public static func isAcceptable(_ output: String, input: String) -> Bool {
+    public static func isAcceptable(_ output: String, input: String, preserveWords: Bool = false) -> Bool {
         let outWords = output.wordCount, inWords = max(1, input.wordCount)
         guard outWords > 0, !output.contains("<|im_") else { return false }
         guard output != input else { return false }
         guard Double(outWords) >= 0.3 * Double(inWords), Double(outWords) <= 3.0 * Double(inWords) else { return false }
+        if preserveWords {
+            // A dominant-language check misses isolated foreign words and same-language additions.
+            // Casual may only change punctuation/case after the configured rule pre-pass. Comparing
+            // ordered tokens also rejects omissions, substitutions and duplicated words.
+            guard let source = contentTokens(input), !source.isEmpty,
+                  let reply = contentTokens(output) else { return false }
+            return source == reply
+        }
         // A prompt is not a guarantee: the local model can translate while rewriting a tone.
         // Compare the actual texts, independently of Whisper's audio-language guess. A changed
         // or unidentifiable language falls back to rules; this check runs entirely on-device.
@@ -36,5 +44,17 @@ public enum OutputValidator {
               sourceLanguage != .undetermined,
               let outputLanguage = NLLanguageRecognizer.dominantLanguage(for: output) else { return false }
         return sourceLanguage == outputLanguage
+    }
+
+    private static func contentTokens(_ text: String) -> [String]? {
+        // Keep contractions, signed/decimal numbers and non-punctuation symbols intact. Do not
+        // fold diacritics: changing a name or a word's spelling is not punctuation cleanup.
+        let pattern = #"[+−-]?\p{N}+(?:[.,:/-]\p{N}+)*|[\p{L}\p{M}\p{N}]+(?:['’][\p{L}\p{M}\p{N}]+)*|[^\s\p{P}]"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+        let normalized = text.precomposedStringWithCanonicalMapping.lowercased()
+            .replacingOccurrences(of: "’", with: "'")
+        let source = normalized as NSString
+        return regex.matches(in: normalized, range: NSRange(location: 0, length: source.length))
+            .map { source.substring(with: $0.range) }
     }
 }

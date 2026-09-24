@@ -65,4 +65,29 @@ struct LlamaEngineIntegrationTests {
         }
         await engine.unload()
     }
+
+    @Test("Casual keeps the source words with the real model",
+          .enabled(if: Self.modelURL != nil, "Install the style model or set VOXFLOW_STYLE_MODEL to run real word-preservation validation"))
+    func casualKeepsWords() async throws {
+        let engine = LlamaEngine()
+        do {
+            try await engine.load(modelAt: #require(Self.modelURL))
+            let styler = LlamaStyler(backend: engine, clock: SystemMonotonicClock())
+            for raw in [
+                "Нужно обязательно добавить защиту на сайты. Там где есть двухфакторная идентификация.",
+                "Отправь пожалуйста ссылку в Zoom через Telegram завтра утром.",
+                "Please send the report tomorrow morning."
+            ] {
+                let result = try await styler.style(raw, options: StylingOptions(style: .casual, removeFillers: true, autoPunctuate: true))
+                // These fixtures contain letters only; check the word-preservation contract
+                // independently of the production validator's numeric/symbol tokenization.
+                let words: (String) -> [Substring] = { $0.lowercased().split { !$0.isLetter } }
+                #expect(words(result.text) == words(raw))
+            }
+        } catch {
+            await engine.unload()
+            throw error
+        }
+        await engine.unload()
+    }
 }
