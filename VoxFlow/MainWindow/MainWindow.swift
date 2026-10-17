@@ -8,7 +8,7 @@ struct MainWindow: View {
     var body: some View {
         @Bindable var navigation = navigation
         NavigationSplitView {
-            SidebarView(selection: $navigation.page, requestBytes: services.requestBytes)
+            SidebarView(selection: $navigation.page)
                 .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 260)
         } detail: {
             switch navigation.page {

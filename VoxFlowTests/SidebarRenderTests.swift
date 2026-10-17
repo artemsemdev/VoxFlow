@@ -1,19 +1,15 @@
 import AppKit
 import SwiftUI
 import Testing
-import VoxFlowModels
-import VoxFlowTestSupport
 @testable import VoxFlow
 
 @Suite(.enabled(if: ProcessInfo.processInfo.environment["VOXFLOW_RENDER"] == "1"))
 @MainActor
 struct SidebarRenderTests {
-    @Test("native sidebar footer wraps exact measured totals at the minimum sidebar width",
-          arguments: [Int64(0), 1234, Int64.max], [false, true])
-    func footer(bytes: Int64, dark: Bool) throws {
-        let counter = ModelRequestByteCounter(store: InMemoryKeyValueStore(), now: Date(timeIntervalSince1970: 100))
-        counter.record(headerBytes: bytes, bodyBytes: 0)
-        let content = SidebarFooter(requestBytes: counter).frame(width: 200)
+    @Test("native sidebar footer shows local processing and version at the minimum sidebar width",
+          arguments: [false, true])
+    func footer(dark: Bool) throws {
+        let content = SidebarFooter().frame(width: 200)
             .fixedSize(horizontal: false, vertical: true)
             .background(dark ? Color(white: 0.12) : Color(white: 0.97))
             .environment(\.colorScheme, dark ? .dark : .light)
@@ -32,6 +28,6 @@ struct SidebarRenderTests {
             .appendingPathComponent(".superpowers/design/renders")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         try #require(bitmap.representation(using: .png, properties: [:]))
-            .write(to: directory.appendingPathComponent("Sidebar-\(bytes)-\(dark ? "dark" : "light").png"))
+            .write(to: directory.appendingPathComponent("Sidebar-\(dark ? "dark" : "light").png"))
     }
 }

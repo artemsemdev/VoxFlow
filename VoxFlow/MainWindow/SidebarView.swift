@@ -1,11 +1,9 @@
 import SwiftUI
 import VoxFlowCore
-import VoxFlowModels
 
 /// Full-height sidebar (design 1c): the seven pages plus the "Everything on this Mac" footer.
 struct SidebarView: View {
     @Binding var selection: SidebarPage
-    let requestBytes: ModelRequestByteCounter
 
     var body: some View {
         List(SidebarPage.allCases, selection: $selection) { page in
@@ -14,25 +12,22 @@ struct SidebarView: View {
         }
         .listStyle(.sidebar)
         .safeAreaInset(edge: .bottom) {
-            SidebarFooter(requestBytes: requestBytes)
+            SidebarFooter()
         }
     }
 }
 
-/// Shared with native render fixtures so byte-count wrapping is checked at sidebar widths.
+/// Shared with native render fixtures at the minimum sidebar width.
 struct SidebarFooter: View {
-    let requestBytes: ModelRequestByteCounter
-
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 6) {
                 Circle().fill(Palette.onDevice).frame(width: 8, height: 8)
                 Text("Everything on this Mac").font(.callout.weight(.semibold))
             }
-            Text("VoxFlow \(VoxFlowVersion.string) · \(requestBytes.summary)")
+            Text("VoxFlow \(VoxFlowVersion.string)")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-                .help(requestBytes.measurementDetails)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
