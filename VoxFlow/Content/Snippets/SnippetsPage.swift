@@ -55,7 +55,7 @@ struct SnippetsHeader: View {
 
     var body: some View {
         HStack(alignment: .lastTextBaseline, spacing: 16) {
-            Text("Say a trigger and VoxFlow inserts the full text. Triggers work in every app.")
+            Text("Type a trigger such as /sig, or speak it while dictating. Typing requires Accessibility access.")
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: 520, alignment: .leading)
             Spacer(minLength: 0)

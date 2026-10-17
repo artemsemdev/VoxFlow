@@ -135,6 +135,9 @@ versioning.
 
 ### Fixed
 
+- Typed snippets use global key-down events and guarded keyboard replacement in VS Code and other
+  Chromium/Electron editors. Recover monitoring after returning from Accessibility settings.
+
 - Casual now preserves dictated words in order after configured filler removal. Reject individual
   foreign words, invented explanations, substitutions and omissions even when the overall language
   stays the same; retain punctuation and capitalization cleanup.

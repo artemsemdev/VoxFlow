@@ -121,7 +121,8 @@ any app, style cleanup with a local LLM and an MCP server follow in 2.x (see the
   words feed the speech engine directly, and "Learn names from Contacts" imports names locally.
 - Snippets page: define a trigger (e.g. `/sig`) and a body with `cursor`/`date`/`clipboard`/`app`
   placeholders; say "slash sig" while dictating or type `/sig` in an accessible text field in
-  another app to expand it (Accessibility permission required). If a longer trigger shares its
+  another app to expand it (Accessibility permission required), including VS Code and other
+  Chromium/Electron editors. Secure fields and excluded apps are skipped. If a longer trigger shares its
   prefix, such as `/sig2`, finish `/sig` with a space. `cursor` (also `{cursor}`) places
   the caret within the inserted text when the target supports Accessibility selection.
 - Styles page: pick a rewrite tone (Formal, Casual, Very casual, Verbatim) and per-app overrides;
