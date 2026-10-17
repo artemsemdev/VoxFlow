@@ -2,13 +2,14 @@ import AppKit
 import ApplicationServices
 import VoxFlowStyling
 
-/// Expands typed triggers in other apps after their key-down has updated the focused field.
-/// Reads the field at key-up instead of retaining a global keystroke buffer across focus changes.
+/// Observe supported global key-down events, then read the updated field after the editor settles.
+/// Retains no keystroke buffer and cancels pending work on subsequent input or focus changes.
 @MainActor
 final class TypedSnippetMonitor {
     private let content: ContentService
     private let settings: DictationSettings
     private var monitor: Any?
+    private var pending: Task<Void, Never>?
 
     init(content: ContentService, settings: DictationSettings) {
         self.content = content
@@ -17,18 +18,24 @@ final class TypedSnippetMonitor {
 
     func start() {
         guard monitor == nil else { return }
-        monitor = NSEvent.addGlobalMonitorForEvents(matching: .keyUp) { [weak self] event in
-            self?.expand(after: event)
+        monitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown, .leftMouseDown, .rightMouseDown]) { [weak self] event in
+            self?.schedule(after: event)
         }
     }
 
     func stop() {
+        pending?.cancel()
+        pending = nil
         if let monitor { NSEvent.removeMonitor(monitor) }
         monitor = nil
     }
 
-    private func expand(after event: NSEvent) {
-        guard event.modifierFlags.intersection([.command, .control, .option]).isEmpty,
+    private func schedule(after event: NSEvent) {
+        guard event.cgEvent?.getIntegerValueField(.eventSourceUserData) != TypedSnippetReplacement.eventMarker else { return }
+        pending?.cancel()
+        pending = nil
+        guard event.type == .keyDown,
+              event.modifierFlags.intersection([.command, .control, .option]).isEmpty,
               let typed = event.characters, typed.count == 1,
               !typed.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains),
               !content.snippetsBox.current.isEmpty,
@@ -37,15 +44,34 @@ final class TypedSnippetMonitor {
               app.processIdentifier != ProcessInfo.processInfo.processIdentifier,
               !settings.excludedBundleIDs.contains(app.bundleIdentifier ?? "") else { return }
 
+        AXTextTarget.prepareFocusedApplication()
         let system = AXUIElementCreateSystemWide()
         guard let focused = attribute(kAXFocusedUIElementAttribute, of: system),
               CFGetTypeID(focused) == AXUIElementGetTypeID() else { return }
         let field = unsafeDowncast(focused, to: AXUIElement.self)
+        let target = AXTextTarget(field)
+        guard target.isEditable else { return }
+        pending = Task { [weak self] in
+            // Global event delivery can precede the editor's text update. A newer key or mouse
+            // event cancels this short debounce; the captured field must still own focus.
+            do { try await Task.sleep(for: .milliseconds(25)) } catch { return }
+            guard !Task.isCancelled, let self, self.isCurrent(target, app: app) else { return }
+            self.expand(typed: typed, field: field, target: target, app: app)
+        }
+    }
+
+    private func isCurrent(_ target: AXTextTarget, app: NSRunningApplication) -> Bool {
+        guard !Task.isCancelled, AXIsProcessTrusted(), !WorkspaceFrontmostApp().secureInputEnabled(),
+              !app.isTerminated, NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier,
+              !settings.excludedBundleIDs.contains(app.bundleIdentifier ?? ""),
+              let current = AXTextTarget.focused() else { return false }
+        return target.isSameTarget(as: current)
+    }
+
+    private func expand(typed: String, field: AXUIElement, target: AXTextTarget, app: NSRunningApplication) {
         var pid: pid_t = 0
         guard AXUIElementGetPid(field, &pid) == .success, pid == app.processIdentifier,
               attribute(kAXSubroleAttribute, of: field) as? String != kAXSecureTextFieldSubrole,
-              isSettable(kAXSelectedTextAttribute, of: field),
-              isSettable(kAXSelectedTextRangeAttribute, of: field),
               let value = attribute(kAXValueAttribute, of: field) as? String,
               let selected = attribute(kAXSelectedTextRangeAttribute, of: field),
               CFGetTypeID(selected) == AXValueGetTypeID() else { return }
@@ -60,20 +86,12 @@ final class TypedSnippetMonitor {
         let expander = SnippetExpander(snippets: content.snippetsBox.current, sayPrefix: false,
                                       context: (Date(), NSPasteboard.general.string(forType: .string),
                                                 app.localizedName, app.bundleIdentifier))
-        guard let expansion = expander.expandTyped(in: value, selection: NSRange(range, in: value)),
-              let currentFocus = attribute(kAXFocusedUIElementAttribute, of: system),
-              CFEqual(currentFocus, field),
-              attribute(kAXValueAttribute, of: field) as? String == value,
-              let currentSelection = attribute(kAXSelectedTextRangeAttribute, of: field),
-              CFEqual(currentSelection, selected) else { return }
-        var replacementRange = CFRange(location: expansion.range.location, length: expansion.range.length)
-        guard setSelection(&replacementRange, in: field) else { return }
-        guard AXUIElementSetAttributeValue(field, kAXSelectedTextAttribute as CFString, expansion.text as CFString) == .success else {
-            _ = setSelection(&selection, in: field)
-            return
-        }
-        var caret = CFRange(location: expansion.caretUTF16, length: 0)
-        _ = setSelection(&caret, in: field)
+        guard let expansion = expander.expandTyped(in: value, selection: NSRange(range, in: value)) else { return }
+        let isValid = { self.isCurrent(target, app: app) }
+        guard TypedSnippetReplacement.apply(expansion, in: value, selection: NSRange(range, in: value),
+            target: target, isValid: isValid, sendKeys: {
+                TypedSnippetReplacement.deliver($0, to: app.processIdentifier, isValid: isValid)
+            }) else { return }
         Task { await content.noteUses(text: "", snippets: [expansion.trigger]) }
     }
 
@@ -83,13 +101,4 @@ final class TypedSnippetMonitor {
         return value
     }
 
-    private func isSettable(_ name: String, of element: AXUIElement) -> Bool {
-        var settable = DarwinBoolean(false)
-        return AXUIElementIsAttributeSettable(element, name as CFString, &settable) == .success && settable.boolValue
-    }
-
-    private func setSelection(_ range: inout CFRange, in element: AXUIElement) -> Bool {
-        guard let value = AXValueCreate(.cfRange, &range) else { return false }
-        return AXUIElementSetAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, value) == .success
-    }
 }

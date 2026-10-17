@@ -141,6 +141,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidBecomeActive(_ notification: Notification) {
         guard !LaunchEnvironment.isRunningTests() else { return }
         AppServices.shared.fnMonitor.refreshEventSource()
+        // Reinstall the snippet monitor after returning from Accessibility permission settings.
+        typedSnippets?.stop()
+        typedSnippets?.start()
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
