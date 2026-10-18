@@ -4,7 +4,9 @@ VoxFlow is a native macOS 15+ Apple Silicon app. The archived .NET solution is o
 the `v1` branch; its build/test commands do not validate v2. Issue #77 is superseded by
 #115. The current milestone follows the [local-use scope in #115](https://github.com/artemsemdev/VoxFlow/issues/115#issuecomment-5634616550):
 exercise Release, install with the existing local signing identity, and document launching
-that installed app. Public distribution is excluded from this milestone.
+that installed app. That local scope is completed. The current
+[2.1.0-rc.1 candidate](2.1.0-rc.1.md) prepares the integrated code for `master`;
+public distribution remains outside its scope.
 
 ## Local Release build and installation
 
@@ -43,6 +45,28 @@ server identity. Keep `VoxFlowVersion.string` in
 `VoxFlowKit/Sources/VoxFlowCore/Version.swift` aligned as well; JSON exports use it
 in their generator metadata. There is no separately versioned v2 CLI. Keep release notes and
 the README status aligned with the version actually published.
+
+For a release candidate, keep the bundle and export version numeric (`2.1.0`) and use a
+unique integer build (`2` for `2.1.0-rc.1`). Record the prerelease identifier in the branch,
+CHANGELOG, candidate record and artifact filename. Every replacement candidate gets a new
+build number. The candidate record identifies its exact source and validation; a version
+bump alone does not establish acceptance.
+
+## Preparing a candidate for master
+
+1. Start a release branch from current `develop`; prepare focused version/documentation changes.
+2. Record owner-confirmed acceptance and any explicitly deferred checks with linked open issues.
+   Deferral applies to that candidate only and does not mark an unperformed check as passed.
+3. Run full app/package/script checks, warning gates, real MCP transport checks and a signed
+   Release build. Record skipped opt-ins separately from passes.
+4. Open a PR into `master` using the repository template. Explain that its cumulative diff
+   promotes existing integration work; list new preparation changes separately.
+5. Require the final PR CI result before merging. Promote with a merge commit to retain
+   ancestry; create the appropriate RC tag only when promotion is authorized, and merge the
+   resulting release changes back into `develop`. A final stable tag needs its own decision.
+
+The older `release/2.1.0` branch is a historical preparation snapshot. The current candidate
+uses `release/2.1.0-rc.1` from `develop` instead of reusing that stale branch.
 
 ## Future public distribution
 

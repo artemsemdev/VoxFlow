@@ -5,6 +5,15 @@ versioning.
 
 ## Unreleased
 
+## 2.1.0-rc.1 — 2026-10-19
+
+Release candidate for local use on Apple Silicon macOS 15+. App/export version: `2.1.0`,
+build `2`. Includes the integrated dictation, settings, styling and MCP work below.
+Owner-confirmed acceptance: #110 and #138 on 2026-10-19; #161 completed on 2026-09-12.
+The owner deferred manual acceptance for #137, #139, #144, #145 and #162 for this candidate;
+those issues remain open. Public notarized distribution is outside this RC's scope.
+See the [candidate record](docs/delivery/2.1.0-rc.1.md) for validation and merge gates.
+
 ### Added
 
 - Copy original or inserted History text explicitly, with shared two-second Copied feedback and stable button widths.
@@ -50,7 +59,7 @@ versioning.
   retain access through exports, and explain fallback to Transcripts when a saved folder is unavailable.
 - Inline History editing with Save/Cancel, preserving the raw transcript and encryption.
 - Dictation logic: microphone capture, Flow Bar state machine, windowed transcription,
-  encrypted history with 30-day retention (no UI yet — phase 3b).
+  encrypted history with configurable retention (30 days by default).
 - Dictation wired end-to-end: hold (or double-tap) fn anywhere to dictate. The floating Flow Bar
   HUD shows listening/processing/result; recognized text is inserted into the focused field via
   Accessibility, or copied to the clipboard when there isn't one; finished dictations save to
@@ -90,7 +99,7 @@ versioning.
   reappears whenever a permission is later revoked.
 - Settings › General: launch at login (`SMAppService`), show in menu bar, play sounds on
   dictation start/end, appearance (Light/Dark/System), Flow Bar position, dictation language.
-- Settings › MCP Server (UI only this phase — the server itself ships in 2.4): endpoint and access
+- Settings › MCP Server: endpoint and access
   token with Copy/Regenerate (a confirmation alert first), which tools are exposed.
 - Native `--mcp-stdio` transport for client-launched local MCP sessions, with bounded framing,
   shared tool/privacy policies, protocol-only stdout and capture cleanup on client shutdown.
@@ -116,7 +125,7 @@ versioning.
   rewrite a past dictation into another tone without re-recording; the row updates in place and
   the result is copied to the clipboard.
 - Files result view: "Apply {Style} cleanup" checkbox rewrites every segment of a finished
-  transcript through the rule-based pipeline (instant, no re-processing) — the preview, Copy,
+  transcript through immediate rules and optional local model refinement — the preview, Copy,
   Save as… and "Also export" all reflect the cleaned text while it's checked.
 - Loopback MCP server (Settings › MCP Server): Cursor, or Claude Desktop via `mcp-remote`, can
   connect over `127.0.0.1` with the token from Settings and use `transcribe_file`, `dictate` and

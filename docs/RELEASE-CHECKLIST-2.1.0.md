@@ -1,5 +1,14 @@
 # VoxFlow 2.1.0 — release checklist
 
+## Candidate status — 2026-10-19
+
+The active candidate is [2.1.0-rc.1](delivery/2.1.0-rc.1.md), app version `2.1.0`, build `2`.
+The owner confirmed #110 and #138; #161 previously passed real TextEdit acceptance.
+The owner explicitly deferred #137, #139, #144, #145 and #162 for this RC. Keep those
+issues open and their unperformed checks unchecked. This checklist remains the full manual
+procedure; unchecked entries are not a claim that the RC has passed every scenario.
+See the candidate record for the evidence and gates applying to its promotion PR.
+
 Manual acceptance on a real Mac, gathered from the phase 3, 4, 5 and 6 plans.
 Use the installed signed Release build and record its actual version. Current automated evidence
 and remaining gates are in [completion validation](completion-validation-2026-09-12.md);

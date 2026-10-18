@@ -41,6 +41,10 @@ restoring the previous app if final verification fails. Launch it with
 first. See the [release process](docs/delivery/release-process.md) for versioning,
 validation and the separate notarized distribution prerequisites.
 
+The current candidate is **2.1.0-rc.1** (app version `2.1.0`, build `2`). Use
+`release/2.1.0-rc.1` for its source and consult the [candidate record](docs/delivery/2.1.0-rc.1.md)
+for validation results and the owner's deferred acceptance checks before installing it.
+
 Open `VoxFlow.xcodeproj`, select the `VoxFlow` scheme and run. On first launch go to
 Settings › Models and download a speech model (large-v3-turbo is recommended on Macs with 16 GB or
 more; small on 8 GB). Then drop an audio file on the window or the Dock icon.
@@ -95,7 +99,8 @@ Tests use temporary databases and fake key providers — see #143.
 
 The Formal / Casual / Very casual style cleanup (Styles page, Re-style, and the Files result's
 "Apply {Style} cleanup") is rule-based on its own; installing the style model upgrades the
-dictation and Re-style paths to LLM rewrites (Files cleanup stays rule-based either way — see
+dictation and Re-style paths to LLM rewrites. Files cleanup also uses the local model for
+transcripts up to 150 words while preserving segment timing (see
 [ADR-007](docs/adr/007-llm-styling-on-llama-cpp.md)). Download it from Settings › Models — the
 "Qwen2.5 3B Instruct (4-bit)" row, 2.1 GB, sha256-verified before it counts as installed, same
 download/pause/resume/remove flow as the speech models. It's saved to
@@ -117,8 +122,8 @@ it installed at the path above, or `VOXFLOW_STYLE_MODEL` set to a GGUF file else
 cd VoxFlowKit && VOXFLOW_STYLE_MODEL=/path/to/qwen2.5-3b-instruct-q4_k_m.gguf swift test --filter LlamaEngineIntegrationTests
 ```
 
-Without either, it prints `skipped: style model not installed` and returns — this is why it's
-absent from CI.
+Without either, real-model cases are explicitly skipped with an installation hint. A skipped
+case does not validate model inference; CI does not install the model.
 
 ### MCP server
 
