@@ -6,10 +6,27 @@
 Native macOS transcription that never leaves your Mac. Swift 6, SwiftUI, whisper.cpp on Metal.
 macOS 15+, Apple Silicon.
 
-VoxFlow 2.0 is a from-scratch rewrite. Version 2.0.0 ships **file transcription**; dictation into
-any app, style cleanup with a local LLM and an MCP server follow in 2.x (see the roadmap).
+VoxFlow 2 is a from-scratch rewrite. The 2.1 candidate combines file transcription, dictation
+into other apps, local style cleanup and MCP integration.
 
-## What works today (2.0.0)
+**Status: 2.1.0-rc.1 prepared for review · app version 2.1.0, build 2.**
+This candidate is for local use with the existing signing identity. Five manual acceptance
+issues are deferred by the owner; see the [candidate record](docs/delivery/2.1.0-rc.1.md).
+The latest published stable version remains 2.0.0.
+
+## Features in 2.1.0-rc.1
+
+- History provides separate original/inserted copy actions with visible Copied confirmation.
+
+- Expanded History keeps inserted text inside its column during layout measurement and resizing.
+
+- Settings → General offers a live 20–100% main-window opacity slider, saved across relaunches.
+
+- Files and settings controls share consistent alignment; Home adapts to narrow windows and card
+  rows stay aligned. See the [visual alignment audit](docs/validation/alignment-2026-09-12/README.md).
+
+- Quitting during file transcription or dictation asks whether to finish and save first, quit immediately, or cancel.
+  Confirmed exit waits for both speech and style models to release native resources, including pending loads.
 
 - Drop audio or video files on the window or the Dock icon, use Finder's Open With, or File › Open.
   MP3, WAV, M4A/AAC, FLAC, AIFF, CAF, MP4, MOV are accepted; anything else is rejected on drop.
@@ -17,21 +34,129 @@ any app, style cleanup with a local LLM and an MCP server follow in 2.x (see the
   over four hours, failed rows that never stall the queue, a "2×" badge for duplicate drops.
 - Transcripts saved to `~/Transcripts` in the format you chose — TXT, SRT, VTT, JSON or Markdown —
   and re-exported to any other format instantly, without re-processing. Spec: [docs/formats.md](docs/formats.md).
-- A result view with the transcript's segments, search, Copy, Save as… and Reveal in Finder.
+- Selected output folders restore through security-scoped bookmarks. Unavailable or stale folders
+  fall back to Transcripts with a visible notice; exports retain access while their files are written.
+- A result view with Sentences / Short / Long segment lengths, search, Copy, Save as… and Reveal in
+  Finder. Preview and export share the chosen segmentation without running recognition again.
+  Optional cleanup renders rules instantly and improves transcripts up to 150 words with the
+  installed local style model; timing is preserved and the displayed word count follows cleanup.
 - Settings › Models: download Whisper large-v3-turbo (default, 1.6 GB) or Whisper small (480 MB),
   pause and resume, checksum verification before a model counts as installed, remove.
 - Everything on this Mac: audio is processed in memory and discarded; the only network action is a
   model download you start. No account, no analytics.
 
-## Roadmap
+### Dictation, styling and integrations
 
-| Version | Phase | Issue |
+- Microphone dictation skips near-silent windows and uses a bundled local speech detector to
+  reject background noise before Whisper decodes it, reducing invented text during pauses.
+
+- Claude Desktop can launch the signed app with `--mcp-stdio`, using its own client approvals
+  without Node, a bearer token or an HTTP listener. See the MCP client runbook for configuration
+  and the distinction from HTTP Connected clients and revocation.
+
+- Hold fn anywhere to dictate (double-tap for hands-free); a floating Flow Bar HUD shows listening,
+  processing and the result. Recognized text is inserted into the focused field via Accessibility,
+  or copied to the clipboard when there isn't a text field; finished dictations save to encrypted
+  history unless the Privacy toggle turns that off.
+- Recognized windows appear in the focused text field while speaking. Final cleanup updates only
+  that capture's text; moving focus, editing the field or moving its caret stops further writes and
+  copies the full final result once. Escape stops capture and keeps text already inserted.
+  Onboarding and History scratchpads retain final-only insertion.
+- The Flow Bar names an app holding exclusive access to the microphone when macOS reports its
+  owner. When that app releases the device, a still-active dictation gesture retries with fresh
+  permission and target checks. Releasing push-to-talk, cancelling, or re-inserting the last
+  dictation cancels that wait; a different dictation shortcut replaces it.
+- File transcription yields the shared speech engine between ten-second windows; pending
+  dictation takes priority over the next file window. On first use, Files and Settings show the
+  model's explicit “Loading into memory…” phase; one shared load serves both Files and dictation.
+- File decoding reads on demand and checks Stop between read/conversion chunks. Automatic language
+  detection retains a 30-second prefix; transcription then uses a rolling 10.2-second lookahead,
+  without keeping the full decoded recording in memory or writing a temporary audio copy.
+- Settings › Audio lets you choose and remember a specific microphone for Fn and “Test microphone”,
+  or follow System Default. An unplugged selected microphone never silently switches to another input.
+- Switching microphones keeps captured audio and accounts for the restart gap in transcript
+  timing. Losing all input devices stops capture with “No microphone found”; Settings › Audio
+  follows the current device even when dictation is idle.
+- Settings › Audio can suppress microphone noise using Apple's voice processing, with explicit
+  minimum/standard/maximum reduction of other audio. Processing defaults off. “Test microphone”
+  records up to five seconds and plays it back from memory; Stop or leaving Audio cancels the test.
+  See [microphone processing](docs/audio-processing.md) for the public API's coupling and limits.
+- Needs Microphone and Accessibility permission, and Contacts (optional — only prompted if you turn
+  on "Learn names from Contacts" on the Dictionary page). First launch walks a five-step onboarding
+  window (welcome, permissions, hotkey mode, model, try it) with buttons to grant each permission
+  and a scratchpad to try dictation before the main window opens; SETUP.md explains how to reset it.
+- When Accessibility is denied, the Flow Bar keeps the transcript on the clipboard and offers
+  “Can't type here · Open Settings” to open the Accessibility pane.
+- VoxFlow's own window is frontmost at launch, so click into the text field you want to dictate
+  into (e.g. TextEdit) before the first fn press, or the dictation lands on the clipboard instead.
+- The sidebar shows on-device processing and the app version. Model-download request bytes are
+  not shown as a privacy indicator; audio recognition and style cleanup run locally.
+- History page: browse local calendar-day groups, search past dictations and filter by app or date,
+  expand a row for the full
+  transcript, Edit, Copy, Delete with Undo; right-click an inserted word to add it to Dictionary.
+  The expanded row shows the resolved style, actual removed fillers and available low-confidence
+  raw-word annotations. Settings › Hotkeys records
+  Push-to-talk, Hands-free, Cancel and Re-insert last bindings, checks known system/VoxFlow conflicts,
+  and updates the live monitor and HUD hints. Re-insert uses a fresh privacy-checked target and
+  supports the current session with history disabled. fn guidance opens Keyboard settings. Audio
+  (input device, silence-stop, hands-free) and Privacy (encrypt-at-rest toggle, retention) are
+  built.
+- Home page: today's words/dictations/speaking pace/time saved, a 7-day word chart with a streak,
+  your last 4 dictations, and (before your first dictation) a Setup card that tracks permissions,
+  the speech model and your hotkey live. Settings › General: launch at login, show in menu bar,
+  start/end sounds, appearance (Light/Dark/System), Flow Bar position, dictation language.
+- Settings › MCP Server: a loopback-only MCP server (`127.0.0.1`, tokened) that Cursor or Claude
+  Desktop (via `mcp-remote`) can connect to and use as a tool — `transcribe_file`, `dictate` and
+  `search_history` (off by default). A floating approval dialog gates every new client by name and
+  process, Connected clients lists who's approved with Revoke, and a path policy keeps
+  `transcribe_file` to files inside your home directory that you'd already open yourself. See
+  [docs/runbooks/connect-an-mcp-client.md](docs/runbooks/connect-an-mcp-client.md) and
+  [ADR-008](docs/adr/008-loopback-mcp-server.md).
+- Menu bar: click the status item for today's stats, a hands-free toggle, quick actions (History,
+  Settings, the language picker) and "Pause dictation for 1 hour" — fn does nothing while paused,
+  and the menu bar header reads "Paused until 10:41" until you resume. A model finishing a download
+  or a file finishing transcription while the window is in the background sends a notification
+  (never for an error) that takes you straight to Models or the result when you click it. See
+  [ADR-006](docs/adr/006-menu-bar-and-notifications.md).
+- Dictionary page: add names, terms, products and places with an optional phonetic hint; recognised
+  words feed the speech engine directly, and "Learn names from Contacts" imports names locally.
+- Snippets page: define a trigger (e.g. `/sig`) and a body with `cursor`/`date`/`clipboard`/`app`
+  placeholders; say "slash sig" while dictating or type `/sig` in an accessible text field in
+  another app to expand it (Accessibility permission required), including VS Code and other
+  Chromium/Electron editors. Secure fields and excluded apps are skipped. If a longer trigger shares its
+  prefix, such as `/sig2`, finish `/sig` with a space. `cursor` (also `{cursor}`) places
+  the caret within the inserted text when the target supports Accessibility selection.
+- Styles page: pick a rewrite tone (Formal, Casual, Very casual, Verbatim) and per-app overrides;
+  rule-based styling (fillers removed, punctuation and capitalization added) runs on every
+  dictation before it's inserted — see [ADR-005](docs/adr/005-rule-based-styling-pipeline.md).
+- On-device style cleanup: an optional local LLM (Qwen2.5 3B Instruct via llama.cpp, Settings ›
+  Models) rewrites the tone step for Formal/Casual/Very casual on top of the same rule pass, with
+  automatic fallback to rule-based styling whenever the model is absent, still loading, too slow
+  or produces a bad answer. Formal and Very casual compare the source and reply languages; a
+  detected language change or unidentifiable language falls back to rules instead of a translation.
+  Casual preserves the exact word order after configured filler removal: only punctuation and
+  capitalization may change; added, removed or replaced words fall back to rule cleanup.
+  Live dictation bounds styling by the time left after speech recognition,
+  reserving one second for completion. The style model unloads after five idle minutes or macOS
+  memory pressure, then reloads lazily on the next styled request. "Re-style ▾" on
+  a History row rewrites a past dictation into another tone without re-recording and copies the
+  result; Files' result view can "Apply {Style} cleanup" with immediate rules and optional local
+  model refinement for transcripts up to 150 words, preserving timing without re-transcribing — see
+  [ADR-007](docs/adr/007-llm-styling-on-llama-cpp.md).
+
+## Release scope
+
+| Status | Capability | Issue |
 |---|---|---|
-| 2.1 | Dictation: fn push-to-talk / hands-free, Flow Bar, insertion into any app, onboarding, History | [#110](https://github.com/artemsemdev/VoxFlow/issues/110) |
-| 2.2 | Main window and Settings complete, menu bar, notifications, rule-based styles | [#111](https://github.com/artemsemdev/VoxFlow/issues/111) |
-| 2.3 | Style cleanup with a local LLM (Qwen2.5 3B via llama.cpp) | [#112](https://github.com/artemsemdev/VoxFlow/issues/112) |
-| 2.4 | MCP server on localhost | [#113](https://github.com/artemsemdev/VoxFlow/issues/113) |
-| — | Signed and notarized releases | [#115](https://github.com/artemsemdev/VoxFlow/issues/115) |
+| In 2.1 RC | Dictation, Flow Bar, onboarding and History | [#110](https://github.com/artemsemdev/VoxFlow/issues/110) |
+| In 2.1 RC | Main window, Settings, menu bar, notifications and rule-based styles | [#111](https://github.com/artemsemdev/VoxFlow/issues/111) |
+| In 2.1 RC | Local style model (Qwen2.5 3B via llama.cpp) | [#112](https://github.com/artemsemdev/VoxFlow/issues/112) |
+| In 2.1 RC | Loopback HTTP and native stdio MCP transports | [#113](https://github.com/artemsemdev/VoxFlow/issues/113) |
+| Completed locally | Signed Release build and installation | [#115](https://github.com/artemsemdev/VoxFlow/issues/115) |
+| Future scope | Developer ID, notarization and public distribution | [Release process](docs/delivery/release-process.md#future-public-distribution) |
+
+The original phase-by-phase 2.1–2.4 roadmap is consolidated into this 2.1 candidate.
+Implementation and remaining manual acceptance are tracked separately in its release record.
 
 Tracking issue: [#105](https://github.com/artemsemdev/VoxFlow/issues/105). The product design is the
 Claude Design canvas checked in at [design/](design/).
@@ -42,13 +167,14 @@ Claude Design canvas checked in at [design/](design/).
 - To build: Xcode 26.x and [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`).
 - Models are downloaded on demand into `~/Library/Application Support/VoxFlow/Models`.
 
-There are no signed binaries yet; build from source (see [SETUP.md](SETUP.md)).
+Build and verify a locally signed Release with `bash scripts/install.sh --build-only`
+(see [SETUP.md](SETUP.md)). A public notarized download is not provided by this candidate.
 
 ## Build and test
 
 ```bash
 xcodegen generate                       # creates VoxFlow.xcodeproj (gitignored)
-xcodebuild -scheme VoxFlow -destination 'platform=macOS' build test
+xcodebuild -xcconfig Build.xcconfig -scheme VoxFlow -destination 'platform=macOS,arch=arm64' build test
 ```
 
 Package-only tests, no Xcode project needed:

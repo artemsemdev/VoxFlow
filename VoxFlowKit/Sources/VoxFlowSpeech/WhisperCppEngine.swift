@@ -2,22 +2,124 @@ import Foundation
 import VoxFlowCore
 import whisper
 
-/// `SpeechEngine` over whisper.cpp. The C context is touched only on `queue`; the actor
-/// serializes calls and awaits the queue, so long transcriptions never block a cooperative thread.
+/// `SpeechEngine` over whisper.cpp. Native calls stay serial; pending dictation runs before file work.
 public actor WhisperCppEngine: SpeechEngine {
-    private let queue = DispatchQueue(label: "dev.artemsem.voxflow.whisper", qos: .userInitiated)
+    private let queue: WhisperWorkQueue
+    private let makeContext: @Sendable (URL, WhisperWorkQueue) throws -> ContextBox
     private var context: ContextBox?
+    private var loads: [UUID: Task<Void, Error>] = [:]
+    private var runs: [UUID: CancelFlag] = [:]
+    private var shutdownTask: Task<Void, Never>?
+    var isShuttingDown: Bool { shutdownTask != nil }
 
-    public init() {}
+    public init() { queue = WhisperWorkQueue(); makeContext = Self.loadNativeContext }
 
-    /// Owns the `whisper_context` pointer and frees it when the engine goes away.
+    init(queue: WhisperWorkQueue, makeContext: @escaping @Sendable (URL, WhisperWorkQueue) throws -> ContextBox) {
+        self.queue = queue
+        self.makeContext = makeContext
+    }
+
+    /// Terminal cleanup for application exit. A plain unload cannot cover an in-flight load
+    /// that has not published its context yet, or cleanup already queued by an earlier unload.
+    public func shutdown() async {
+        if let shutdownTask { await shutdownTask.value; return }
+        let pendingLoads = Array(loads.values)
+        pendingLoads.forEach { $0.cancel() }
+        runs.values.forEach { $0.set() }
+        let loadedContext = context
+        context = nil
+        let task = Task {
+            for load in pendingLoads { _ = await load.result }
+            await loadedContext?.release()
+            await self.queue.drain()
+        }
+        shutdownTask = task
+        await task.value
+    }
+
+    static func wordConfidences(tokenTexts: [String], probabilities: [Double], segmentText: String) -> [WordConfidence]? {
+        guard tokenTexts.count == probabilities.count,
+              probabilities.allSatisfy({ $0.isFinite && (0...1).contains($0) }),
+              tokenTexts.flatMap({ Array($0.utf16) }).elementsEqual(segmentText.utf16) else { return nil }
+
+        var tokenRanges: [(NSRange, Double)] = []
+        var location = 0
+        for (token, probability) in zip(tokenTexts, probabilities) {
+            let length = (token as NSString).length
+            tokenRanges.append((NSRange(location: location, length: length), probability))
+            location += length
+        }
+        guard let regex = try? NSRegularExpression(pattern: "\\S+") else { return nil }
+        let words = regex.matches(in: segmentText, range: NSRange(location: 0, length: (segmentText as NSString).length))
+        return words.compactMap { match in
+            let probabilities = tokenRanges.compactMap { range, probability in
+                NSIntersectionRange(range, match.range).length > 0 ? probability : nil
+            }
+            guard !probabilities.isEmpty,
+                  let span = RawTextSpan(location: match.range.location, length: match.range.length) else { return nil }
+            return WordConfidence(span: span, confidence: probabilities.reduce(0, +) / Double(probabilities.count))
+        }
+    }
+
+    /// Same loaded model and serial native queue, with lower priority between file windows.
+    public nonisolated var fileEngine: any SpeechEngine { FileEngine(owner: self) }
+
+    private struct FileEngine: SpeechEngine {
+        let owner: WhisperCppEngine
+        func load(modelAt url: URL) async throws { try await owner.load(modelAt: url) }
+        func detectLanguage(in audio: AudioSamples) async throws -> LanguageDetection {
+            try await owner.detectLanguage(in: audio, priority: .file)
+        }
+        func transcribe(_ audio: AudioSamples, options: TranscriptionOptions) -> AsyncThrowingStream<SegmentEvent, Error> {
+            owner.transcribe(audio, options: options, priority: .file)
+        }
+    }
+
+    /// Owns the native pointer. Cleanup follows all earlier file and dictation work.
     final class ContextBox: @unchecked Sendable {
-        // Safe: the pointer is only dereferenced on WhisperCppEngine.queue while runs are in flight;
-        // deinit runs when the last reference (held by the engine or an in-flight run) goes away,
-        // so nothing can be using it.
+        // Safe: native work is confined to WhisperCppEngine.queue. The lock only arbitrates which
+        // caller claims the single release when explicit unload races the deinit fallback.
+        // Cleanup uses file priority: FIFO within that role keeps it after older file uses,
+        // while dictation uses already run first. The actor clears context before enqueuing
+        // cleanup, so later operations cannot acquire this pointer.
         let pointer: OpaquePointer
-        init(_ pointer: OpaquePointer) { self.pointer = pointer }
-        deinit { whisper_free(pointer) }
+        private let queue: WhisperWorkQueue
+        private let releaseNative: @Sendable (OpaquePointer) -> Void
+        private let lock = NSLock()
+        private var isReleased = false
+
+        init(_ pointer: OpaquePointer, queue: WhisperWorkQueue,
+             releaseNative: @escaping @Sendable (OpaquePointer) -> Void = { whisper_free($0) }) {
+            self.pointer = pointer
+            self.queue = queue
+            self.releaseNative = releaseNative
+        }
+
+        /// Waits until the native context has been freed. Concurrent or repeated calls are no-ops.
+        func release() async {
+            guard let address = claimRelease() else { return }
+            let releaseNative = releaseNative
+            await withCheckedContinuation { continuation in
+                queue.enqueue(priority: .file) {
+                    releaseNative(OpaquePointer(bitPattern: address)!)
+                    continuation.resume()
+                }
+            }
+        }
+
+        deinit {
+            guard let address = claimRelease() else { return }
+            let releaseNative = releaseNative
+            queue.enqueue(priority: .file) { releaseNative(OpaquePointer(bitPattern: address)!) }
+        }
+
+        private func claimRelease() -> UInt? {
+            lock.withLock {
+                guard !isReleased else { return nil }
+                isReleased = true
+                return UInt(bitPattern: pointer)
+            }
+        }
     }
 
     /// State shared with the C callbacks during one `whisper_full` call.
@@ -33,24 +135,53 @@ public actor WhisperCppEngine: SpeechEngine {
     }
 
     public func load(modelAt url: URL) async throws {
-        let path = url.path
-        let box: ContextBox = try await onQueue {
-            var params = whisper_context_default_params()
-            params.use_gpu = true
-            params.flash_attn = true
-            guard let pointer = whisper_init_from_file_with_params(path, params) else {
-                throw SpeechEngineError.modelLoadFailed(path)
+        guard !isShuttingDown else { throw SpeechEngineError.cancelled }
+        let nativeQueue = queue
+        let makeContext = makeContext
+        let task = Task {
+            let box = try await self.onQueue { try makeContext(url, nativeQueue) }
+            guard !self.isShuttingDown else {
+                await box.release()
+                throw SpeechEngineError.cancelled
             }
-            return ContextBox(pointer)
+            let previous = self.context
+            self.context = box
+            await previous?.release()
         }
-        context = box
+        let id = UUID()
+        loads[id] = task
+        defer { loads[id] = nil }
+        try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: { task.cancel() }
+    }
+
+    private static func loadNativeContext(_ url: URL, queue: WhisperWorkQueue) throws -> ContextBox {
+        var params = whisper_context_default_params()
+        params.use_gpu = true
+        params.flash_attn = true
+        guard let pointer = whisper_init_from_file_with_params(url.path, params) else {
+            throw SpeechEngineError.modelLoadFailed(url.path)
+        }
+        return ContextBox(pointer, queue: queue)
+    }
+
+    /// Releases the loaded model after all previously submitted native work has completed.
+    public func unload() async {
+        let loadedContext = context
+        context = nil
+        await loadedContext?.release()
     }
 
     public func detectLanguage(in audio: AudioSamples) async throws -> LanguageDetection {
+        try await detectLanguage(in: audio, priority: .dictation)
+    }
+
+    private func detectLanguage(in audio: AudioSamples, priority: WhisperWorkQueue.Priority) async throws -> LanguageDetection {
         guard let context else { throw SpeechEngineError.modelNotLoaded }
         let samples = audio.samples
         let threads = Int32(WhisperParameters(options: TranscriptionOptions(), availableCores: ProcessInfo.processInfo.activeProcessorCount).threadCount)
-        return try await onQueue {
+        return try await onQueue(priority: priority) {
             var probabilities = [Float](repeating: 0, count: Int(whisper_lang_max_id()) + 1)
             let languageID: Int32 = samples.withUnsafeBufferPointer { buffer in
                 guard whisper_pcm_to_mel(context.pointer, buffer.baseAddress, Int32(buffer.count), threads) == 0 else { return -1 }
@@ -63,6 +194,11 @@ public actor WhisperCppEngine: SpeechEngine {
     }
 
     public nonisolated func transcribe(_ audio: AudioSamples, options: TranscriptionOptions) -> AsyncThrowingStream<SegmentEvent, Error> {
+        transcribe(audio, options: options, priority: .dictation)
+    }
+
+    private nonisolated func transcribe(_ audio: AudioSamples, options: TranscriptionOptions,
+                                       priority: WhisperWorkQueue.Priority) -> AsyncThrowingStream<SegmentEvent, Error> {
         AsyncThrowingStream { continuation in
             // The stream builder runs synchronously on the caller's task, before any suspension. If that
             // task is already cancelled, `AsyncThrowingStream.next()` would otherwise end iteration
@@ -74,7 +210,7 @@ public actor WhisperCppEngine: SpeechEngine {
             }
             let task = Task {
                 do {
-                    try await self.run(audio, options: options, continuation: continuation)
+                    try await self.run(audio, options: options, priority: priority, continuation: continuation)
                     continuation.finish()
                 } catch {
                     continuation.finish(throwing: error)
@@ -84,7 +220,7 @@ public actor WhisperCppEngine: SpeechEngine {
         }
     }
 
-    private func run(_ audio: AudioSamples, options: TranscriptionOptions,
+    private func run(_ audio: AudioSamples, options: TranscriptionOptions, priority: WhisperWorkQueue.Priority,
                      continuation: AsyncThrowingStream<SegmentEvent, Error>.Continuation) async throws {
         guard let context else { throw SpeechEngineError.modelNotLoaded }
         let mapped = WhisperParameters(options: options, availableCores: ProcessInfo.processInfo.activeProcessorCount)
@@ -93,10 +229,14 @@ public actor WhisperCppEngine: SpeechEngine {
         // reaches it through continuation.onTermination → task.cancel(). See #125 for the stream-side
         // caveat.
         let cancelFlag = CancelFlag()
+        let runID = UUID()
+        runs[runID] = cancelFlag
+        defer { runs[runID] = nil }
         let runState = RunState(continuation: continuation, isCancelled: { cancelFlag.isSet })
 
         try await withTaskCancellationHandler {
-            try await onQueue {
+            try await onQueue(priority: priority) {
+                guard !cancelFlag.isSet else { throw SpeechEngineError.cancelled }
                 var params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY)
                 params.n_threads = Int32(mapped.threadCount)
                 params.print_progress = false
@@ -105,6 +245,23 @@ public actor WhisperCppEngine: SpeechEngine {
                 params.print_timestamps = false
                 params.no_speech_thold = mapped.noSpeechThreshold
                 params.single_segment = false
+
+                // Whisper can confidently turn background noise into subtitle credits, even
+                // with a near-zero no_speech probability. Use a separate local speech detector
+                // for microphone dictation; file transcription keeps its existing behavior.
+                let vadC: UnsafeMutablePointer<CChar>?
+                if priority == .dictation {
+                    guard let model = Bundle.module.url(forResource: "ggml-silero-v6.2.0", withExtension: "bin",
+                                                        subdirectory: "Resources") else {
+                        throw SpeechEngineError.modelLoadFailed("Bundled speech activity detector is missing")
+                    }
+                    vadC = strdup(model.path)
+                    params.vad = true
+                    params.vad_model_path = vadC.map { UnsafePointer($0) }
+                } else {
+                    vadC = nil
+                }
+                defer { free(vadC) }
 
                 let languageC = mapped.language.flatMap { strdup($0) }
                 let promptC = mapped.initialPrompt.flatMap { strdup($0) }
@@ -128,10 +285,13 @@ public actor WhisperCppEngine: SpeechEngine {
                         let end = Double(whisper_full_get_segment_t1(ctx, i)) / 100
                         let text = String(cString: whisper_full_get_segment_text(ctx, i))
                         let tokenCount = whisper_full_n_tokens(ctx, i)
-                        let confidence: Double? = tokenCount > 0
-                            ? (0..<tokenCount).reduce(0.0) { $0 + Double(whisper_full_get_token_p(ctx, i, $1)) } / Double(tokenCount)
-                            : nil
-                        if let segment = TranscriptSegment(start: start, end: end, text: text, confidence: confidence) {
+                        let tokenTexts = (0..<tokenCount).map { String(cString: whisper_full_get_token_text(ctx, i, $0)) }
+                        let probabilities = (0..<tokenCount).map { Double(whisper_full_get_token_p(ctx, i, $0)) }
+                        let confidence = probabilities.isEmpty ? nil : probabilities.reduce(0, +) / Double(probabilities.count)
+                        let words = WhisperCppEngine.wordConfidences(tokenTexts: tokenTexts, probabilities: probabilities,
+                                                                    segmentText: text)
+                        if let segment = TranscriptSegment(start: start, end: end, text: text, confidence: confidence,
+                                                           wordConfidences: words) {
                             state.continuation.yield(.segment(segment))
                         }
                         state.emitted += 1
@@ -171,11 +331,8 @@ public actor WhisperCppEngine: SpeechEngine {
     }
 
     /// Runs `body` on the engine's serial queue and resumes when it finishes.
-    private func onQueue<T: Sendable>(_ body: @escaping @Sendable () throws -> T) async throws -> T {
-        try await withCheckedThrowingContinuation { continuation in
-            queue.async {
-                do { continuation.resume(returning: try body()) } catch { continuation.resume(throwing: error) }
-            }
-        }
+    private func onQueue<T: Sendable>(priority: WhisperWorkQueue.Priority = .dictation,
+                                     _ body: @escaping @Sendable () throws -> T) async throws -> T {
+        try await queue.run(priority: priority, body)
     }
 }

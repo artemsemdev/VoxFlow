@@ -21,6 +21,7 @@ struct ModelsSettingsView: View {
         }
         .frame(maxWidth: .infinity)
         .task { await model.refresh() }
+        .task { await model.observeModelLoading() }
         // Re-triggered whenever `isAnyRowActive` flips — a download starting (from this view or
         // `useSmallerModelInstead`/`resume`) or `refresh()` itself picking one up — since SwiftUI
         // cancels and restarts a `.task(id:)` when its id changes. `pollWhileActive()` then exits on
@@ -73,7 +74,16 @@ struct ModelsSettingsView: View {
         }
     }
 
-    private func rowView(_ row: ModelsViewModel.Row) -> some View {
+    @ViewBuilder
+    func rowView(_ row: ModelsViewModel.Row) -> some View {
+        if let failureReason = row.failureReason {
+            failedRow(row, reason: failureReason)
+        } else {
+            standardRow(row)
+        }
+    }
+
+    private func standardRow(_ row: ModelsViewModel.Row) -> some View {
         HStack(spacing: 14) {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 8) {
@@ -103,9 +113,37 @@ struct ModelsSettingsView: View {
         .padding(.vertical, 12)
     }
 
+    private func failedRow(_ row: ModelsViewModel.Row, reason: String) -> some View {
+        HStack(spacing: 14) {
+            Circle()
+                .fill(Color.red)
+                .frame(width: 18, height: 18)
+                .overlay(Text("!").font(.caption2.weight(.heavy)).foregroundStyle(.white))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(row.model.displayName).fontWeight(.medium)
+                Text(reason).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("Retry download") { Task { await model.retry(row.model) } }
+                .buttonStyle(.borderedProminent)
+                .tint(.accentColor)
+                .controlSize(.small)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(Color.red.opacity(0.05))
+    }
+
     @ViewBuilder
     private func rowSubtitle(_ row: ModelsViewModel.Row) -> some View {
-        switch row.state {
+        if row.isLoadingIntoMemory {
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text(row.statusSubtitle)
+            }
+            .font(.caption).foregroundStyle(.secondary)
+        } else { switch row.state {
         case .verifying:
             Text("Verifying download… checking \(row.sizeText) against the published checksum")
                 .font(.caption).foregroundStyle(.secondary)
@@ -115,11 +153,14 @@ struct ModelsSettingsView: View {
         default:
             Text(row.subtitle).font(.caption).foregroundStyle(.secondary)
         }
+        }
     }
 
     @ViewBuilder
     private func trailingControl(_ row: ModelsViewModel.Row) -> some View {
-        switch row.state {
+        if row.isLoadingIntoMemory {
+            Text(row.statusContext ?? "").font(.caption).foregroundStyle(.tertiary)
+        } else { switch row.state {
         case .installed:
             HStack(spacing: 10) {
                 Label("Installed", systemImage: "checkmark.circle.fill")
@@ -145,6 +186,7 @@ struct ModelsSettingsView: View {
                 .controlSize(.small)
         case .verifying:
             EmptyView()
+        }
         }
     }
 

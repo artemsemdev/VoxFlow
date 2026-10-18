@@ -25,16 +25,38 @@ public struct TranscriptionOptions: Sendable, Equatable {
     public var threadCount: Int?
     /// Segments whose no-speech probability exceeds this are dropped.
     public var noSpeechThreshold: Double
+    /// Tail of the text recognized so far, so whisper conditions the next window on it (phase 3 windows).
+    public var promptContext: String?
 
-    public init(language: String? = nil, vocabulary: [String] = [], threadCount: Int? = nil, noSpeechThreshold: Double = 0.6) {
+    public init(language: String? = nil, vocabulary: [String] = [], threadCount: Int? = nil,
+                noSpeechThreshold: Double = 0.6, promptContext: String? = nil) {
         self.language = language
         self.vocabulary = vocabulary
         self.threadCount = threadCount
         self.noSpeechThreshold = noSpeechThreshold
+        self.promptContext = promptContext
     }
 
+    /// I2: whisper's initial-prompt budget is small (~`n_text_ctx/2` tokens); `promptContext` (the
+    /// phase-3 window continuation) goes first and is truncated to its last 200 characters so it
+    /// always survives, then `vocabulary` words are appended in order up to a 400-character budget
+    /// — a word that would push the vocabulary section past that budget is dropped, along with every
+    /// word after it, rather than truncating mid-word.
     public var initialPrompt: String? {
-        vocabulary.isEmpty ? nil : vocabulary.joined(separator: ", ")
+        let contextTail = 200
+        let vocabularyBudget = 400
+
+        let context = promptContext.map { String($0.suffix(contextTail)) }.flatMap { $0.isEmpty ? nil : $0 }
+
+        var vocabularySection = ""
+        for word in vocabulary {
+            let candidate = vocabularySection.isEmpty ? word : "\(vocabularySection), \(word)"
+            guard candidate.count <= vocabularyBudget else { break }
+            vocabularySection = candidate
+        }
+
+        let parts = [context, vocabularySection.isEmpty ? nil : vocabularySection].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: "\n")
     }
 }
 
@@ -62,6 +84,6 @@ public protocol SpeechEngine: Sendable {
     /// Cancellation: if the consuming task is already cancelled when iteration starts, the stream
     /// throws `SpeechEngineError.cancelled`. If it is cancelled mid-run, the engine aborts promptly
     /// but `AsyncThrowingStream` may end the iteration without an error — check `Task.isCancelled`
-    /// after the loop. Tracked in issue #125.
+    /// after the loop. Decided in ADR-003: consumers check `Task.isCancelled` after the loop.
     func transcribe(_ audio: AudioSamples, options: TranscriptionOptions) -> AsyncThrowingStream<SegmentEvent, Error>
 }

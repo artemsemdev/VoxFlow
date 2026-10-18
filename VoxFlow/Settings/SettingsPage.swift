@@ -1,13 +1,15 @@
 import SwiftUI
 
 /// Settings (design ST-01…06): segmented tabs across the top, `navigation.settingsTab` picks which
-/// one shows. Only Models (ST-03) is real in this phase — the other five read "Coming in a later
-/// phase", matching `PlaceholderPageView`'s treatment of the not-yet-built sidebar pages.
+/// one shows. General and MCP (ST-01, ST-06) read from `SettingsServices.shared` (a separate
+/// composition root from `AppServices` for now — see that type's doc comment).
 struct SettingsPage: View {
     @Environment(AppServices.self) private var services
     @Environment(Navigation.self) private var navigation
 
     private var model: ModelsViewModel { services.modelsViewModel }
+    private var audio: AudioViewModel { services.audioViewModel }
+    private var privacy: PrivacyViewModel { services.privacyViewModel }
 
     var body: some View {
         @Bindable var navigation = navigation
@@ -23,32 +25,17 @@ struct SettingsPage: View {
             .padding(.top, 16)
 
             Group {
-                if navigation.settingsTab == .models {
-                    ModelsSettingsView(model: model)
-                } else {
-                    SettingsPlaceholderTab(tab: navigation.settingsTab)
+                switch navigation.settingsTab {
+                case .general: GeneralSettingsView(general: SettingsServices.shared.generalViewModel)
+                case .hotkeys: HotkeysSettingsView(settings: services.dictationSettings, recorder: services.shortcutRecorder)
+                case .models: ModelsSettingsView(model: model)
+                case .audio: AudioSettingsView(audio: audio)
+                case .privacy: PrivacySettingsView(privacy: privacy)
+                case .mcp: MCPSettingsView(mcp: SettingsServices.shared.mcpViewModel)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .navigationTitle("Settings")
-    }
-}
-
-/// Stand-in content for the tabs not yet built (General/Hotkeys/Audio/Privacy/MCP — phases 2c+).
-private struct SettingsPlaceholderTab: View {
-    let tab: SettingsTab
-
-    var body: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "gearshape")
-                .font(.system(size: 40))
-                .foregroundStyle(.secondary)
-            Text(tab.title)
-                .font(.title2.weight(.semibold))
-            Text("Coming in a later phase.")
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

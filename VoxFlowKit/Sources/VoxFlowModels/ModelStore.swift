@@ -101,7 +101,7 @@ public actor ModelStore {
             } catch {
                 continuation.finish(throwing: error)
             }
-            await self.forgetInstallTask(id: id, token: token)
+            self.forgetInstallTask(id: id, token: token)
         }
         // A second install for an id already in flight fails fast inside performInstall and must
         // not displace (or later erase) the real producer's registration — hence the token.

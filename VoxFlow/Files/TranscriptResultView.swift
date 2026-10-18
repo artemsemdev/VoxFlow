@@ -18,6 +18,7 @@ struct TranscriptResultView: View {
             Divider()
             footer
         }
+        .onDisappear { resultModel.cancelCleanup() }
     }
 
     private var header: some View {
@@ -27,12 +28,12 @@ struct TranscriptResultView: View {
                 .foregroundStyle(.tint)
                 .accessibilityLabel("Back to queue")
             VStack(alignment: .leading, spacing: 2) {
-                Text(resultModel.document.baseName).fontWeight(.semibold)
+                Text(resultModel.document.sourceURL.lastPathComponent).fontWeight(.semibold).lineLimit(1)
                 Text(resultModel.metaLine)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .lineLimit(2)
             }
-            .lineLimit(1)
             Spacer(minLength: 12)
             Picker("Format", selection: $resultModel.format) {
                 ForEach(OutputFormat.allCases, id: \.self) { format in
@@ -50,36 +51,48 @@ struct TranscriptResultView: View {
             }
             .buttonStyle(.borderedProminent)
         }
-        .padding(16)
+        .frame(height: 44)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
     }
 
     private var searchBar: some View {
-        // "Segment length" and "Apply Casual cleanup" (design 2f) aren't built here — they're
-        // phase 4/5 (segmentation controls, style rewriting), out of scope for this UI task.
-        HStack(spacing: 7) {
-            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-            TextField("Find in transcript", text: $resultModel.searchText)
-                .textFieldStyle(.plain)
+        HStack(spacing: 8) {
+            HStack(spacing: 7) {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField("Find in transcript", text: $resultModel.searchText)
+                    .textFieldStyle(.plain)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            Text("Segment length").font(.caption).foregroundStyle(.secondary)
+            SegmentLengthPicker(selection: $resultModel.segmentLength)
+            Toggle(resultModel.cleanupLabel, isOn: $resultModel.applyCleanup)
+                .toggleStyle(.checkbox)
+                .font(.caption)
+            if resultModel.isCleaning {
+                ProgressView().controlSize(.small).accessibilityLabel("Applying local cleanup")
+            }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
     }
 
     private var segmentList: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 10) {
-                ForEach(Array(resultModel.visibleIndexedSegments.enumerated()), id: \.offset) { _, indexed in
-                    HStack(alignment: .top, spacing: 18) {
-                        Text("\(indexed.index)\n\(TimeCode.srt(indexed.segment.start)) → \(TimeCode.srt(indexed.segment.end))")
-                            .font(.system(.caption, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 190, alignment: .leading)
-                        Text(indexed.segment.text)
-                            .font(.system(.callout, design: .monospaced))
+            Group {
+                if resultModel.usesTimedPreview {
+                    LazyVStack(alignment: .leading, spacing: 10) {
+                        ForEach(Array(resultModel.visibleIndexedSegments.enumerated()), id: \.offset) { _, indexed in
+                            TranscriptSegmentRow(index: indexed.index, segment: indexed.segment, format: resultModel.format)
+                        }
                     }
+                } else {
+                    Text(resultModel.previewText)
+                        .font(.system(.callout, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
             .padding(16)
@@ -115,5 +128,73 @@ struct TranscriptResultView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
+    }
+}
+
+/// The compact white popup and blue chevrons from canvas 2f, with native menu selection.
+struct SegmentLengthPicker: View {
+    @Binding var selection: SegmentLength
+    @State private var showingOptions = false
+
+    var body: some View {
+        Button { showingOptions = true } label: {
+            HStack(spacing: 6) {
+                Text(selection.displayName).font(.system(size: 12))
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 9, weight: .semibold)).foregroundStyle(.white)
+                    .frame(width: 16, height: 16)
+                    .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 4))
+            }
+            .padding(.leading, 10).padding(.trailing, 6).frame(height: 24)
+            .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.secondary.opacity(0.25)))
+        }
+        .buttonStyle(.plain).fixedSize()
+        .accessibilityLabel("Segment length").accessibilityValue(selection.displayName)
+        .popover(isPresented: $showingOptions, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(SegmentLength.allCases, id: \.self) { length in
+                    Button {
+                        selection = length
+                        showingOptions = false
+                    } label: {
+                        HStack {
+                            Image(systemName: "checkmark").opacity(selection == length ? 1 : 0)
+                            Text(length.displayName)
+                            Spacer()
+                        }
+                        .padding(.horizontal, 8).padding(.vertical, 5).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(selection == length ? [.isSelected] : [])
+                }
+            }
+            .padding(6).frame(width: 150)
+        }
+    }
+}
+
+/// One transcript row (position, timecode, text) — its own type (not inline in `segmentList`'s
+/// `ForEach`) so `FilesRenderTests` can render rows outside a live `ScrollView`, which rasterizes
+/// blank under `ImageRenderer`, without hand-retyping the row and risking drift from production
+/// (the same reasoning `StylesRenderTests`' `AppListRow` reuse documents).
+struct TranscriptSegmentRow: View {
+    let index: Int
+    let segment: TranscriptSegment
+    var format: OutputFormat = .srt
+
+    private func timecode(_ seconds: TimeInterval) -> String {
+        format == .vtt ? TimeCode.vtt(seconds) : TimeCode.srt(seconds)
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 18) {
+            Text("\(index)\n\(timecode(segment.start)) → \(timecode(segment.end))")
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .frame(width: 190, alignment: .leading)
+            Text(segment.text)
+                .font(.system(.callout, design: .monospaced))
+        }
     }
 }

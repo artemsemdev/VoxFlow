@@ -1,0 +1,242 @@
+import Foundation
+import OSLog
+import VoxFlowCore
+import VoxFlowModels
+
+/// Lazy owner of the style model (plan ruling 4). Implements `LLMBackend` for `LlamaStyler`: ready
+/// only when the default `.style` model from `ModelStore` is loaded into `engine`; an installed but
+/// unloaded model starts one background load and reports not-ready; a removed model is unloaded.
+actor StyleModelLoader: LLMBackend {
+    typealias IdleTaskFactory = @Sendable (@escaping @Sendable () async -> Void) -> Task<Void, Never>
+    static let defaultIdleInterval: TimeInterval = 5 * 60
+
+    private let store: ModelStore
+    private let engine: any StyleEngine
+    private let clock: any MonotonicClock
+    private let idleInterval: TimeInterval
+    private let idleTaskFactory: IdleTaskFactory
+    private(set) var idleTimerRevision = 0
+    private var idleTask: Task<Void, Never>?
+    private var pressureTask: Task<Void, Never>?
+    private var pressurePending = false
+    private(set) var loadedModelID: String?
+    private var loadTask: Task<Void, Never>?
+    private(set) var loadingModelID: String?
+    /// Serializes native loads and unloads without making readiness checks wait for either one.
+    /// In particular, a replacement load must start only after a cancelled predecessor has been
+    /// unloaded, otherwise the predecessor's cleanup can unload the replacement model.
+    private var lifecycleTask: Task<Void, Never>?
+    // Do not queue a short-budget dictation behind another native generation: a queued native
+    // continuation cannot observe cancellation until the older operation leaves the serial queue.
+    private var generationInFlight = false
+    private var generationTask: Task<String, Error>?
+    private var shutdownTask: Task<Void, Never>?
+    /// Captured by each load. Cancellation advances it immediately, so stale completions cannot
+    /// clear or publish ownership while their cleanup and replacement remain queued.
+    private var loadGeneration = 0
+    private static let log = Logger(subsystem: "dev.artemsem.voxflow", category: "style-model")
+
+    init(store: ModelStore, engine: any StyleEngine,
+         clock: any MonotonicClock = SystemMonotonicClock(),
+         idleInterval: TimeInterval = StyleModelLoader.defaultIdleInterval,
+         idleTaskFactory: @escaping IdleTaskFactory = { operation in Task { await operation() } }) {
+        self.store = store
+        self.engine = engine
+        self.clock = clock
+        self.idleInterval = idleInterval
+        self.idleTaskFactory = idleTaskFactory
+    }
+
+    deinit {
+        idleTask?.cancel()
+        pressureTask?.cancel()
+    }
+
+    /// Terminal barrier: reject new work, cancel generation, and await native context/model
+    /// release even if warm-up or an earlier unload is still running. AppKit exits only afterward.
+    func shutdown() async {
+        if let shutdownTask { await shutdownTask.value; return }
+        idleTask?.cancel()
+        idleTask = nil
+        stopObservingMemoryPressure()
+        let generation = generationTask
+        generation?.cancel()
+        let task = Task {
+            _ = await generation?.result
+            self.scheduleUnloadIfNeeded()
+            await self.lifecycleTask?.value
+        }
+        shutdownTask = task
+        await task.value
+    }
+
+    func isReady() async -> Bool {
+        guard shutdownTask == nil, !generationInFlight else { return false }
+        let model = await store.defaultModel(role: .style)
+        guard shutdownTask == nil, !generationInFlight else { return false }
+        guard let model else {
+            scheduleUnloadIfNeeded()
+            return false
+        }
+        if loadedModelID == model.id { return true }
+        ensureLoad(of: model)
+        return false
+    }
+
+    /// Launch hook: same as `isReady()` but awaited, so the first dictation after launch can already
+    /// use the LLM once the Metal shaders and weights are in memory.
+    func warmUp() async {
+        guard shutdownTask == nil else { return }
+        guard let model = await store.defaultModel(role: .style), shutdownTask == nil,
+              loadedModelID != model.id else { return }
+        ensureLoad(of: model)
+        await loadTask?.value
+    }
+
+    func generate(_ prompt: ChatPrompt, maxNewTokens: Int) async throws -> String {
+        guard shutdownTask == nil, loadedModelID != nil else { throw LLMError.modelNotLoaded }
+        guard !generationInFlight else { throw LLMError.backendBusy }
+        generationInFlight = true
+        idleTask?.cancel()
+        idleTask = nil
+        defer {
+            generationInFlight = false
+            generationTask = nil
+            if shutdownTask != nil {
+                pressurePending = false
+            } else if pressurePending {
+                pressurePending = false
+                scheduleUnloadIfNeeded()
+            } else {
+                armIdleTimer()
+            }
+        }
+        let engine = engine
+        let task = Task { try await engine.generate(prompt, maxNewTokens: maxNewTokens) }
+        generationTask = task
+        return try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: { task.cancel() }
+    }
+
+    private func ensureLoad(of model: ModelDescriptor) {
+        guard loadingModelID != model.id else { return }
+        scheduleUnloadIfNeeded()
+        startLoad(model)
+    }
+
+    private func startLoad(_ model: ModelDescriptor) {
+        loadGeneration += 1
+        let generation = loadGeneration
+        let predecessor = lifecycleTask
+        let task = Task {
+            await predecessor?.value
+            guard !Task.isCancelled else { return }
+            await self.load(model, generation: generation)
+        }
+        loadTask = task
+        loadingModelID = model.id
+        lifecycleTask = task
+    }
+
+    private func load(_ model: ModelDescriptor, generation: Int) async {
+        // Only clear `loadTask` if a newer load hasn't since replaced it — lifecycle cancellation
+        // may already have forgotten this task (without waiting for it) by the time it resumes here.
+        defer {
+            if loadGeneration == generation {
+                loadTask = nil
+                loadingModelID = nil
+            }
+        }
+        do {
+            try await engine.load(modelAt: store.directory.appendingPathComponent(model.fileName))
+            // A cancelled, non-cancellation-aware native load may still finish. Clean it up inside
+            // this lifecycle operation, before the chained replacement is allowed to start.
+            guard !Task.isCancelled, loadGeneration == generation else {
+                await engine.unload()
+                return
+            }
+            loadedModelID = model.id
+            armIdleTimer()
+        } catch {
+            guard loadGeneration == generation else { return }
+            Self.log.error("style model load failed: \(String(describing: error))")
+            loadedModelID = nil
+        }
+    }
+
+    /// Cancels logical ownership immediately while native cleanup stays on the lifecycle chain.
+    /// `isReady()` must never await native load or unload work.
+    private func scheduleUnloadIfNeeded() {
+        let cancelledLoad = loadTask != nil
+        let loadedModel = loadedModelID != nil
+        guard cancelledLoad || loadedModel else { return }
+        idleTask?.cancel()
+        idleTask = nil
+        loadGeneration += 1
+        loadTask?.cancel()
+        loadTask = nil
+        loadingModelID = nil
+        loadedModelID = nil
+
+        // An in-flight load owns its cleanup inside `load`. A task cancelled before entering the
+        // engine touched no native state, so it needs no extra unload either.
+        guard !cancelledLoad, loadedModel else { return }
+
+        let predecessor = lifecycleTask
+        let task = Task {
+            await predecessor?.value
+            await self.engine.unload()
+        }
+        lifecycleTask = task
+    }
+
+    private func armIdleTimer() {
+        guard loadedModelID != nil else { return }
+        idleTask?.cancel()
+        idleTimerRevision += 1
+        let revision = idleTimerRevision
+        let clock = clock
+        let deadline = clock.now() + idleInterval
+        idleTask = idleTaskFactory { [weak self] in
+            do {
+                let remaining = deadline - clock.now()
+                if remaining > 0 { try await clock.sleep(for: remaining) }
+            } catch {
+                return
+            }
+            await self?.idleTimerFired(revision: revision)
+        }
+    }
+
+    private func idleTimerFired(revision: Int) {
+        guard revision == idleTimerRevision, !generationInFlight, loadedModelID != nil else { return }
+        idleTask = nil
+        scheduleUnloadIfNeeded()
+    }
+
+    func memoryPressureReceived() {
+        guard shutdownTask == nil else { return }
+        if generationInFlight {
+            pressurePending = true
+        } else {
+            scheduleUnloadIfNeeded()
+        }
+    }
+
+    func observeMemoryPressure(_ events: AsyncStream<Void>) {
+        guard shutdownTask == nil else { return }
+        pressureTask?.cancel()
+        pressureTask = Task { [weak self] in
+            for await _ in events {
+                guard !Task.isCancelled else { return }
+                await self?.memoryPressureReceived()
+            }
+        }
+    }
+
+    func stopObservingMemoryPressure() {
+        pressureTask?.cancel()
+        pressureTask = nil
+    }
+}

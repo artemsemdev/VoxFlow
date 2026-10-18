@@ -1,0 +1,3 @@
+// Build-wide overrides for xcodebuild -xcconfig Build.xcconfig (including Swift package targets).
+// VoxFlow has no App Intents; do not run their metadata extractor or link an unused framework.
+LM_SKIP_METADATA_EXTRACTION = YES

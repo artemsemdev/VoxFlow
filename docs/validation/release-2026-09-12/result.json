@@ -1,0 +1,17 @@
+{
+  "installed_app": "/Applications/VoxFlow.app",
+  "configuration": "Release",
+  "source_commit": "6172012",
+  "version": "2.0.0",
+  "signing_authority": "VoxFlow Dev",
+  "signature_verified": true,
+  "install_succeeded": true,
+  "reopened": true,
+  "build_warning_gate": "pass",
+  "build_log": "build.log.gz",
+  "build_log_sha256": "161d07d429a809b58f4bde1f15a98f82b5f8181f286403987903ff128ccdf455",
+  "stdio_result": "stdio.json",
+  "stdio_exit_code": 0,
+  "installed_executable_sha256": "288e54fc831b56d092072a2ac8fcb794964c5998f40e47a5503dd352ef68f859",
+  "installed_matches_built_executable": true
+}

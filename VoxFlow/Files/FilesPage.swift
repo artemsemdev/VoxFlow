@@ -3,6 +3,7 @@ import UniformTypeIdentifiers
 import VoxFlowCore
 import VoxFlowFiles
 import VoxFlowModels
+import VoxFlowStyling
 
 /// The Files page (design 1c Files, MW-06): drop zone/queue + toolbar, replaced by the transcript
 /// result view (design 2f) when a row is opened — not a sheet (controller ruling 6).
@@ -26,11 +27,7 @@ struct FilesPage: View {
         .navigationTitle("Files")
         .task { await model.refreshModelState() }
         .onChange(of: model.selected?.item.id, initial: true) { _, _ in updateResultModel() }
-        .alert(alertTitle, isPresented: alertIsPresented, presenting: model.confirmation) { confirmation in
-            alertButtons(confirmation)
-        } message: { confirmation in
-            Text(alertMessage(confirmation))
-        }
+        .modifier(FilesAlerts(model: model))
         // At the outermost container (not scoped to `queueBody`) so File › Open
         // (`Navigation.requestFileImport`) always has somewhere to present from, even when it fires
         // while the result view is showing — the command itself closes the result first, but the two
@@ -45,19 +42,28 @@ struct FilesPage: View {
     }
 
     private func updateResultModel() {
+        resultModel?.cancelCleanup()
         guard let selected = model.selected else {
             resultModel = nil
             return
         }
         let settings = services.filesSettings
         let modelDisplayName = ModelCatalog.model(id: selected.document.modelID)?.displayName ?? selected.document.modelID
+        // "Apply {Style} cleanup" (design 2f, plan ruling 6) always styles for the *default* tone,
+        // not any per-app override — a file transcript has no "frontmost app" to key an override by.
+        let styling = services.stylingSettings.snapshot
+        let cleanupClock = SystemMonotonicClock()
         resultModel = ResultViewModel(
             document: selected.document, format: settings.outputFormat, timestamps: settings.timestamps,
             // No per-job record of "was auto-detect requested" survives onto `QueueItem`/
             // `TranscriptDocument` — this reads the *current* Files setting as the best available
             // proxy for what the job that produced this transcript most likely used.
             autoDetectedLanguage: settings.language == nil, modelDisplayName: modelDisplayName, savedURL: selected.url,
-            exporter: { services.exporter }, pasteboard: SystemPasteboard(), revealer: FinderRevealer())
+            exporter: { services.exporter },
+            cleanupStyle: styling.defaultStyle,
+            cleanupOptions: StylingOptions(style: styling.defaultStyle, removeFillers: styling.removeFillers, autoPunctuate: styling.autoPunctuate),
+            pasteboard: SystemPasteboard(), revealer: FinderRevealer(),
+            cleanupStyler: LlamaStyler(backend: services.styleModelLoader, clock: cleanupClock), cleanupClock: cleanupClock)
     }
 
     private var queueBody: some View {
@@ -86,7 +92,7 @@ struct FilesPage: View {
         // when dropping more files onto an already-populated queue (design MW-06g applies either
         // way). `allowsHitTesting(false)` keeps it from stealing the drop itself.
         .overlay {
-            if model.isDragOver { dragOverOverlay }
+            if model.isDragOver { FilesDragOverOverlay(dragCount: model.dragCount) }
         }
     }
 
@@ -96,12 +102,20 @@ struct FilesPage: View {
         Binding(get: { navigation.requestFileImport }, set: { navigation.requestFileImport = $0 })
     }
 
-    private var dragOverOverlay: some View {
+}
+
+/// The live MW-06g overlay used while files are held over the Files page.
+struct FilesDragOverOverlay: View {
+    let dragCount: Int
+
+    var body: some View {
         VStack(spacing: 8) {
-            Image(systemName: "arrow.down.circle")
-                .font(.system(size: 32, weight: .medium))
-                .foregroundStyle(Color.accentColor)
-            Text("Release to add \(model.dragCount) \(model.dragCount == 1 ? "file" : "files")").font(.headline)
+            Image(systemName: "arrow.down")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 40, height: 40)
+                .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 11))
+            Text("Release to add \(dragCount) \(dragCount == 1 ? "file" : "files")").font(.headline)
             Text("processed on this Mac").font(.caption).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -112,6 +126,20 @@ struct FilesPage: View {
         )
         .padding(8)
         .allowsHitTesting(false)
+    }
+
+}
+
+/// Shared production alert presentation; native fixtures exercise the same buttons and copy.
+struct FilesAlerts: ViewModifier {
+    let model: FilesViewModel
+
+    func body(content: Content) -> some View {
+        content.alert(alertTitle, isPresented: alertIsPresented, presenting: model.confirmation) { confirmation in
+            alertButtons(confirmation)
+        } message: { confirmation in
+            Text(alertMessage(confirmation))
+        }
     }
 
     // MARK: Alerts (design MW-06c stop confirmation, 3e long-audio confirmation)

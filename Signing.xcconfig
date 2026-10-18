@@ -1,0 +1,11 @@
+// Code signing for local builds and CI (ADR-001, #143).
+// Default: ad-hoc, so CI and a fresh clone need no certificate.
+CODE_SIGN_IDENTITY = -
+CODE_SIGN_STYLE = Manual
+DEVELOPMENT_TEAM =
+ENABLE_HARDENED_RUNTIME = NO
+// A developer's Mac overrides the identity in the git-ignored Local.xcconfig (see SETUP.md):
+//   CODE_SIGN_IDENTITY = VoxFlow Dev
+// A stable identity keeps macOS permission grants (Microphone, Accessibility) and Keychain
+// access valid across rebuilds; ad-hoc signatures change on every build.
+#include? "Local.xcconfig"

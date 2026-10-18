@@ -241,4 +241,46 @@ struct FileQueueTests {
         await queue.waitUntilIdle()
         #expect(await queue.isRunning == false)
     }
+
+    @Test("the first decode progress leaves model loading even below the coalescing threshold")
+    func loadingEndsAtZeroProgress() async {
+        let transcriber = FakeFileTranscriber()
+        await transcriber.setLoadingModelID("whisper")
+        await transcriber.setProgressSteps([0, 0.005])
+        await transcriber.script(a, .document(Self.doc(a)))
+        let queue = makeQueue(transcriber)
+        await queue.add([a])
+        let stream = await queue.subscribe()
+        await queue.start()
+        var statuses: [QueueItem.Status] = []
+        for await event in stream {
+            if case .changed(let item) = event { statuses.append(item.status) }
+            if case .idle = event { break }
+        }
+        #expect(Array(statuses.prefix(3)) == [.running(progress: 0), .loadingModel(modelID: "whisper"), .running(progress: 0)])
+        #expect(!statuses.contains(.running(progress: 0.005)))
+    }
+
+    @Test("model-loading update is a distinct cancellable queue phase before progress")
+    func loadingModelPhase() async throws {
+        let transcriber = FakeFileTranscriber()
+        await transcriber.setLoadingModelID("whisper")
+        await transcriber.setProgressSteps([])
+        await transcriber.hold(a)
+        await transcriber.script(a, .document(Self.doc(a)))
+        let queue = makeQueue(transcriber)
+        let item = try #require(await queue.add([a]).first)
+        let stream = await queue.subscribe()
+        await queue.start()
+        await transcriber.waitUntilHeld(a)
+        for await event in stream {
+            if case .changed(let changed) = event,
+               changed.status == .loadingModel(modelID: "whisper") { break }
+        }
+        #expect(await queue.items.first?.status == .loadingModel(modelID: "whisper"))
+        #expect(await queue.progress(of: item.id) == nil)
+        await queue.cancel(id: item.id)
+        await queue.waitUntilIdle()
+        #expect(await queue.items.first?.status == .cancelled)
+    }
 }

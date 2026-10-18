@@ -21,8 +21,8 @@ public enum ModelCatalog {
         ModelDescriptor(
             id: "qwen2.5-3b-instruct-q4", displayName: "Qwen2.5 3B Instruct (4-bit)", role: .style,
             downloadURL: URL(string: "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf")!,
-            sizeInBytes: 2_100_000_000,   // TODO(phase 5): pin the exact size and checksum when the style engine lands
-            sha256: "",
+            sizeInBytes: 2_104_932_768,
+            sha256: "626b4a6678b86442240e33df819e00132d3ba7dddfe1cdc4fbb18e0a9615c62d",
             languagesSummary: "powers Formal / Casual / Very casual rewriting", isDefault: true),
     ]
 

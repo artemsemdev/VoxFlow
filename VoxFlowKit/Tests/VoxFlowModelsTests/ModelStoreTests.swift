@@ -253,13 +253,17 @@ struct ModelStoreTests {
         #expect(try FileManager.default.attributesOfItem(atPath: h.dir.file("big.bin.partial").path)[.size] as? Int64 == 131_072)
     }
 
-    @Test("a catalog entry without a checksum cannot be installed (real Qwen row)")
+    @Test("a catalog entry without a checksum cannot be installed (ST-03v)")
     func checksumUnknown() async throws {
         let h = Harness()
-        let store = ModelStore(directory: h.dir.url, catalog: ModelCatalog.all, downloader: h.downloader,
+        let unpinned = Self.descriptor(id: "unpinned", payload: Self.smallPayload, isDefault: false)
+        let withoutChecksum = ModelDescriptor(id: unpinned.id, displayName: unpinned.displayName, role: unpinned.role,
+                                              downloadURL: unpinned.downloadURL, sizeInBytes: unpinned.sizeInBytes,
+                                              sha256: "", languagesSummary: unpinned.languagesSummary, isDefault: unpinned.isDefault)
+        let store = ModelStore(directory: h.dir.url, catalog: [withoutChecksum], downloader: h.downloader,
                                freeSpace: h.freeSpace, settings: h.settings)
-        await #expect(throws: ModelStoreError.checksumUnknown("qwen2.5-3b-instruct-q4")) {
-            _ = try await Self.drain(await store.install(id: "qwen2.5-3b-instruct-q4"))
+        await #expect(throws: ModelStoreError.checksumUnknown("unpinned")) {
+            _ = try await Self.drain(await store.install(id: "unpinned"))
         }
         #expect(await h.downloader.calls.isEmpty)
     }

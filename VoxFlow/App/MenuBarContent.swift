@@ -1,19 +1,12 @@
 import SwiftUI
 
-/// Menu bar dropdown, phase-0 subset of MB-01: status line, Open, Quit.
+/// Wires the live `MenuBarViewModel` (via `MenuBarServices`) into `MenuBarView` — the
+/// `MenuBarExtra` scene's content (design MB-01/MB-02). `AppServices`/`SettingsServices` aren't
+/// injected via `.environment(_:)` into the `MenuBarExtra` scene, so this reads `MenuBarServices.shared`
+/// directly, same as `SettingsPage` reads `SettingsServices.shared`.
 struct MenuBarContent: View {
-    @Environment(\.openWindow) private var openWindow
-
     var body: some View {
-        HStack(spacing: 6) {
-            Circle().fill(Palette.onDevice).frame(width: 8, height: 8)
-            Text("Ready · on-device")
-        }
-        Divider()
-        Button("Open VoxFlow") { openWindow(id: MainWindowID.main) }
-        Divider()
-        Button("Quit VoxFlow") { NSApplication.shared.terminate(nil) }
-            .keyboardShortcut("q")
+        MenuBarView(viewModel: MenuBarServices.shared.viewModel)
     }
 }
 

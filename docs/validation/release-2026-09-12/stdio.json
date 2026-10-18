@@ -1,0 +1,77 @@
+{
+  "initialize": {
+    "result": {
+      "serverInfo": {
+        "version": "2.0.0",
+        "name": "VoxFlow"
+      },
+      "protocolVersion": "2025-06-18",
+      "capabilities": {
+        "tools": {}
+      }
+    },
+    "jsonrpc": "2.0",
+    "id": 1
+  },
+  "tools": {
+    "jsonrpc": "2.0",
+    "id": 2,
+    "result": {
+      "tools": [
+        {
+          "description": "Transcribe an audio file at a path; returns text or SRT",
+          "name": "transcribe_file",
+          "inputSchema": {
+            "properties": {
+              "format": {
+                "enum": [
+                  "text",
+                  "srt"
+                ],
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "description": "Start a dictation and return the cleaned-up text",
+          "name": "dictate",
+          "inputSchema": {
+            "properties": {},
+            "type": "object",
+            "required": []
+          }
+        }
+      ]
+    }
+  },
+  "ping": {
+    "id": "ping",
+    "jsonrpc": "2.0",
+    "result": {}
+  },
+  "malformed": {
+    "error": {
+      "message": "Parse error",
+      "code": -32700
+    },
+    "id": null,
+    "jsonrpc": "2.0"
+  },
+  "invalid_envelope": {
+    "error": {
+      "message": "Invalid Request",
+      "code": -32600
+    },
+    "jsonrpc": "2.0",
+    "id": null
+  },
+  "eof_exit": 0
+}

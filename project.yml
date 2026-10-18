@@ -10,15 +10,13 @@ settings:
     SWIFT_VERSION: "6.0"
     SWIFT_STRICT_CONCURRENCY: complete
     MACOSX_DEPLOYMENT_TARGET: "15.0"
-    # Ad-hoc signing so local builds and CI need no team or certificate.
-    # Developer ID signing is configured in phase 7 (release pipeline).
-    CODE_SIGN_IDENTITY: "-"
-    CODE_SIGN_STYLE: Manual
-    DEVELOPMENT_TEAM: ""
-    ENABLE_HARDENED_RUNTIME: NO
+    # Signing lives in Signing.xcconfig (ad-hoc by default; Local.xcconfig overrides it on a
+    # developer's Mac — see SETUP.md). Developer ID signing is configured in phase 7.
     SWIFT_TREAT_WARNINGS_AS_ERRORS: YES
-    MARKETING_VERSION: "2.0.0"
-    CURRENT_PROJECT_VERSION: "1"
+    # No App Intents are defined; skip metadata extraction rather than link an unused framework.
+    LM_SKIP_METADATA_EXTRACTION: YES
+    MARKETING_VERSION: "2.1.0"
+    CURRENT_PROJECT_VERSION: "2"
 packages:
   VoxFlowKit:
     path: VoxFlowKit
@@ -26,6 +24,9 @@ targets:
   VoxFlow:
     type: application
     platform: macOS
+    configFiles:
+      Debug: Signing.xcconfig
+      Release: Signing.xcconfig
     sources:
       - path: VoxFlow
     dependencies:
@@ -39,6 +40,16 @@ targets:
         product: VoxFlowModels
       - package: VoxFlowKit
         product: VoxFlowFiles
+      - package: VoxFlowKit
+        product: VoxFlowDictation
+      - package: VoxFlowKit
+        product: VoxFlowStorage
+      - package: VoxFlowKit
+        product: VoxFlowStyling
+      - package: VoxFlowKit
+        product: VoxFlowLLM
+      - package: VoxFlowKit
+        product: VoxFlowMCP
     info:
       path: VoxFlow/Info.plist
       properties:
@@ -47,6 +58,8 @@ targets:
         NSHumanReadableCopyright: "© 2026 Artem Semenov"
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSMicrophoneUsageDescription: "VoxFlow listens only while you hold fn. Audio never leaves this Mac."
+        NSContactsUsageDescription: "VoxFlow reads first and last names from Contacts so it spells them right. Nothing is uploaded."
         CFBundleDocumentTypes:
           - CFBundleTypeName: Audio or video
             LSItemContentTypes:
@@ -57,12 +70,19 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.artemsem.voxflow
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         SWIFT_EMIT_LOC_STRINGS: YES
   VoxFlowTests:
     type: bundle.unit-test
     platform: macOS
+    configFiles:
+      Debug: Signing.xcconfig
+      Release: Signing.xcconfig
     sources:
       - path: VoxFlowTests
+      # Compile the dictation fake against the same package product as the test host. Keeping it
+      # in VoxFlowTestSupport would statically link a second copy of Dictation into this bundle.
+      - path: VoxFlowKit/Tests/VoxFlowDictationTests/FakeDictationTranscriber.swift
     dependencies:
       - target: VoxFlow
       - package: VoxFlowKit
@@ -75,6 +95,16 @@ targets:
         product: VoxFlowModels
       - package: VoxFlowKit
         product: VoxFlowFiles
+      - package: VoxFlowKit
+        product: VoxFlowDictation
+      - package: VoxFlowKit
+        product: VoxFlowStorage
+      - package: VoxFlowKit
+        product: VoxFlowStyling
+      - package: VoxFlowKit
+        product: VoxFlowLLM
+      - package: VoxFlowKit
+        product: VoxFlowMCP
       - package: VoxFlowKit
         product: VoxFlowTestSupport
     settings:
@@ -89,6 +119,8 @@ schemes:
       config: Debug
     test:
       config: Debug
+      environmentVariables:
+        VOXFLOW_TEST_HOST: "1"
       gatherCoverageData: true
       targets:
         - VoxFlowTests
@@ -100,4 +132,5 @@ schemes:
         - package: VoxFlowKit/VoxFlowDictationTests
         - package: VoxFlowKit/VoxFlowStorageTests
         - package: VoxFlowKit/VoxFlowStylingTests
+        - package: VoxFlowKit/VoxFlowLLMTests
         - package: VoxFlowKit/VoxFlowMCPTests

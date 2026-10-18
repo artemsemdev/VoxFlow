@@ -1,0 +1,77 @@
+import Foundation
+
+/// A slice of microphone audio in the internal format (16 kHz mono Float32) with its loudness.
+public struct AudioChunk: Sendable, Equatable {
+    public var samples: [Float]
+    /// Monotonic capture time elapsed immediately before these samples, without synthesising silence.
+    public var precedingGap: TimeInterval
+    /// Root mean square of `samples`, 0 for an empty chunk. Drives the 14-bar waveform and silence detection.
+    public var rms: Float
+
+    public init(samples: [Float], precedingGap: TimeInterval = 0) {
+        self.samples = samples
+        self.precedingGap = max(0, precedingGap)
+        rms = samples.isEmpty ? 0 : (samples.reduce(0) { $0 + $1 * $1 } / Float(samples.count)).squareRoot()
+    }
+
+    public var duration: TimeInterval { Double(samples.count) / AudioSamples.sampleRate }
+}
+
+public enum MicrophoneError: Error, Equatable, Sendable {
+    case accessDenied
+    case noInputDevice
+    case inUse(by: String?)
+    /// The audio engine could not start or stopped; the other app, when known, is in the string.
+    case engineFailed(String)
+}
+
+public enum MicrophoneUseState: Sendable, Equatable {
+    case available
+    case inUse(by: String?)
+    case unknown
+}
+
+public protocol MicrophoneUseMonitoring: Sendable {
+    func currentState() -> MicrophoneUseState
+    func freshState() -> MicrophoneUseState
+    func changes() -> AsyncStream<MicrophoneUseState>
+}
+
+public struct UnmonitoredMicrophoneUse: MicrophoneUseMonitoring {
+    public init() {}
+    public func currentState() -> MicrophoneUseState { .unknown }
+    public func freshState() -> MicrophoneUseState { .unknown }
+    public func changes() -> AsyncStream<MicrophoneUseState> { AsyncStream { $0.finish() } }
+}
+
+public enum MicrophoneEvent: Sendable, Equatable {
+    case chunk(AudioChunk)
+    /// The default input device changed (design ST-04n); nil when no device is left.
+    case deviceChanged(name: String?)
+}
+
+/// Live microphone input. Capture runs until the consuming task is cancelled.
+public protocol MicrophoneCapturing: Sendable {
+    func start() -> AsyncThrowingStream<MicrophoneEvent, Error>
+}
+
+public enum CopyReason: Sendable, Equatable {
+    case noTextField, accessibilityDenied, insertionFailed
+}
+
+public enum InsertionResult: Sendable, Equatable {
+    /// Text went into the focused field of `appName` (FB-04).
+    case inserted(appName: String?)
+    /// Text is on the clipboard; the reason selects the appropriate result/recovery HUD.
+    case copiedToClipboard(reason: CopyReason)
+}
+
+/// Puts dictated text where the user was typing. Never throws: the clipboard is the fallback.
+public protocol TextInserting: Sendable {
+    /// `cursorOffset` counts Swift Characters from the start of the inserted text.
+    func insert(_ text: String, cursorOffset: Int?) async -> InsertionResult
+}
+
+public extension TextInserting {
+    func insert(_ text: String) async -> InsertionResult { await insert(text, cursorOffset: nil) }
+}

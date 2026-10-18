@@ -1,0 +1,30 @@
+{
+  "source_commit": "c95aae18996ffc708429841985f685ffa241328b",
+  "command": "VOXFLOW_STYLE_MODEL=/tmp/voxflow-style-real-validation/qwen2.5-3b-instruct-q4_k_m.gguf PATH=/usr/bin:/bin:/usr/sbin:/sbin /usr/bin/swift test --package-path VoxFlowKit --scratch-path /tmp/voxflow-completion-package --filter 'LlamaContextReleaseTests|LlamaEngineIntegrationTests|LlamaEngineTests'",
+  "model": {
+    "url": "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf",
+    "bytes": 2104932768,
+    "sha256": "626b4a6678b86442240e33df819e00132d3ba7dddfe1cdc4fbb18e0a9615c62d",
+    "catalog_hash_verified": true
+  },
+  "tests": {
+    "passed": 8,
+    "suites": 3,
+    "formal_skips": 0,
+    "real_tone_generation_executed": true,
+    "tone_variants": 2,
+    "duration_seconds": 1.647
+  },
+  "process_exit_code": 0,
+  "warning_gate": {
+    "command": "/usr/bin/python3 scripts/check_build_logs.py /tmp/voxflow-style-real-validation/test-green.log",
+    "exit_code": 0,
+    "scope": "complete standalone SwiftPM build and test output"
+  },
+  "evidence": {
+    "complete_log": "test.log.gz",
+    "uncompressed_log_sha256": "e240b85a537653f9dcedcdbda6937a715b8d146b3a93028be45a43ca014c0d48"
+  },
+  "baseline_failure": "Before the fix both integration tests reported success, then asynchronous ContextBox.deinit native cleanup crashed the runner with SIGBUS (exit 1).",
+  "coverage_note": "Earlier full native 1358 reported passes and package 524 reported passes included a guard-return real-tone test when no style model was installed; five formal native skips did not include that hidden omission. This supplement executes the real model. Missing models now produce an explicit Swift Testing skip; an invalid explicit model override fails."
+}

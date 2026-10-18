@@ -24,11 +24,15 @@ final class ModelsViewModel {
         let model: ModelDescriptor
         var state: ModelState
         var isDefault: Bool
+        var failureReason: String? = nil
+        var isLoadingIntoMemory = false
         var id: String { model.id }
         // `nonisolated` — `Row` is a plain value type with no isolation of its own, and `gigabytes`
         // touches no actor state, so it stays callable from a nonisolated context like this getter.
         var sizeText: String { ModelsViewModel.gigabytes(model.sizeInBytes) }
         var subtitle: String { "\(sizeText) · \(model.languagesSummary)" }
+        var statusSubtitle: String { isLoadingIntoMemory ? "Loading into memory…" : subtitle }
+        var statusContext: String? { isLoadingIntoMemory ? "first use" : nil }
         var isAvailable: Bool { !model.sha256.isEmpty }   // the Qwen row ships in phase 5
     }
 
@@ -49,18 +53,21 @@ final class ModelsViewModel {
     private(set) var footerText = ""
 
     private let store: ModelStore
+    private let modelLoader: ModelLoader?
     private let catalog: [ModelDescriptor]
     private let settingsOpener: any SystemSettingsOpening
     private var installs: [String: Task<Void, Never>] = [:]
+    private var failureReasons: [String: String] = [:]
     private let now: () -> Date
     /// One ETA estimator per actively-downloading row (design 3d's rate/window logic, reused from
     /// `ETAEstimator`); cleared whenever a row leaves `.downloading` for any other state.
     private var estimators: [String: ETAEstimator] = [:]
 
-    init(store: ModelStore, catalog: [ModelDescriptor] = ModelCatalog.all,
+    init(store: ModelStore, catalog: [ModelDescriptor] = ModelCatalog.all, modelLoader: ModelLoader? = nil,
          settingsOpener: any SystemSettingsOpening = WorkspaceSystemSettingsOpener(), now: @escaping () -> Date = { Date() }) {
         self.store = store
         self.catalog = catalog
+        self.modelLoader = modelLoader
         self.settingsOpener = settingsOpener
         self.now = now
     }
@@ -73,7 +80,10 @@ final class ModelsViewModel {
         for model in catalog {
             let state = await store.state(of: model.id)
             if state == .installed { installedBytes += model.sizeInBytes }
-            let row = Row(model: model, state: state, isDefault: (model.role == .speech ? defaultSpeech : defaultStyle) == model.id)
+            if state != .notInstalled { failureReasons[model.id] = nil }
+            let row = Row(model: model, state: state,
+                          isDefault: (model.role == .speech ? defaultSpeech : defaultStyle) == model.id,
+                          failureReason: failureReasons[model.id])
             if model.role == .speech { speech.append(row) } else { style.append(row) }
         }
         // Race fix: the `await store.state(of:)` calls above each suspend, and `download()`'s own
@@ -92,10 +102,32 @@ final class ModelsViewModel {
         for index in style.indices where installs[style[index].id] != nil {
             if let live = liveStates[style[index].id] { style[index].state = live }
         }
+        // Read this after the suspending store loop so a load that started or finished during the
+        // refresh cannot be overwritten by an earlier snapshot.
+        let loadingModelID = await modelLoader?.loadingModelID
+        for index in speech.indices { speech[index].isLoadingIntoMemory = speech[index].id == loadingModelID }
+        for index in style.indices { style[index].isLoadingIntoMemory = style[index].id == loadingModelID }
         speechRows = speech
         styleRows = style
         let directory = await store.directory   // actor-isolated property: needs its own hop
         footerText = "\(Self.gigabytes(installedBytes)) in \(Self.abbreviate(directory)). Downloads happen only when you press Download — VoxFlow never checks for or fetches anything on its own."
+    }
+
+    func observeModelLoading() async {
+        guard let modelLoader else { return }
+        let events = await modelLoader.subscribe()
+        if let id = await modelLoader.loadingModelID { setLoading(true, modelID: id) }
+        for await event in events {
+            switch event {
+            case .started(let id): setLoading(true, modelID: id)
+            case .finished(let id): setLoading(false, modelID: id)
+            }
+        }
+    }
+
+    private func setLoading(_ loading: Bool, modelID: String) {
+        if let index = speechRows.firstIndex(where: { $0.id == modelID }) { speechRows[index].isLoadingIntoMemory = loading }
+        if let index = styleRows.firstIndex(where: { $0.id == modelID }) { styleRows[index].isLoadingIntoMemory = loading }
     }
 
     /// Runs the install in a detached-from-`self` task: only `store` (a plain, cycle-free reference)
@@ -107,6 +139,8 @@ final class ModelsViewModel {
     func download(_ model: ModelDescriptor) async {
         guard installs[model.id] == nil else { return }
         alert = nil   // starting a fresh attempt (incl. a resume) supersedes any stale alert for this row
+        failureReasons[model.id] = nil
+        setFailureReason(nil, for: model.id)
         let store = self.store
         let task = Task { [weak self] in
             do {
@@ -125,7 +159,7 @@ final class ModelsViewModel {
                 self.alert = .offline(model, bytesWritten: written, total: model.sizeInBytes, dictationKeepsWorking: dictationKeepsWorking)
             } catch ModelStoreError.checksumMismatch {
                 guard let self else { return }
-                self.alert = .downloadFailed(model, reason: "The download didn't verify (checksum mismatch). Nothing was installed and the file was deleted.")
+                self.failureReasons[model.id] = Self.checksumFailureMessage
             } catch ModelStoreError.http(let status) {
                 guard let self else { return }
                 self.alert = .downloadFailed(model, reason: "The server answered \(status).")
@@ -150,6 +184,7 @@ final class ModelsViewModel {
         installs[model.id]?.cancel()
     }
     func resume(_ model: ModelDescriptor) async { await download(model) }
+    func retry(_ model: ModelDescriptor) async { await download(model) }
 
     /// ST-03o "Cancel download": discards the partial file outright (vs. `pause`, which keeps it).
     /// A no-op download-wise — nothing is in progress by the time this is offered (the alert only
@@ -218,6 +253,11 @@ final class ModelsViewModel {
         if let index = styleRows.firstIndex(where: { $0.id == id }) { styleRows[index].state = state }
     }
 
+    private func setFailureReason(_ reason: String?, for id: String) {
+        if let index = speechRows.firstIndex(where: { $0.id == id }) { speechRows[index].failureReason = reason }
+        if let index = styleRows.firstIndex(where: { $0.id == id }) { styleRows[index].failureReason = reason }
+    }
+
     /// "744 MB of 1.2 GB" for a downloading row, plus " · N min left"/" · N s left" once
     /// `ETAEstimator` has enough samples to estimate (design 3d's rate/window logic, F).
     func downloadText(for row: Row) -> String {
@@ -230,8 +270,7 @@ final class ModelsViewModel {
     }
 
     nonisolated static func gigabytes(_ bytes: Int64) -> String {
-        let gb = Double(bytes) / 1_000_000_000
-        return gb >= 1 ? String(format: "%.1f GB", gb) : "\(Int((Double(bytes) / 1_000_000).rounded())) MB"
+        ModelSizeText.format(bytes)
     }
 
     static func abbreviate(_ url: URL) -> String { ResultViewModel.abbreviate(url) }
@@ -260,6 +299,7 @@ final class ModelsViewModel {
     static let cannotRemoveOnlyModelMessage = "Download another model before removing it."
 
     static let offlineTitle = "Download paused — you're offline"
+    static let checksumFailureMessage = "The download didn’t verify (checksum mismatch). Nothing was installed and the file was deleted."
     static func offlineMessage(bytesWritten: Int64, total: Int64, dictationKeepsWorking: Bool) -> String {
         var message = "\(gigabytes(bytesWritten)) of \(gigabytes(total)) saved. It will resume when you're back online."
         if dictationKeepsWorking { message += " Dictation keeps working with your installed model." }
