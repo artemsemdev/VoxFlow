@@ -12,6 +12,11 @@ speaking, and no network use except model downloads. Candidates: whisper.cpp, Wh
   version and checksum pinned in `Package.swift`; updates are deliberate `chore:` PRs).
 - `WhisperCppEngine` is an actor that runs the C API on a private serial queue and streams
   final segments via `new_segment_callback`; cancellation goes through `abort_callback`.
+- Recognition uses five-candidate beam search, retaining five candidates for temperature
+  fallbacks. This improves the extended Russian corpus without changing reference texts,
+  acceptance thresholds or the file pipeline's deliberate lack of a prior-text prompt.
+  See the [quality comparison](../testing/russian-recognition-fix.md) for remaining errors
+  and the measured cost; the September performance figures below predate this change.
 - Application exit awaits terminal `shutdown()` for both Whisper and the style-model loader.
   Whisper rejects new loads, cancels active recognition, waits for late load results to be freed,
   releases its current context and drains queued native cleanup at both file/dictation priorities.

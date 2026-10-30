@@ -249,7 +249,12 @@ public actor WhisperCppEngine: SpeechEngine {
         try await withTaskCancellationHandler {
             try await onQueue(priority: priority) {
                 guard !cancelFlag.isSet else { throw SpeechEngineError.cancelled }
-                var params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY)
+                // Keep several candidate sequences so an early token choice can be corrected
+                // by later words; measured against both English and Russian regression corpora.
+                var params = whisper_full_default_params(WHISPER_SAMPLING_BEAM_SEARCH)
+                params.beam_search.beam_size = 5
+                // Preserve the five candidates used by greedy temperature fallbacks.
+                params.greedy.best_of = 5
                 params.n_threads = Int32(mapped.threadCount)
                 params.print_progress = false
                 params.print_realtime = false

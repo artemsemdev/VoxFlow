@@ -48,6 +48,9 @@ any app, style cleanup with a local LLM and an MCP server follow in 2.x (see the
   reject background noise before Whisper decodes it, reducing invented text during pauses.
 - File transcription also uses the local speech detector; recognized segment times are bounded
   by the source audio duration before they reach previews or subtitle exports.
+- Recognition compares five candidate sequences to reduce errors in connected speech. See the
+  [Russian quality comparison](docs/testing/russian-recognition-fix.md) for measurements and
+  remaining mistakes on long recordings.
 
 - Claude Desktop can launch the signed app with `--mcp-stdio`, using its own client approvals
   without Node, a bearer token or an HTTP listener. See the MCP client runbook for configuration
