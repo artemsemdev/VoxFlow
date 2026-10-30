@@ -5,6 +5,41 @@ versioning.
 
 ## Unreleased
 
+## 2.1.1 — 2026-10-30
+
+App/export version `2.1.1`, build `3`. Improves transcription quality on the existing local models.
+See the [release record](docs/delivery/2.1.1.md) for validation, signing and known limitations.
+
+### Fixed
+
+- Compare five recognition candidates while preserving temperature fallback candidates.
+  Extended Russian WER improves from 2.92% to 1.58% on Turbo and 4.95% to 4.75% on Small.
+- Apply the bundled speech detector to files to reject noise before recognition, and bound
+  recognized timestamps by source duration.
+- Prefer pauses at forced dictation window boundaries while retaining all buffered samples.
+
+### Added
+
+- Nineteen real-model English/Russian audio scenarios and eight additional Russian recordings
+  from 16 seconds to 4 minutes 17 seconds, with strict negation and ordered-phrase checks.
+- Whole-recording diagnostic controls, reproducible fixtures and archived before/after results.
+
+### Known limitations
+
+- Russian strict scenarios pass 7/8 on Turbo and 5/8 on Small. Grammatical substitutions remain;
+  Small still loses one negation in the proposal/file case. Tests retain these failures.
+- The downloadable app retains the local VoxFlow Dev signature; it is not notarized.
+- The five manual hardware acceptance gaps from the previous release remain unverified.
+
+## 2.1.0-rc.1 — 2026-10-19
+
+Release candidate for local use on Apple Silicon macOS 15+. App/export version: `2.1.0`,
+build `2`. Includes the integrated dictation, settings, styling and MCP work below.
+Owner-confirmed acceptance: #110 and #138 on 2026-10-19; #161 completed on 2026-09-12.
+The owner deferred manual acceptance for #137, #139, #144, #145 and #162 for this candidate;
+those issues remain open. Public notarized distribution is outside this RC's scope.
+See the [candidate record](docs/delivery/2.1.0-rc.1.md) for validation and merge gates.
+
 ### Added
 
 - Copy original or inserted History text explicitly, with shared two-second Copied feedback and stable button widths.
@@ -50,7 +85,7 @@ versioning.
   retain access through exports, and explain fallback to Transcripts when a saved folder is unavailable.
 - Inline History editing with Save/Cancel, preserving the raw transcript and encryption.
 - Dictation logic: microphone capture, Flow Bar state machine, windowed transcription,
-  encrypted history with 30-day retention (no UI yet — phase 3b).
+  encrypted history with configurable retention (30 days by default).
 - Dictation wired end-to-end: hold (or double-tap) fn anywhere to dictate. The floating Flow Bar
   HUD shows listening/processing/result; recognized text is inserted into the focused field via
   Accessibility, or copied to the clipboard when there isn't one; finished dictations save to
@@ -90,7 +125,7 @@ versioning.
   reappears whenever a permission is later revoked.
 - Settings › General: launch at login (`SMAppService`), show in menu bar, play sounds on
   dictation start/end, appearance (Light/Dark/System), Flow Bar position, dictation language.
-- Settings › MCP Server (UI only this phase — the server itself ships in 2.4): endpoint and access
+- Settings › MCP Server: endpoint and access
   token with Copy/Regenerate (a confirmation alert first), which tools are exposed.
 - Native `--mcp-stdio` transport for client-launched local MCP sessions, with bounded framing,
   shared tool/privacy policies, protocol-only stdout and capture cleanup on client shutdown.
@@ -116,7 +151,7 @@ versioning.
   rewrite a past dictation into another tone without re-recording; the row updates in place and
   the result is copied to the clipboard.
 - Files result view: "Apply {Style} cleanup" checkbox rewrites every segment of a finished
-  transcript through the rule-based pipeline (instant, no re-processing) — the preview, Copy,
+  transcript through immediate rules and optional local model refinement — the preview, Copy,
   Save as… and "Also export" all reflect the cleaned text while it's checked.
 - Loopback MCP server (Settings › MCP Server): Cursor, or Claude Desktop via `mcp-remote`, can
   connect over `127.0.0.1` with the token from Settings and use `transcribe_file`, `dictate` and
@@ -133,15 +168,6 @@ versioning.
   [docs/runbooks/connect-an-mcp-client.md](docs/runbooks/connect-an-mcp-client.md).
 
 ### Fixed
-
-- Use five-candidate beam search for speech recognition, retaining the existing temperature
-  fallback candidates. This reduces measured errors in extended Russian speech; remaining
-  grammatical and negation errors stay visible in the strict E2E corpus.
-
-- Prefer a recent short pause at dictation's ten-second window limit, preserving the following
-  audio and short final words so conditions and negations are less likely to be cut in half.
-- Reject silent/noisy file windows with the bundled speech detector and bound native segment
-  timestamps to the recording, preventing invented silence captions and subtitle times beyond EOF.
 
 - Typed snippets use global key-down events and guarded keyboard replacement in VS Code and other
   Chromium/Electron editors. Recover monitoring after returning from Accessibility settings.
