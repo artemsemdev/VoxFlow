@@ -4,9 +4,9 @@ VoxFlow is a native macOS 15+ Apple Silicon app. The archived .NET solution is o
 the `v1` branch; its build/test commands do not validate v2. Issue #77 is superseded by
 #115. The current milestone follows the [local-use scope in #115](https://github.com/artemsemdev/VoxFlow/issues/115#issuecomment-5634616550):
 exercise Release, install with the existing local signing identity, and document launching
-that installed app. That local scope is completed. The current
-[2.1.0-rc.1 candidate](2.1.0-rc.1.md) prepares the integrated code for `master`;
-public distribution remains outside its scope.
+that installed app. That local scope is completed. The owner subsequently requested GitHub publication and
+local installation of [2.1.1](2.1.1.md). Its downloadable artifact retains local signing;
+Developer ID distribution and notarization remain separate work.
 
 ## Local Release build and installation
 
@@ -62,17 +62,18 @@ bump alone does not establish acceptance.
 4. Open a PR into `master` using the repository template. Explain that its cumulative diff
    promotes existing integration work; list new preparation changes separately.
 5. Require the final PR CI result before merging. Promote with a merge commit to retain
-   ancestry; create the appropriate RC tag only when promotion is authorized, and merge the
-   resulting release changes back into `develop`. A final stable tag needs its own decision.
+   ancestry; create the matching version tag when publication is authorized, and merge the
+   resulting release changes back into `develop`. Publish the verified archive and its checksum;
+   identify signing and any unverified acceptance items in the release notes.
 
-The older `release/2.1.0` branch is a historical preparation snapshot. The current candidate
-uses `release/2.1.0-rc.1` from `develop` instead of reusing that stale branch.
+The older `release/2.1.0` and `release/2.1.0-rc.1` branches are historical snapshots.
+Version 2.1.1 uses `release/2.1.1` and retains both the integration and master ancestry.
 
 ## Future public distribution
 
-Developer ID signing, notarization, stapling, DMG packaging, a GitHub Release workflow
-and auto-updates are outside #115's current scope. If sharing the app becomes a goal,
-track that work separately with its certificate and clean-account validation requirements.
+Developer ID signing, notarization, stapling, DMG packaging, an automated release workflow
+and auto-updates remain outside the completed local-use milestone. GitHub publication of a
+locally signed ZIP does not establish notarized distribution or clean-account validation.
 Preserve the existing local signing configuration when preparing any future distribution.
 
 ## Local milestone acceptance

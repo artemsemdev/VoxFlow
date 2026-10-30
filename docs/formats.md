@@ -79,7 +79,7 @@ Structured format including metadata and segment details.
 {
   "createdAt": "2025-09-08T00:00:00Z",
   "duration": 9.86,
-  "generator": "VoxFlow 2.0.0",
+  "generator": "VoxFlow 2.1.1",
   "language": "en",
   "model": "whisper-large-v3-turbo",
   "processingTime": 0.62,
