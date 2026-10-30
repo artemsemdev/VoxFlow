@@ -6,15 +6,15 @@
 Native macOS transcription that never leaves your Mac. Swift 6, SwiftUI, whisper.cpp on Metal.
 macOS 15+, Apple Silicon.
 
-VoxFlow 2 is a from-scratch rewrite. The 2.1 candidate combines file transcription, dictation
-into other apps, local style cleanup and MCP integration.
+VoxFlow 2 is a from-scratch rewrite with file transcription, system-wide dictation,
+local style cleanup and MCP integration.
 
-**Status: 2.1.0-rc.1 prepared for review · app version 2.1.0, build 2.**
-This candidate is for local use with the existing signing identity. Five manual acceptance
-issues are deferred by the owner; see the [candidate record](docs/delivery/2.1.0-rc.1.md).
-The latest published stable version remains 2.0.0.
+**Latest release: [2.1.1](https://github.com/artemsemdev/VoxFlow/releases/tag/v2.1.1), build 3.**
+This patch improves recognition and adds long-form Russian regression coverage. See the
+[release record](docs/delivery/2.1.1.md) for validation and remaining accuracy/manual-test gaps.
+The downloadable app uses the local VoxFlow Dev signature and is not notarized.
 
-## Features in 2.1.0-rc.1
+## What works today (2.1.1)
 
 - History provides separate original/inserted copy actions with visible Copied confirmation.
 
@@ -45,10 +45,15 @@ The latest published stable version remains 2.0.0.
 - Everything on this Mac: audio is processed in memory and discarded; the only network action is a
   model download you start. No account, no analytics.
 
-### Dictation, styling and integrations
+### Dictation
 
 - Microphone dictation skips near-silent windows and uses a bundled local speech detector to
   reject background noise before Whisper decodes it, reducing invented text during pauses.
+- File transcription also uses the local speech detector; recognized segment times are bounded
+  by the source audio duration before they reach previews or subtitle exports.
+- Recognition compares five candidate sequences to reduce errors in connected speech. See the
+  [Russian quality comparison](docs/testing/russian-recognition-fix.md) for measurements and
+  remaining mistakes on long recordings.
 
 - Claude Desktop can launch the signed app with `--mcp-stdio`, using its own client approvals
   without Node, a bearer token or an HTTP listener. See the MCP client runbook for configuration
@@ -62,6 +67,8 @@ The latest published stable version remains 2.0.0.
   that capture's text; moving focus, editing the field or moving its caret stops further writes and
   copies the full final result once. Escape stops capture and keeps text already inserted.
   Onboarding and History scratchpads retain final-only insertion.
+- At dictation's ten-second window limit, recognition prefers a recent short pause and carries
+  the remaining audio into the next window, reducing word cuts in long sentences.
 - The Flow Bar names an app holding exclusive access to the microphone when macOS reports its
   owner. When that app releases the device, a still-active dictation gesture retries with fresh
   permission and target checks. Releasing push-to-talk, cancelling, or re-inserting the last
@@ -140,23 +147,16 @@ The latest published stable version remains 2.0.0.
   reserving one second for completion. The style model unloads after five idle minutes or macOS
   memory pressure, then reloads lazily on the next styled request. "Re-style ▾" on
   a History row rewrites a past dictation into another tone without re-recording and copies the
-  result; Files' result view can "Apply {Style} cleanup" with immediate rules and optional local
-  model refinement for transcripts up to 150 words, preserving timing without re-transcribing — see
+  result; Files' result view can "Apply {Style} cleanup" to instantly rewrite every segment of a
+  finished transcript (rule-based only, no re-processing) — see
   [ADR-007](docs/adr/007-llm-styling-on-llama-cpp.md).
 
-## Release scope
+## Delivery status
 
-| Status | Capability | Issue |
-|---|---|---|
-| In 2.1 RC | Dictation, Flow Bar, onboarding and History | [#110](https://github.com/artemsemdev/VoxFlow/issues/110) |
-| In 2.1 RC | Main window, Settings, menu bar, notifications and rule-based styles | [#111](https://github.com/artemsemdev/VoxFlow/issues/111) |
-| In 2.1 RC | Local style model (Qwen2.5 3B via llama.cpp) | [#112](https://github.com/artemsemdev/VoxFlow/issues/112) |
-| In 2.1 RC | Loopback HTTP and native stdio MCP transports | [#113](https://github.com/artemsemdev/VoxFlow/issues/113) |
-| Completed locally | Signed Release build and installation | [#115](https://github.com/artemsemdev/VoxFlow/issues/115) |
-| Future scope | Developer ID, notarization and public distribution | [Release process](docs/delivery/release-process.md#future-public-distribution) |
-
-The original phase-by-phase 2.1–2.4 roadmap is consolidated into this 2.1 candidate.
-Implementation and remaining manual acceptance are tracked separately in its release record.
+File transcription, dictation, History, Dictionary/Snippets/Styles, local Qwen cleanup and
+HTTP/native-stdio MCP are included in 2.1.1. Physical acceptance checks still pending are
+tracked in the [hardware checklist](docs/HARDWARE-ACCEPTANCE.md). Developer ID signing,
+notarization and auto-updates remain future distribution work.
 
 Tracking issue: [#105](https://github.com/artemsemdev/VoxFlow/issues/105). The product design is the
 Claude Design canvas checked in at [design/](design/).
@@ -167,8 +167,9 @@ Claude Design canvas checked in at [design/](design/).
 - To build: Xcode 26.x and [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`).
 - Models are downloaded on demand into `~/Library/Application Support/VoxFlow/Models`.
 
-Build and verify a locally signed Release with `bash scripts/install.sh --build-only`
-(see [SETUP.md](SETUP.md)). A public notarized download is not provided by this candidate.
+Download the ZIP and SHA256SUMS from the [latest release](https://github.com/artemsemdev/VoxFlow/releases/latest),
+or build using your own local signing identity (see [SETUP.md](SETUP.md)). The published local
+signature is not a notarized installer for other Macs.
 
 ## Build and test
 
@@ -187,6 +188,11 @@ Open `VoxFlow.xcodeproj` in Xcode to run the app (scheme `VoxFlow`). `VoxFlow/In
 generated by XcodeGen from `project.yml` (`info.properties`) and is not committed: add usage strings
 such as `NSMicrophoneUsageDescription` to `project.yml`. Integration tests that need a Whisper model
 look in `~/Library/Application Support/VoxFlow/Models` and skip with a reason when none is installed.
+
+For the opt-in real-model transcription quality matrix (including long Russian/English sentences),
+commands and measured failures, see [the E2E audit](docs/testing/transcription-e2e.md).
+Eight additional Russian cases, from 16 seconds to 4 minutes 17 seconds, are covered in the
+[long-form Russian audit](docs/testing/russian-longform-e2e.md).
 
 ## Layout
 

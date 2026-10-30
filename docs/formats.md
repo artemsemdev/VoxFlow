@@ -2,6 +2,10 @@
 
 All transcript output formats guarantee determinism: given the same audio and model, you get the same file bytes every time. Line endings are Unix (`\n`), with a single trailing newline. JSON objects have keys sorted alphabetically. Dates use ISO 8601 format in UTC. Segment text is always trimmed of leading/trailing whitespace. The timestamps toggle applies only to TXT and Markdown — SRT and VTT always carry per-cue timing (it's inherent to the format) and JSON always includes each segment's `start`/`end`, regardless of the toggle.
 
+New Whisper transcripts bound segment times to the decoded recording: native padding cannot
+extend a cue beyond EOF, and segments entirely outside the audio are discarded. Existing saved
+documents are not rewritten; exporters preserve the supplied document's timings.
+
 The Files result view can re-segment its document without running recognition again. **Sentences**
 uses sentence boundaries within each source cue; **Short** and **Long** also wrap at word boundaries,
 targeting 42 and 84 Characters. An overlong word or URL stays intact. Source cues are never merged
@@ -75,7 +79,7 @@ Structured format including metadata and segment details.
 {
   "createdAt": "2025-09-08T00:00:00Z",
   "duration": 9.86,
-  "generator": "VoxFlow 2.0.0",
+  "generator": "VoxFlow 2.1.1",
   "language": "en",
   "model": "whisper-large-v3-turbo",
   "processingTime": 0.62,

@@ -1,0 +1,10 @@
+[
+  {"id": "reminder", "voice": "Milena", "rate": 165, "frames": 259845, "pcmSHA256": "5bb4c868c558e236150f1c8650f40e99759329b4928b314ee1b4b8a5ca32ffe4", "parts": ["reminder-01.flac"]},
+  {"id": "conditions", "voice": "Milena", "rate": 165, "frames": 520711, "pcmSHA256": "12afcb8b68f0b6f51de90e6603bcbdf9e00970f72ea2c250ed8c5515d1f4ce5e", "parts": ["conditions-01.flac", "conditions-02.flac"]},
+  {"id": "incident", "voice": "Milena", "rate": 165, "frames": 1113198, "pcmSHA256": "add3dd2f785112eb8264a976d14fc1757e8a4d8b38124a8cc9377c6ce350f418", "parts": ["incident-01.flac", "incident-02.flac", "incident-03.flac"]},
+  {"id": "planning", "voice": "Milena", "rate": 165, "frames": 1530885, "pcmSHA256": "60f311ff1e4c01e62e9a76fd7364e6c8053156764117a01c49df05d89db35b6d", "parts": ["planning-01.flac", "planning-02.flac", "planning-03.flac", "planning-04.flac"]},
+  {"id": "explanation", "voice": "Milena", "rate": 165, "frames": 2020835, "pcmSHA256": "f272ca98437db12558c9a40ca0754789411f52cbee219ad5e3b90325ba263be6", "parts": ["explanation-01.flac", "explanation-02.flac", "explanation-03.flac", "explanation-04.flac", "explanation-05.flac"]},
+  {"id": "handover", "voice": "Milena", "rate": 165, "frames": 2534567, "pcmSHA256": "7523fd0bbeb91994b7ece1e5ba846cabc47eee79d64a585210f9ea0c211ba9aa", "parts": ["handover-01.flac", "handover-02.flac", "handover-03.flac", "handover-04.flac", "handover-05.flac", "handover-06.flac"]},
+  {"id": "proposal", "voice": "Milena", "rate": 165, "frames": 3055640, "pcmSHA256": "207f248438c5b61d4b80b9efba166a22e0e5f126b93ceaf49ce8b49ffebe2fb2", "parts": ["proposal-01.flac", "proposal-02.flac", "proposal-03.flac", "proposal-04.flac", "proposal-05.flac", "proposal-06.flac", "proposal-07.flac"]},
+  {"id": "retrospective", "voice": "Milena", "rate": 165, "frames": 4118434, "pcmSHA256": "b1e6fdb9cc20dca106dc36679024b8173ab8f0e95b1fa01e48304de146ddf2ff", "parts": ["retrospective-01.flac", "retrospective-02.flac", "retrospective-03.flac", "retrospective-04.flac", "retrospective-05.flac", "retrospective-06.flac", "retrospective-07.flac", "retrospective-08.flac", "retrospective-09.flac"]}
+]

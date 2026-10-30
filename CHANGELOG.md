@@ -5,6 +5,32 @@ versioning.
 
 ## Unreleased
 
+## 2.1.1 — 2026-10-30
+
+App/export version `2.1.1`, build `3`. Improves transcription quality on the existing local models.
+See the [release record](docs/delivery/2.1.1.md) for validation, signing and known limitations.
+
+### Fixed
+
+- Compare five recognition candidates while preserving temperature fallback candidates.
+  Extended Russian WER improves from 2.92% to 1.58% on Turbo and 4.95% to 4.75% on Small.
+- Apply the bundled speech detector to files to reject noise before recognition, and bound
+  recognized timestamps by source duration.
+- Prefer pauses at forced dictation window boundaries while retaining all buffered samples.
+
+### Added
+
+- Nineteen real-model English/Russian audio scenarios and eight additional Russian recordings
+  from 16 seconds to 4 minutes 17 seconds, with strict negation and ordered-phrase checks.
+- Whole-recording diagnostic controls, reproducible fixtures and archived before/after results.
+
+### Known limitations
+
+- Russian strict scenarios pass 7/8 on Turbo and 5/8 on Small. Grammatical substitutions remain;
+  Small still loses one negation in the proposal/file case. Tests retain these failures.
+- The downloadable app retains the local VoxFlow Dev signature; it is not notarized.
+- The five manual hardware acceptance gaps from the previous release remain unverified.
+
 ## 2.1.0-rc.1 — 2026-10-19
 
 Release candidate for local use on Apple Silicon macOS 15+. App/export version: `2.1.0`,
