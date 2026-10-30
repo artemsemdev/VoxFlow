@@ -4,6 +4,9 @@ Eight additional connected-speech cases build on the original 19-scenario matrix
 through the production file decoder/recognizer/exporters and through dictation in 100 ms chunks.
 The text is newly authored for each case; longer recordings are not repetitions of short phrases.
 
+This report preserves the initial baseline. See the [decoding fix comparison](russian-recognition-fix.md)
+for subsequent improvements and remaining failures on the same corpus.
+
 | Case | Content | Duration | Words¹ | Language mode |
 |---|---|---:|---:|---|
 | reminder | Reminder with a prohibition | 16.24 s | 35 | Russian |

@@ -134,6 +134,10 @@ versioning.
 
 ### Fixed
 
+- Use five-candidate beam search for speech recognition, retaining the existing temperature
+  fallback candidates. This reduces measured errors in extended Russian speech; remaining
+  grammatical and negation errors stay visible in the strict E2E corpus.
+
 - Prefer a recent short pause at dictation's ten-second window limit, preserving the following
   audio and short final words so conditions and negations are less likely to be cut in half.
 - Reject silent/noisy file windows with the bundled speech detector and bound native segment

@@ -127,6 +127,25 @@ extension TranscriptionE2ETests {
         }
     }
 
+    @Test("whole-recording controls distinguish model errors from application windowing",
+          .timeLimit(.minutes(10)),
+          .enabled(if: ProcessInfo.processInfo.environment["VOXFLOW_E2E_BATCH_CONTROLS"] == "1",
+                   "Set VOXFLOW_E2E_BATCH_CONTROLS=1 to diagnose the failing long-form cases"),
+          arguments: [RussianSpeechCase.incident, .explanation, .proposal])
+    func russianFullContext(_ scenario: RussianSpeechCase) async throws {
+        let fixture = try RussianSpeechFixture.load(scenario)
+        let audio = try fixture.audio()
+        try await withEngine { engine, model in
+            var segments: [TranscriptSegment] = []
+            for try await event in engine.transcribe(audio, options: TranscriptionOptions(language: "ru")) {
+                if case .segment(let segment) = event { segments.append(segment) }
+            }
+            try checkRussian(Transcript(segments: segments).plainText, reference: fixture.reference(),
+                             scenario: scenario, duration: audio.duration, route: "batch", model: model)
+            checkTimeline(segments, duration: audio.duration)
+        }
+    }
+
     private func checkRussian(_ text: String, reference: String, scenario: RussianSpeechCase,
                               duration: Double, route: String, model: String) throws {
         let wer = WordErrorRate.measure(reference: reference, hypothesis: text)
