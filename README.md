@@ -190,6 +190,8 @@ look in `~/Library/Application Support/VoxFlow/Models` and skip with a reason wh
 
 For the opt-in real-model transcription quality matrix (including long Russian/English sentences),
 commands and measured failures, see [the E2E audit](docs/testing/transcription-e2e.md).
+Eight additional Russian cases, from 16 seconds to 4 minutes 17 seconds, are covered in the
+[long-form Russian audit](docs/testing/russian-longform-e2e.md).
 
 ## Layout
 
