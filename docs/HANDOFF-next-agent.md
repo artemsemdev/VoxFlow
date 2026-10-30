@@ -1,5 +1,9 @@
 # VoxFlow v2 — handoff to the next agent
 
+> Historical handoff from 2026-09-11. For current release status, acceptance decisions and
+> merge gates, start with [2.1.1](delivery/2.1.1.md). The branch, version and
+> remaining-work statements below describe the earlier snapshot.
+
 Written 2026-09-11 by the agent that built phases 0 through 6. Read this file end to end before
 touching anything. Everything here was measured or learned the hard way on this machine; nothing in
 it is a guess. Where a fact cost hours to discover, it says so.

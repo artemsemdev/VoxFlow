@@ -6,12 +6,15 @@
 Native macOS transcription that never leaves your Mac. Swift 6, SwiftUI, whisper.cpp on Metal.
 macOS 15+, Apple Silicon.
 
-VoxFlow 2.0 is a from-scratch rewrite. Version 2.0.0 ships **file transcription**; dictation into
-any app, style cleanup with a local LLM and an MCP server follow in 2.x (see the roadmap).
+VoxFlow 2 is a from-scratch rewrite with file transcription, system-wide dictation,
+local style cleanup and MCP integration.
 
-**Status: 2.0.0 released · 2.1.0 (dictation) in progress.**
+**Latest release: [2.1.1](https://github.com/artemsemdev/VoxFlow/releases/tag/v2.1.1), build 3.**
+This patch improves recognition and adds long-form Russian regression coverage. See the
+[release record](docs/delivery/2.1.1.md) for validation and remaining accuracy/manual-test gaps.
+The downloadable app uses the local VoxFlow Dev signature and is not notarized.
 
-## What works today (2.0.0)
+## What works today (2.1.1)
 
 - History provides separate original/inserted copy actions with visible Copied confirmation.
 
@@ -42,7 +45,7 @@ any app, style cleanup with a local LLM and an MCP server follow in 2.x (see the
 - Everything on this Mac: audio is processed in memory and discarded; the only network action is a
   model download you start. No account, no analytics.
 
-### Dictation (`develop`, in progress toward 2.2.0)
+### Dictation
 
 - Microphone dictation skips near-silent windows and uses a bundled local speech detector to
   reject background noise before Whisper decodes it, reducing invented text during pauses.
@@ -148,19 +151,12 @@ any app, style cleanup with a local LLM and an MCP server follow in 2.x (see the
   finished transcript (rule-based only, no re-processing) — see
   [ADR-007](docs/adr/007-llm-styling-on-llama-cpp.md).
 
-## Roadmap
+## Delivery status
 
-| Version | Phase | Issue |
-|---|---|---|
-| 2.1 | Dictation: fn push-to-talk / hands-free, Flow Bar, insertion into any app, onboarding, History | [#110](https://github.com/artemsemdev/VoxFlow/issues/110) |
-| 2.2 | Main window and Settings complete, menu bar, notifications, rule-based styles | [#111](https://github.com/artemsemdev/VoxFlow/issues/111) |
-| 2.3 | Style cleanup with a local LLM (Qwen2.5 3B via llama.cpp) | [#112](https://github.com/artemsemdev/VoxFlow/issues/112) |
-| 2.4 | MCP server on localhost | [#113](https://github.com/artemsemdev/VoxFlow/issues/113) |
-| — | Signed and notarized releases | [#115](https://github.com/artemsemdev/VoxFlow/issues/115) |
-
-Dictation (capture, Flow Bar state machine and HUD, the fn hotkey, windowed transcription,
-Accessibility insertion, encrypted history), onboarding, the History page and Settings ›
-Hotkeys/Audio/Privacy are wired end-to-end on `develop` (unreleased, phase 3c).
+File transcription, dictation, History, Dictionary/Snippets/Styles, local Qwen cleanup and
+HTTP/native-stdio MCP are included in 2.1.1. Physical acceptance checks still pending are
+tracked in the [hardware checklist](docs/HARDWARE-ACCEPTANCE.md). Developer ID signing,
+notarization and auto-updates remain future distribution work.
 
 Tracking issue: [#105](https://github.com/artemsemdev/VoxFlow/issues/105). The product design is the
 Claude Design canvas checked in at [design/](design/).
@@ -171,7 +167,9 @@ Claude Design canvas checked in at [design/](design/).
 - To build: Xcode 26.x and [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`).
 - Models are downloaded on demand into `~/Library/Application Support/VoxFlow/Models`.
 
-There are no signed binaries yet; build from source (see [SETUP.md](SETUP.md)).
+Download the ZIP and SHA256SUMS from the [latest release](https://github.com/artemsemdev/VoxFlow/releases/latest),
+or build using your own local signing identity (see [SETUP.md](SETUP.md)). The published local
+signature is not a notarized installer for other Macs.
 
 ## Build and test
 

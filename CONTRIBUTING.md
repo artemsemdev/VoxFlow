@@ -17,6 +17,10 @@ Contributions must preserve that.
 - `develop`: integration branch; every feature PR targets it.
 - `feature/<issue>-<slug>` from `develop`; `release/x.y.z` from `develop` merges to `master` with a
   tag and back into `develop`; `hotfix/*` from `master`.
+- A candidate may use `release/x.y.z-rc.n`; its PR targets `master` and records the exact
+  version/build, validation and explicitly deferred checks. Preserve the integration ancestry
+  with a merge commit when promoting a release. Tagging/publication and merging back into
+  `develop` follow promotion; preparing a candidate alone does not publish a stable release.
 
 ## Commits
 
