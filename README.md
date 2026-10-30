@@ -46,6 +46,8 @@ any app, style cleanup with a local LLM and an MCP server follow in 2.x (see the
 
 - Microphone dictation skips near-silent windows and uses a bundled local speech detector to
   reject background noise before Whisper decodes it, reducing invented text during pauses.
+- File transcription also uses the local speech detector; recognized segment times are bounded
+  by the source audio duration before they reach previews or subtitle exports.
 
 - Claude Desktop can launch the signed app with `--mcp-stdio`, using its own client approvals
   without Node, a bearer token or an HTTP listener. See the MCP client runbook for configuration
