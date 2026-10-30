@@ -62,8 +62,9 @@ struct WhisperCppEngineIntegrationTests {
     // The fixture pronounces "we're"/"we are" and "why"/"Y" alike; preserve every other word.
     private static func fixtureWords(_ text: String) -> [Substring] {
         text.lowercased().replacingOccurrences(of: "we're", with: "we are")
-            .replacingOccurrences(of: "we’re", with: "we are").replacingOccurrences(of: " y fixed", with: " why fixed")
-            .split { !$0.isLetter && !$0.isNumber }
+            .replacingOccurrences(of: "we’re", with: "we are")
+            .split { !$0.isLetter && !$0.isNumber }.joined(separator: " ")
+            .replacingOccurrences(of: " y fixed", with: " why fixed").split(separator: " ")
     }
 
     private struct RepeatedAudio: AudioDecoding {

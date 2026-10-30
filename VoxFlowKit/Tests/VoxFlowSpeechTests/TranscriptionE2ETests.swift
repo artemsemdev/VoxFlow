@@ -16,11 +16,11 @@ import VoxFlowTestSupport
 struct TranscriptionE2ETests {
     enum Scenario: String, CaseIterable, Sendable {
         case english, russian, autoEnglish, autoRussian, stereo48k, aac
-        case longEnglish, longRussian, autoLongRussian
+        case longEnglish, longRussian, autoLongRussian, offsetLongEnglish, offsetLongRussian
         case quiet, noisy, pauses, multipleWindows, autoMultipleWindows, continuousSpeech, silence, noiseOnly
 
-        var language: String { [.russian, .autoRussian, .longRussian, .autoLongRussian].contains(self) ? "ru" : "en" }
-        var isLong: Bool { [.longEnglish, .longRussian, .autoLongRussian].contains(self) }
+        var language: String { [.russian, .autoRussian, .longRussian, .autoLongRussian, .offsetLongRussian].contains(self) ? "ru" : "en" }
+        var isLong: Bool { [.longEnglish, .longRussian, .autoLongRussian, .offsetLongEnglish, .offsetLongRussian].contains(self) }
         var fixtureName: String { "e2e-\(isLong ? "long-" : "")\(language)" }
         var automatic: Bool { self == .autoEnglish || self == .autoRussian || self == .autoMultipleWindows || self == .autoLongRussian }
         var repetitions: Int { self == .multipleWindows || self == .autoMultipleWindows || self == .continuousSpeech ? 6 : 1 }
@@ -138,12 +138,13 @@ struct TranscriptionE2ETests {
     }
 
     private func makeInput(_ scenario: Scenario, in directory: TemporaryDirectory) throws -> URL {
-        let fixture = try #require(Bundle.module.url(forResource: scenario.fixtureName, withExtension: "wav", subdirectory: "Fixtures"))
+        let fixture = try #require(Bundle.module.url(forResource: scenario.fixtureName, withExtension: scenario.isLong ? "flac" : "wav", subdirectory: "Fixtures"))
         var samples = try AudioDecoder().decode(fixture).samples
         let silence = [Float](repeating: 0, count: 16_000)
         switch scenario {
         case .multipleWindows, .autoMultipleWindows: samples = (0..<scenario.repetitions).flatMap { _ in samples + silence }
         case .continuousSpeech: samples = (0..<scenario.repetitions).flatMap { _ in samples }
+        case .offsetLongEnglish, .offsetLongRussian: samples = Array(repeating: 0, count: 11_200) + samples
         case .pauses: samples = silence + silence + samples + silence + silence + silence
         case .quiet: samples = samples.map { $0 * 0.08 }
         case .noisy: samples = zip(samples, noise(samples.count)).map { $0 + $1 * 0.02 }

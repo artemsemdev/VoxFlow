@@ -61,6 +61,16 @@ public actor WhisperCppEngine: SpeechEngine {
         }
     }
 
+    /// Native decoding pads short audio; its timestamps can extend into that padding.
+    static func boundedSegment(_ segment: TranscriptSegment, duration: TimeInterval) -> TranscriptSegment? {
+        guard duration.isFinite, duration > 0, segment.start.isFinite, segment.end.isFinite else { return nil }
+        var bounded = segment
+        bounded.start = max(0, segment.start)
+        bounded.end = min(duration, segment.end)
+        guard bounded.end > bounded.start else { return nil }
+        return bounded
+    }
+
     /// Same loaded model and serial native queue, with lower priority between file windows.
     public nonisolated var fileEngine: any SpeechEngine { FileEngine(owner: self) }
 
@@ -127,9 +137,11 @@ public actor WhisperCppEngine: SpeechEngine {
         // Safe: written only from whisper.cpp's callbacks, which run on `queue` inside whisper_full.
         let continuation: AsyncThrowingStream<SegmentEvent, Error>.Continuation
         let isCancelled: @Sendable () -> Bool
+        let duration: TimeInterval
         var emitted: Int32 = 0
-        init(continuation: AsyncThrowingStream<SegmentEvent, Error>.Continuation, isCancelled: @escaping @Sendable () -> Bool) {
+        init(continuation: AsyncThrowingStream<SegmentEvent, Error>.Continuation, duration: TimeInterval, isCancelled: @escaping @Sendable () -> Bool) {
             self.continuation = continuation
+            self.duration = duration
             self.isCancelled = isCancelled
         }
     }
@@ -232,7 +244,7 @@ public actor WhisperCppEngine: SpeechEngine {
         let runID = UUID()
         runs[runID] = cancelFlag
         defer { runs[runID] = nil }
-        let runState = RunState(continuation: continuation, isCancelled: { cancelFlag.isSet })
+        let runState = RunState(continuation: continuation, duration: audio.duration, isCancelled: { cancelFlag.isSet })
 
         try await withTaskCancellationHandler {
             try await onQueue(priority: priority) {
@@ -246,21 +258,15 @@ public actor WhisperCppEngine: SpeechEngine {
                 params.no_speech_thold = mapped.noSpeechThreshold
                 params.single_segment = false
 
-                // Whisper can confidently turn background noise into subtitle credits, even
-                // with a near-zero no_speech probability. Use a separate local speech detector
-                // for microphone dictation; file transcription keeps its existing behavior.
-                let vadC: UnsafeMutablePointer<CChar>?
-                if priority == .dictation {
-                    guard let model = Bundle.module.url(forResource: "ggml-silero-v6.2.0", withExtension: "bin",
-                                                        subdirectory: "Resources") else {
-                        throw SpeechEngineError.modelLoadFailed("Bundled speech activity detector is missing")
-                    }
-                    vadC = strdup(model.path)
-                    params.vad = true
-                    params.vad_model_path = vadC.map { UnsafePointer($0) }
-                } else {
-                    vadC = nil
+                // Both entry points need speech detection: silence/noise can otherwise become
+                // confidently decoded captions, regardless of the no-speech threshold.
+                guard let model = Bundle.module.url(forResource: "ggml-silero-v6.2.0", withExtension: "bin",
+                                                    subdirectory: "Resources") else {
+                    throw SpeechEngineError.modelLoadFailed("Bundled speech activity detector is missing")
                 }
+                let vadC = strdup(model.path)
+                params.vad = true
+                params.vad_model_path = vadC.map { UnsafePointer($0) }
                 defer { free(vadC) }
 
                 let languageC = mapped.language.flatMap { strdup($0) }
@@ -291,8 +297,9 @@ public actor WhisperCppEngine: SpeechEngine {
                         let words = WhisperCppEngine.wordConfidences(tokenTexts: tokenTexts, probabilities: probabilities,
                                                                     segmentText: text)
                         if let segment = TranscriptSegment(start: start, end: end, text: text, confidence: confidence,
-                                                           wordConfidences: words) {
-                            state.continuation.yield(.segment(segment))
+                                                           wordConfidences: words),
+                           let bounded = WhisperCppEngine.boundedSegment(segment, duration: state.duration) {
+                            state.continuation.yield(.segment(bounded))
                         }
                         state.emitted += 1
                     }

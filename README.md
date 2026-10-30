@@ -46,6 +46,8 @@ any app, style cleanup with a local LLM and an MCP server follow in 2.x (see the
 
 - Microphone dictation skips near-silent windows and uses a bundled local speech detector to
   reject background noise before Whisper decodes it, reducing invented text during pauses.
+- File transcription also uses the local speech detector; recognized segment times are bounded
+  by the source audio duration before they reach previews or subtitle exports.
 
 - Claude Desktop can launch the signed app with `--mcp-stdio`, using its own client approvals
   without Node, a bearer token or an HTTP listener. See the MCP client runbook for configuration
@@ -59,6 +61,8 @@ any app, style cleanup with a local LLM and an MCP server follow in 2.x (see the
   that capture's text; moving focus, editing the field or moving its caret stops further writes and
   copies the full final result once. Escape stops capture and keeps text already inserted.
   Onboarding and History scratchpads retain final-only insertion.
+- At dictation's ten-second window limit, recognition prefers a recent short pause and carries
+  the remaining audio into the next window, reducing word cuts in long sentences.
 - The Flow Bar names an app holding exclusive access to the microphone when macOS reports its
   owner. When that app releases the device, a still-active dictation gesture retries with fresh
   permission and target checks. Releasing push-to-talk, cancelling, or re-inserting the last
