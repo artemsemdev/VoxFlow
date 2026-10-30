@@ -3,6 +3,9 @@
 Baseline run on macOS 27.0.1, arm64, from `develop` at `a1ccce9`, branch `feature/transcription-e2e`.
 Corrections on `fix/transcription-quality` pass all **19/19 scenario pairs on both models**;
 the baseline and after-fix measurements are preserved below.
+An [additional eight-case Russian corpus](russian-longform-e2e.md) extends coverage up to 4:17;
+its separate results include new strict phrase mismatches, so the 19/19 result below applies
+to the original corpus only.
 The suite uses the production decoder, Whisper/Metal, file windowing, dictation windowing and
 all five exporters. There are no recognition fakes. It does **not** exercise microphone capture,
 Fn/permissions, UI, Accessibility insertion, history or style cleanup. Synthetic speech is a

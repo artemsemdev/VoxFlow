@@ -123,7 +123,7 @@ struct TranscriptionE2ETests {
         }
     }
 
-    private func withEngine(_ body: (WhisperCppEngine, String) async throws -> Void) async throws {
+    func withEngine(_ body: (WhisperCppEngine, String) async throws -> Void) async throws {
         let path = try #require(ProcessInfo.processInfo.environment["VOXFLOW_E2E_MODEL"])
         let model = URL(fileURLWithPath: path)
         let engine = WhisperCppEngine()
@@ -183,7 +183,7 @@ struct TranscriptionE2ETests {
         }
     }
 
-    private func chunks(_ audio: AudioSamples) -> AsyncStream<AudioChunk> {
+    func chunks(_ audio: AudioSamples) -> AsyncStream<AudioChunk> {
         AsyncStream { continuation in
             for offset in stride(from: 0, to: audio.samples.count, by: 1600) {
                 continuation.yield(AudioChunk(samples: Array(audio.samples[offset..<min(offset + 1600, audio.samples.count)])))
@@ -215,14 +215,14 @@ struct TranscriptionE2ETests {
         }
     }
 
-    private func checkTimeline(_ segments: [TranscriptSegment], duration: Double) {
+    func checkTimeline(_ segments: [TranscriptSegment], duration: Double) {
         #expect(segments.map(\.start) == segments.map(\.start).sorted())
         #expect(segments.allSatisfy { $0.start >= 0 && $0.end >= $0.start && $0.end <= duration + 0.5 },
                 "Audio duration: \(duration); segment ranges: \(segments.map { "\($0.start)...\($0.end)" })")
         #expect(segments.allSatisfy { $0.confidence.map { (0...1).contains($0) } ?? false })
     }
 
-    private func checkExports(_ document: TranscriptDocument, in directory: TemporaryDirectory) throws {
+    func checkExports(_ document: TranscriptDocument, in directory: TemporaryDirectory) throws {
         let exporter = TranscriptExporter(directory: directory.file("exports"))
         let urls = try exporter.exportAll(document, formats: OutputFormat.allCases, timestamps: false)
         for format in OutputFormat.allCases {
@@ -261,7 +261,7 @@ struct TranscriptionE2ETests {
 }
 
 /// Levenshtein word distance counts substitutions, deletions AND hallucinated insertions.
-private enum WordErrorRate {
+enum WordErrorRate {
     static func words(_ text: String) -> [String] {
         text.lowercased().replacingOccurrences(of: "ё", with: "е")
             .split { !$0.isLetter && !$0.isNumber }.map(String.init)
