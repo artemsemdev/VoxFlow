@@ -25,7 +25,8 @@ public struct WindowPlanner: Sendable, Equatable {
         buffer.append(contentsOf: chunk.samples)
         silentTail = chunk.rms < voiceRMS ? silentTail + chunk.duration : 0
         let buffered = Double(buffer.count) / AudioSamples.sampleRate
-        if buffered >= maxWindow || (buffered >= minWindow && silentTail >= trailingSilence) {
+        if buffered >= maxWindow { return cut(at: lastPauseEnd()) }
+        if buffered >= minWindow && silentTail >= trailingSilence {
             return cut()
         }
         return nil
@@ -48,11 +49,37 @@ public struct WindowPlanner: Sendable, Equatable {
         return nil
     }
 
-    private mutating func cut() -> Window {
-        let window = Window(samples: AudioSamples(buffer), startOffset: consumed)
-        consumed += Double(buffer.count) / AudioSamples.sampleRate
-        buffer.removeAll(keepingCapacity: true)
-        silentTail = 0
+    /// At the latency limit, prefer a short internal pause to splitting a word. The suffix is
+    /// retained verbatim for the next window; no overlap, dropped samples or duplicated words.
+    private func lastPauseEnd() -> Int {
+        let frame = Int(0.02 * AudioSamples.sampleRate)
+        let minimum = Int(minWindow * AudioSamples.sampleRate)
+        let pauseSamples = Int(0.2 * AudioSamples.sampleRate)
+        var quietSamples = 0
+        var quietEnd = buffer.count
+        for end in stride(from: buffer.count, through: minimum + frame, by: -frame) {
+            let energy = buffer[(end - frame)..<end].reduce(Float(0)) { $0 + $1 * $1 }
+            if energy / Float(frame) < voiceRMS * voiceRMS {
+                if quietSamples == 0 { quietEnd = end }
+                quietSamples += frame
+                // A shorter voiced suffix would be discarded by flush(); keep it in this window.
+                let remaining = buffer.count - quietEnd
+                if quietSamples >= pauseSamples && (remaining == 0 || Double(remaining) / AudioSamples.sampleRate >= minFlush) {
+                    return quietEnd
+                }
+            } else {
+                quietSamples = 0
+            }
+        }
+        return buffer.count
+    }
+
+    private mutating func cut(at end: Int? = nil) -> Window {
+        let count = end ?? buffer.count
+        let window = Window(samples: AudioSamples(Array(buffer.prefix(count))), startOffset: consumed)
+        consumed += Double(count) / AudioSamples.sampleRate
+        buffer.removeFirst(count)
+        silentTail = min(silentTail, Double(buffer.count) / AudioSamples.sampleRate)
         return window
     }
 }

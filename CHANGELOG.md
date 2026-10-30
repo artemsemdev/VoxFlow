@@ -134,6 +134,8 @@ versioning.
 
 ### Fixed
 
+- Prefer a recent short pause at dictation's ten-second window limit, preserving the following
+  audio and short final words so conditions and negations are less likely to be cut in half.
 - Reject silent/noisy file windows with the bundled speech detector and bound native segment
   timestamps to the recording, preventing invented silence captions and subtitle times beyond EOF.
 
