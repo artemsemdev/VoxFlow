@@ -170,6 +170,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if !mainWindowVisible {
                 AppServices.shared.navigation.requestMainWindow = true
             }
+            AppServices.shared.filesViewModel.inputAccess.retain(urls)
             await AppServices.shared.queue.add(urls)
             await AppServices.shared.queue.start()
         }
