@@ -14,6 +14,9 @@ This patch improves recognition and adds long-form Russian regression coverage. 
 [release record](docs/delivery/2.1.1.md) for validation and remaining accuracy/manual-test gaps.
 The downloadable app uses the local VoxFlow Dev signature and is not notarized.
 
+A separate sandboxed [Mac App Store edition](docs/app-store/README.md) is being prepared for review.
+Its features and storage are separate from the desktop release described below.
+
 ## What works today (2.1.1)
 
 - History provides separate original/inserted copy actions with visible Copied confirmation.
