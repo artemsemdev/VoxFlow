@@ -4,14 +4,20 @@ The store edition is being prepared for review; a repository change does not mea
 Apple has approved or published it. Its product name is **VoxFlow: Offline
 Transcription** and its bundle ID is `dev.artemsem.voxflow.store`.
 
-It provides local in-app dictation, an editable saved draft, copying, audio/video
-file transcription and TXT/SRT/VTT/JSON/Markdown export. Speech models download on
-demand. It requires macOS 15 or later on Apple silicon.
+The store target compiles the same application entry point, composition root and
+seven screens as the desktop target: Home, History, Dictionary, Snippets, Styles,
+Files and Settings. A separate reduced interface is not part of this product.
 
-The sandbox edition has a separate entry point and storage container. It does not
-include system-wide insertion, Accessibility access, global dictation shortcuts,
-MCP servers, the full app's history database or LLM rewriting. It leaves data from
-the separately distributed desktop app in place.
+The bundle ID and macOS container are separate from the desktop release. First
+launch must not import the owner's history, dictionary, snippets, preferences or
+model downloads. Keychain namespaces are also separate, so store preparation does
+not read or replace the desktop edition's history key or MCP token.
+
+**Release gate:** matching the desktop interface is not proof of Mac App Store
+compatibility. The desktop Accessibility insertion and global input hooks conflict
+with App Sandbox. Their behavior needs an agreed adaptation and runtime validation
+before this archive can be treated as a submission candidate. Do not submit a build
+whose visible controls promise unavailable behavior.
 
 - [Privacy policy](privacy-policy.md)
 - [Support](https://github.com/artemsemdev/VoxFlow/issues)
@@ -23,7 +29,7 @@ then archive scheme `VoxFlowStore` in `VoxFlowStore.xcodeproj`. If both generate
 projects are present, always pass `-project` to xcodebuild. Signing uses the
 publisher's Apple team; never copy local certificates or credentials into Git.
 
-Before upload, verify the archive's signature and entitlements. Inspect the actual
+Before any upload, verify the archive's signature and entitlements. Inspect the actual
 `.app` contents: only application code, icons, privacy declarations, license notices
 and the bundled Silero voice-activity model belong there. No speech model downloads,
 drafts, transcripts, preferences, databases, test hosts, screenshot fixtures or
@@ -31,15 +37,20 @@ personal files may be shipped. Do not package an existing Application Support or
 container directory.
 
 Check first launch with the store bundle ID, then use synthetic speech to check
-model download, file selection, recognition and export under sandbox restrictions.
+model download, file selection, recognition, history, dictionary, snippets, styles
+and export under sandbox restrictions.
 Retest live microphone permission and start/stop behavior separately. Local test
 container data is not part of the archive.
 
-Store screenshots are rendered from the real production views using synthetic
-content in `StoreRenderTests`; they are not release resources. Generate JPEGs at
-2560 × 1600 and inspect every image before upload. Keep private App Review contact
-information in App Store Connect only.
+Review screenshots use the original production views in dark mode and synthetic
+content in `AppStoreReviewRenderTests`. They are test outputs, never release resources.
+Inspect the complete sidebar, selected labels and native controls as well as image
+size (2560 × 1600); native offscreen materials can render incorrectly even when the
+test passes. Do not use an image with rendering defects. Keep private App Review
+contact information in App Store Connect only.
 
-App Store processing, distribution signing, export-compliance answers and Apple
-review remain release gates. Use manual release so an approved version does not
-go live before the publisher is ready.
+The owner must inspect the actual matching build and final screenshots, then give
+explicit approval before **Add for Review / Submit for Review**. Preparing metadata,
+signing or screenshots is not approval to submit. Keep manual release enabled.
+Distribution export, sandbox compatibility, export-compliance answers and Apple
+review remain release gates.
