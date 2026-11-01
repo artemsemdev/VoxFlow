@@ -420,7 +420,11 @@ final class AppServices {
                                            onInputDeviceChange: { _ = microphoneUse.freshState() })
         // Shared across Privacy/Snippets/Styles — one `/Applications` scan behind the three app
         // pickers ("Never record in", "Only in {app}", "Add app override").
+        #if APP_STORE
+        let installedApps = InAppInstalledApps()
+        #else
         let installedApps = WorkspaceInstalledApps()
+        #endif
         let privacyViewModel = PrivacyViewModel(settings: dictationSettings, history: historyService, apps: installedApps)
 
         // Dictionary/Snippets/Styles pages (design MW-03/04/05) — built on the same

@@ -153,7 +153,7 @@ struct OverridesCard: View {
                 // Implementation-authored copy (review M4) — neither the canvas nor the brief shows
                 // this empty state; flagged for an explicit owner call rather than silently assumed.
                 // Kept because a blank card with no explanation would be a worse default.
-                Text("No overrides yet — every app uses the default style above.")
+                Text(AppScopeCopy.overrideEmpty)
                     .font(.callout)
                     .foregroundStyle(.secondary)
             } else {

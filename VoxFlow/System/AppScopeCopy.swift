@@ -15,6 +15,11 @@ enum AppScopeCopy {
             ? "Hold fn in a VoxFlow text field and start talking. Saved dictations stay on this Mac. Scratchpad practice is not saved."
             : "Hold fn in any text field and start talking. Everything you dictate shows up here, on this Mac only."
     }
+    static var overrideEmpty: String {
+        AppCapabilities.inAppDictation
+            ? "VoxFlow uses the default style above. Dictation stays inside VoxFlow."
+            : "No overrides yet — every app uses the default style above."
+    }
     static var hotkeyScope: String {
         AppCapabilities.inAppDictation ? " Shortcuts work while VoxFlow is active." : ""
     }
