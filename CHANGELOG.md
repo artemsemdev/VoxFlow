@@ -5,6 +5,12 @@ versioning.
 
 ## Unreleased
 
+## Unreleased — Mac App Store edition
+
+- Prepare a separate sandboxed product with in-app dictation, local drafts, file transcription and exports.
+- Keep the existing desktop app and its data separate; document store privacy and release checks.
+- App Store availability is pending distribution validation and Apple review.
+
 ## 2.1.1 — 2026-10-30
 
 App/export version `2.1.1`, build `3`. Improves transcription quality on the existing local models.
