@@ -9,7 +9,7 @@ final class LiveAccessibilityInsertion {
     let context: LiveInsertionContext
     private let target: (any AccessibilityTextTarget)?
     private let appName: String?
-    private let permissions: any PermissionChecking
+    private let canAccessTarget: @MainActor () -> Bool
     private let pasteboard: any Pasteboard
     private let focusTarget: @MainActor () -> (any AccessibilityTextTarget)?
     private var planner = LiveInsertionPlanner()
@@ -22,17 +22,17 @@ final class LiveAccessibilityInsertion {
 
     init(context: LiveInsertionContext, target: (any AccessibilityTextTarget)?, appName: String?,
          initialText: String?, initialSelection: NSRange?,
-         permissions: any PermissionChecking, pasteboard: any Pasteboard,
+         canAccessTarget: @escaping @MainActor () -> Bool, pasteboard: any Pasteboard,
          focusTarget: @escaping @MainActor () -> (any AccessibilityTextTarget)?) {
         self.context = context; self.target = target; self.appName = appName
-        self.permissions = permissions; self.pasteboard = pasteboard; self.focusTarget = focusTarget
+        self.canAccessTarget = canAccessTarget; self.pasteboard = pasteboard; self.focusTarget = focusTarget
         expectedText = initialText; expectedSelection = initialSelection
         self.initialSelection = initialSelection
     }
 
     private func ownsTarget() -> Bool {
         guard context.isActive, blocked == nil else { return false }
-        guard permissions.accessibilityTrusted(prompt: false) else { blocked = .accessibilityDenied; return false }
+        guard canAccessTarget() else { blocked = .accessibilityDenied; return false }
         guard let target, target.isEditable else { blocked = .noTextField; return false }
         guard let focused = focusTarget(), target.isSameTarget(as: focused) else {
             blocked = .insertionFailed; return false

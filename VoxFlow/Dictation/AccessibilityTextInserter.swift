@@ -59,7 +59,8 @@ final class AccessibilityTextInserter: LiveTextInserting {
         guard context.isActive else { return }
         live = LiveAccessibilityInsertion(context: context, target: target, appName: appName,
             initialText: liveAnchor?.text, initialSelection: liveAnchor?.selection,
-            permissions: permissions, pasteboard: pasteboard, focusTarget: focusTarget)
+            canAccessTarget: { [permissions] in permissions.accessibilityTrusted(prompt: false) },
+            pasteboard: pasteboard, focusTarget: focusTarget)
     }
 
     func updateLiveInsertion(_ text: String, context: LiveInsertionContext) async {
