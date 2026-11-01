@@ -9,7 +9,10 @@ versioning.
 
 - Prepare a sandboxed build of the original desktop interface with separate local data and Keychain namespaces.
 - Keep the existing desktop app and its data separate; document store privacy and release checks.
-- App Store availability is pending distribution validation and Apple review.
+- Scope store dictation, shortcuts and typed snippets to VoxFlow without Accessibility permission.
+- Retain selected input-file access through queued transcription and retries; offer only supported local rule targets.
+- Validate a signed store candidate with synthetic file transcription, export and in-app snippet expansion.
+- App Store release remains pending owner approval and Apple review.
 
 ## 2.1.1 — 2026-10-30
 
