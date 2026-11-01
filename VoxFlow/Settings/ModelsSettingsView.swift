@@ -6,13 +6,14 @@ import VoxFlowModels
 /// row, and the alerts `ModelsViewModel` surfaces (SYS-DISK, ST-03d, ST-03v, ST-03o).
 struct ModelsSettingsView: View {
     let model: ModelsViewModel
+    var footerText: String? = nil
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 section(title: "Speech recognition", rows: model.speechRows)
-                section(title: "Cleanup & styles", rows: model.styleRows)
-                Text(model.footerText)
+                if !model.styleRows.isEmpty { section(title: "Cleanup & styles", rows: model.styleRows) }
+                Text(footerText ?? model.footerText)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

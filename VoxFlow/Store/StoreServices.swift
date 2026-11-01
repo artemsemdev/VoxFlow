@@ -11,6 +11,7 @@ import VoxFlowSpeech
 @Observable @MainActor
 final class StoreServices {
     static let shared = StoreServices()
+    static let modelsFooter = "Download a model once to transcribe offline. Models stay in VoxFlow’s private storage."
     let engine: WhisperCppEngine
     let modelLoader: ModelLoader
     let models: ModelsViewModel
@@ -26,13 +27,13 @@ final class StoreServices {
 
     private init() {
         let preferences = UserDefaultsKeyValueStore()
-        let store = ModelStore(directory: ModelStore.defaultDirectory,
+        let store = ModelStore(directory: ModelStore.defaultDirectory, catalog: ModelCatalog.all.filter { $0.role == .speech },
             downloader: RangeResumingDownloader(), freeSpace: VolumeFreeSpace(), settings: preferences)
         let engine = WhisperCppEngine()
         self.engine = engine
         let loader = ModelLoader(store: store, engine: engine)
         modelLoader = loader
-        models = ModelsViewModel(store: store, modelLoader: loader)
+        models = ModelsViewModel(store: store, catalog: ModelCatalog.all.filter { $0.role == .speech }, modelLoader: loader)
         let settings = FilesSettings(store: preferences)
         self.settings = settings
         let options = settings.optionsSnapshot
@@ -55,6 +56,22 @@ final class StoreServices {
                     model: await loader.readiness())
             }, loadModel: { _ = try await loader.ensureLoaded() }, options: { options.current },
             onSave: { _, _ in }, copyToClipboard: { SystemPasteboard().setString($0) })
+    }
+
+    var dictationStatus: String {
+        switch state {
+        case .idle: "Ready when you are"
+        case .loadingModel: "Loading speech model…"
+        case .armed, .tapped: "Starting microphone…"
+        case .listening: "Listening…"
+        case .processing: "Transcribing on this Mac…"
+        case .inserted: "Text added to your draft"
+        case .modelNotInstalled: "Download a speech model to get started"
+        case .micUnavailable: "Microphone unavailable. Check Privacy & Security settings."
+        case .didntCatch: "No speech recognized. Please try again."
+        case .error(let message): message
+        default: "Ready when you are"
+        }
     }
 
     func observeDictation() async {
