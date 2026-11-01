@@ -42,12 +42,13 @@ and export under sandbox restrictions.
 Retest live microphone permission and start/stop behavior separately. Local test
 container data is not part of the archive.
 
-Review screenshots use the original production views in dark mode and synthetic
-content in `AppStoreReviewRenderTests`. They are test outputs, never release resources.
-Inspect the complete sidebar, selected labels and native controls as well as image
-size (2560 × 1600); native offscreen materials can render incorrectly even when the
-test passes. Do not use an image with rendering defects. Keep private App Review
-contact information in App Store Connect only.
+Capture final screenshots from the running application's original screens in dark
+mode, with only synthetic examples in a separate test container. Use a 1280 × 800
+point window on a Retina display for a 2560 × 1600 image. Inspect every image before
+uploading; offscreen AppKit sidebar materials can produce incorrect label colors
+even when render tests pass. Do not substitute hand-drawn controls or use defective
+captures. Screenshots and synthetic data are never bundled into the release.
+Keep private App Review contact information in App Store Connect only.
 
 The owner must inspect the actual matching build and final screenshots, then give
 explicit approval before **Add for Review / Submit for Review**. Preparing metadata,
