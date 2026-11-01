@@ -8,6 +8,7 @@ import UniformTypeIdentifiers
 @MainActor
 struct FilesDropDelegate: DropDelegate {
     let model: FilesViewModel
+    var importFiles: (@MainActor ([URL]) async -> Void)? = nil
 
     func dropEntered(info: DropInfo) {
         model.isDragOver = true
@@ -29,7 +30,8 @@ struct FilesDropDelegate: DropDelegate {
             for provider in providers {
                 if let url = await Self.loadURL(from: provider) { urls.append(url) }
             }
-            await model.addFiles(urls)
+            if let importFiles { await importFiles(urls) }
+            else { await model.addFiles(urls) }
         }
         return true
     }

@@ -41,7 +41,7 @@ final class NativeRenderHost {
             throw RenderError.couldNotCreateBitmap
         }
         hostingView.cacheDisplay(in: hostingView.bounds, to: bitmap)
-        guard let png = bitmap.representation(using: .png, properties: [:]) else {
+        guard let png = bitmap.representation(using: url.pathExtension == "jpg" ? .jpeg : .png, properties: [:]) else {
             throw RenderError.couldNotEncodePNG
         }
         try png.write(to: url)
@@ -86,7 +86,7 @@ final class NativeRenderHost {
                 sheet.effectiveAppearance.performAsCurrentDrawingAppearance {
                     view.cacheDisplay(in: view.bounds, to: bitmap)
                 }
-                guard let png = bitmap.representation(using: .png, properties: [:]) else {
+                guard let png = bitmap.representation(using: url.pathExtension == "jpg" ? .jpeg : .png, properties: [:]) else {
                     throw RenderError.couldNotEncodePNG
                 }
                 try png.write(to: url)
