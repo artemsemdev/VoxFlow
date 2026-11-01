@@ -4,7 +4,11 @@ import SwiftUI
 /// Dock-icon drops and Finder "Open With" (design MW-06: "drop on Dock icon").
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var quitCoordinator: QuitCoordinator?
+    #if APP_STORE
+    private var typedSnippets: InAppTypedSnippetMonitor?
+    #else
     private var typedSnippets: TypedSnippetMonitor?
+    #endif
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard !LaunchEnvironment.isRunningTests() else { return .terminateNow }
@@ -80,12 +84,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Electron enables its Accessibility tree asynchronously. Prepare it when the user
             // switches apps, before a later Fn capture needs the focused editor. One observer
             // lasts for the application lifetime; test hosts never register it.
+            #if !APP_STORE
             _ = NSWorkspace.shared.notificationCenter.addObserver(
                 forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
             ) { _ in
                 Task { @MainActor in AXTextTarget.prepareFocusedApplication() }
             }
             AXTextTarget.prepareFocusedApplication()
+            #endif
             // MB-03/MB-04 (ruling 8): never starts under XCTest, same reasoning as everything else
             // in this block — a test run must not touch the real Notification Center either.
             AppServices.shared.notifications.start()
@@ -106,7 +112,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task {
                 let services = AppServices.shared
                 await services.contentService.ready()
+                #if APP_STORE
+                let monitor = InAppTypedSnippetMonitor(content: services.contentService, settings: services.dictationSettings)
+                #else
                 let monitor = TypedSnippetMonitor(content: services.contentService, settings: services.dictationSettings)
+                #endif
                 typedSnippets = monitor
                 monitor.start()
             }

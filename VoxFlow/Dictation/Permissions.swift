@@ -22,9 +22,17 @@ struct SystemPermissions: PermissionChecking {
     }
     func requestMicrophone() async -> PermissionState { await AVCaptureDevice.requestAccess(for: .audio) ? .granted : .denied }
     func accessibilityTrusted(prompt: Bool) -> Bool {
+        #if APP_STORE
+        false
+        #else
         AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": prompt] as CFDictionary)
+        #endif
     }
     func openMicrophoneSettings() { open("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone") }
-    func openAccessibilitySettings() { open("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") }
+    func openAccessibilitySettings() {
+        #if !APP_STORE
+        open("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+        #endif
+    }
     private func open(_ s: String) { if let url = URL(string: s) { NSWorkspace.shared.open(url) } }
 }

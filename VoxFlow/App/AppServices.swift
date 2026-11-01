@@ -129,7 +129,7 @@ final class AppServices {
     let snippetsViewModel: SnippetsViewModel
     /// Drives the Styles page (design MW-05) — same reasoning as `snippetsViewModel`.
     let stylesViewModel: StylesViewModel
-    let inserter: AccessibilityTextInserter
+    let inserter: any TextInserting
     /// Entered/left by onboarding's Try It step and History's scratchpad sheet — read once at the
     /// start of every capture (`dictationController`'s `ephemeral:` closure) to decide whether that
     /// capture should be written to History (I-1/I-2/I-3). See `EphemeralScope`'s doc comment.
@@ -173,7 +173,7 @@ final class AppServices {
                  stylingSettings: StylingSettings, styleModelLoader: StyleModelLoader, restyler: Restyler,
                  contentService: ContentService, dictionaryViewModel: DictionaryViewModel,
                  snippetsViewModel: SnippetsViewModel, stylesViewModel: StylesViewModel,
-                 inserter: AccessibilityTextInserter, ephemeralScope: EphemeralScope, dictationController: DictationController,
+                 inserter: any TextInserting, ephemeralScope: EphemeralScope, dictationController: DictationController,
                  dictation: DictationCoordinator, flowBar: FlowBarPresenter, fnMonitor: FnKeyMonitor,
                  onboardingState: OnboardingState, onboardingViewModel: OnboardingViewModel,
                  generalSettings: GeneralSettings, mcpSettings: MCPSettings, generalViewModel: GeneralViewModel,
@@ -248,10 +248,15 @@ final class AppServices {
         let dictationSettings = DictationSettings(store: settingsStore)
         let permissions = SystemPermissions()
         let frontmost = WorkspaceFrontmostApp()
+        #if APP_STORE
+        let microphoneUse = UnmonitoredMicrophoneUse()
+        let inserter = InAppTextInserter(pasteboard: SystemPasteboard())
+        #else
         let microphoneUse = CoreAudioMicrophoneUseMonitor(inputDeviceUID: { dictationSettings.box.current.inputDeviceUID }) { pid in
             NSRunningApplication(processIdentifier: pid)?.localizedName
         }
         let inserter = AccessibilityTextInserter(permissions: permissions, pasteboard: SystemPasteboard())
+        #endif
 
         // `HistoryService` owns opening/reopening the store (and its `RetentionRunner`) off the main
         // actor; `.keyLost` (the original key material is gone, e.g. a Keychain reset) and other open
@@ -307,12 +312,13 @@ final class AppServices {
         // Built fresh on every fn-down (not once, up front) so a Settings edit to the excluded-apps
         // list or hotkey mode applies to the very next capture rather than only after a relaunch.
         let preflight: @Sendable () async -> Preflight = {
-            let builder = PreflightBuilder(frontmost: frontmost, permissions: permissions,
+            var builder = PreflightBuilder(frontmost: frontmost, permissions: permissions,
                                            readiness: { await modelLoader.readiness() },
                                            settings: dictationSettings.box.current,
                                            microphoneUse: microphoneUse,
                                            captureFocus: { app in await inserter.captureFocus(app: app) },
                                            onFrontmostCaptured: { app in frontmostBox.set(app) })
+            if AppCapabilities.inAppDictation { builder.allowedProcessID = ProcessInfo.processInfo.processIdentifier }
             return await builder.preflight()
         }
 

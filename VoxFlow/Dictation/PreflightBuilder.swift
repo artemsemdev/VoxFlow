@@ -9,6 +9,8 @@ struct PreflightBuilder: Sendable {
     let readiness: @Sendable () async -> ModelReadiness
     let settings: DictationSettingsSnapshot
     var microphoneUse: any MicrophoneUseMonitoring = UnmonitoredMicrophoneUse()
+    /// Store captures must start and remain inside this process, including across permission awaits.
+    var allowedProcessID: Int32? = nil
     /// Called last, only when no gate applies — the inserter remembers the focused element (ruling 2).
     /// Takes the already-read `FrontmostApp` (I-5: the inserter must not re-read `NSWorkspace` itself,
     /// which can disagree with the app that passed the exclusion check above if the frontmost app
@@ -27,6 +29,9 @@ struct PreflightBuilder: Sendable {
 
     func preflight() async -> Preflight {
         let app = frontmost.frontmostApp()
+        if let allowedProcessID, app.processID != allowedProcessID {
+            return Preflight(excludedApp: app.name ?? "another app", secureInput: false, microphone: .granted, model: .loaded)
+        }
         if let id = app.bundleID, settings.excludedBundleIDs.contains(id) {
             return Preflight(excludedApp: app.name ?? id, secureInput: false, microphone: .granted, model: .loaded)
         }
@@ -48,6 +53,9 @@ struct PreflightBuilder: Sendable {
         // Permissions/readiness may suspend while focus or secure input changes. Recheck privacy,
         // but keep the original fn-down identity: the inserter refuses a different process's field.
         let current = frontmost.frontmostApp()
+        if let allowedProcessID, current.processID != allowedProcessID {
+            return Preflight(excludedApp: current.name ?? "another app", secureInput: false, microphone: .granted, model: model)
+        }
         if let id = current.bundleID, settings.excludedBundleIDs.contains(id) {
             return Preflight(excludedApp: current.name ?? id, secureInput: false, microphone: .granted, model: model)
         }

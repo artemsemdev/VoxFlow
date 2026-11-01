@@ -95,6 +95,24 @@ struct PreflightBuilderTests {
         #expect(metadata.withLock { $0 } == (blocked ? [] : [original]))
     }
 
+    @Test("In-app capture rejects foreign focus before and after readiness", arguments: [false, true])
+    func inAppScope(changesDuringReadiness: Bool) async {
+        let own = FrontmostApp(name: "VoxFlow", bundleID: "test", processID: 42)
+        let other = FrontmostApp(name: "Other", bundleID: "other", processID: 43)
+        let focus = MutablePreflightFocus(changesDuringReadiness ? own : other)
+        let permissions = FakePermissions(microphone: .granted, requestResult: .granted, accessibility: false)
+        let captures = Counter(), loads = Counter()
+        let builder = PreflightBuilder(frontmost: focus, permissions: permissions,
+            readiness: { loads.withLock { $0 += 1 }; focus.set(other); return .loaded },
+            settings: DictationSettingsSnapshot(excludedBundleIDs: [], keepHistory: true, options: TranscriptionOptions()),
+            allowedProcessID: 42,
+            captureFocus: { _ in captures.withLock { $0 += 1 } })
+        #expect(await builder.preflight().excludedApp == "Other")
+        #expect(captures.withLock { $0 } == 0)
+        #expect(loads.withLock { $0 } == (changesDuringReadiness ? 1 : 0))
+        #expect(permissions.requests == 0)
+    }
+
     @Test("model readiness is passed through")
     func model() async {
         let (b, _, cap, _, _) = await builder(readiness: .notInstalled(sizeBytes: 1_624_555_275))
