@@ -1,0 +1,91 @@
+name: VoxFlowStore
+options:
+  deploymentTarget:
+    macOS: "15.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    SWIFT_TREAT_WARNINGS_AS_ERRORS: YES
+    MACOSX_DEPLOYMENT_TARGET: "15.0"
+    ARCHS: arm64
+    LM_SKIP_METADATA_EXTRACTION: YES
+packages:
+  VoxFlowKit:
+    path: VoxFlowKit
+targets:
+  VoxFlowStore:
+    type: application
+    platform: macOS
+    # Compile the same application and screens as the desktop target. Only the
+    # superseded standalone Store prototype and generated desktop plist are excluded.
+    # User containers, test fixtures and screenshots are outside these source roots.
+    sources:
+      - path: VoxFlow
+        excludes: [Store, Info.plist]
+      - path: StoreDistribution/PrivacyInfo.xcprivacy
+      - path: StoreDistribution/WhisperCpp-LICENSE.txt
+      - path: StoreDistribution/Whisper-LICENSE.txt
+      - path: StoreDistribution/GRDB-LICENSE.txt
+      - path: StoreDistribution/LlamaCpp-LICENSE.txt
+    dependencies:
+      - package: VoxFlowKit
+        product: VoxFlowCore
+      - package: VoxFlowKit
+        product: VoxFlowAudio
+      - package: VoxFlowKit
+        product: VoxFlowSpeech
+      - package: VoxFlowKit
+        product: VoxFlowModels
+      - package: VoxFlowKit
+        product: VoxFlowFiles
+      - package: VoxFlowKit
+        product: VoxFlowDictation
+      - package: VoxFlowKit
+        product: VoxFlowStyling
+      - package: VoxFlowKit
+        product: VoxFlowStorage
+      - package: VoxFlowKit
+        product: VoxFlowLLM
+      - package: VoxFlowKit
+        product: VoxFlowMCP
+    info:
+      path: build/app-store/Info.plist
+      properties:
+        CFBundleDisplayName: VoxFlow
+        LSApplicationCategoryType: public.app-category.productivity
+        NSHumanReadableCopyright: "© 2026 Artem Semenov"
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSMicrophoneUsageDescription: "VoxFlow listens when you start dictation. Audio is processed on this Mac."
+        NSContactsUsageDescription: "VoxFlow reads first and last names from Contacts so it spells them right. Nothing is uploaded."
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: Audio or video
+            LSItemContentTypes: [public.audio, public.movie]
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Alternate
+    settings:
+      base:
+        PRODUCT_NAME: VoxFlow
+        PRODUCT_BUNDLE_IDENTIFIER: dev.artemsem.voxflow.store
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        MARKETING_VERSION: "2.1.1"
+        CURRENT_PROJECT_VERSION: "5"
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) APP_STORE
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_IDENTITY: Apple Development
+        DEVELOPMENT_TEAM: 9BYHQ35ANX
+        CODE_SIGN_ENTITLEMENTS: StoreDistribution/VoxFlowStore.entitlements
+        ENABLE_APP_SANDBOX: YES
+        ENABLE_HARDENED_RUNTIME: YES
+        DEBUG_INFORMATION_FORMAT: dwarf-with-dsym
+schemes:
+  VoxFlowStore:
+    build:
+      targets:
+        VoxFlowStore: all
+    run:
+      config: Debug
+    archive:
+      config: Release
