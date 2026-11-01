@@ -36,6 +36,7 @@ final class FilesViewModel {
     var dragCount = 0
     private(set) var etaSeconds: [UUID: TimeInterval] = [:]
 
+    let inputAccess = FileInputAccess()
     private let queue: FileQueue
     private let settings: FilesSettings
     private let modelStore: ModelStore
@@ -126,6 +127,7 @@ final class FilesViewModel {
     }
 
     func addFiles(_ urls: [URL]) async {
+        inputAccess.retain(urls.filter(SupportedAudio.isSupported))
         var total: TimeInterval = 0
         for url in urls where SupportedAudio.isSupported(url) {
             total += (try? await durations.duration(of: url)) ?? 0
