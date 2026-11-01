@@ -7,7 +7,7 @@ versioning.
 
 ## Unreleased — Mac App Store edition
 
-- Prepare a separate sandboxed product with in-app dictation, local drafts, file transcription and exports.
+- Prepare a sandboxed build of the original desktop interface with separate local data and Keychain namespaces.
 - Keep the existing desktop app and its data separate; document store privacy and release checks.
 - App Store availability is pending distribution validation and Apple review.
 
