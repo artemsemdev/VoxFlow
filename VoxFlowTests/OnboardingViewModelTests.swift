@@ -83,7 +83,7 @@ struct OnboardingViewModelTests {
 
         /// Builds a fresh `OnboardingViewModel` resuming at `step` (persisted into `store` first, the
         /// same way a relaunch would resume it) plus every collaborator it was built from.
-        func viewModel(step: OnboardingStep = .welcome, completed: Bool = false)
+        func viewModel(step: OnboardingStep = .welcome, completed: Bool = false, requiresAccessibility: Bool = true)
             -> (vm: OnboardingViewModel, state: OnboardingState, models: ModelsViewModel,
                 dictation: DictationCoordinator, scope: EphemeralScope) {
             let bootstrap = OnboardingState(store: store)
@@ -95,9 +95,21 @@ struct OnboardingViewModelTests {
             let scope = EphemeralScope()
             let dc = dictation(historyWriter: historyWriter, ephemeralScope: scope)
             let vm = OnboardingViewModel(state: state, permissions: permissions, settings: dictationSettings, models: models,
-                                         dictation: dc, ephemeralScope: scope, navigation: navigation, clock: clock)
+                                         dictation: dc, ephemeralScope: scope, navigation: navigation, clock: clock, requiresAccessibility: requiresAccessibility)
             return (vm, state, models, dc, scope)
         }
+    }
+
+    @Test("In-app onboarding needs microphone permission without Accessibility")
+    func inAppPermissions() throws {
+        let h = try Harness(accessibility: false)
+        let vm = h.viewModel(step: .permissions, requiresAccessibility: false).vm
+        #expect(vm.canContinue && !vm.accessibilityGranted)
+        vm.openAccessibilitySettings()
+        vm.tryAgainAccessibility()
+        #expect(!vm.showsAccessibilityDenied)
+        let denied = try Harness(microphone: .denied, accessibility: false)
+        #expect(!denied.viewModel(step: .permissions, requiresAccessibility: false).vm.canContinue)
     }
 
     @Test("fresh state starts at .welcome")

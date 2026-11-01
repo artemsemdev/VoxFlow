@@ -11,7 +11,7 @@ struct HistoryEmptyView: View {
         switch state {
         case .noDictations:
             iconState(title: "No dictations yet",
-                     body: "Hold fn in any text field and start talking. Everything you dictate shows up here, on this Mac only.") {
+                     body: AppScopeCopy.historyEmpty) {
                 Button("Try it in a scratchpad") { model.isScratchpadPresented = true }
                     .buttonStyle(.borderedProminent)
             }

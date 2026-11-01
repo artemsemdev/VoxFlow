@@ -9,6 +9,7 @@ import VoxFlowModels
 /// through `OnboardingStep` and persisting progress into `state`.
 @Observable @MainActor
 final class OnboardingViewModel {
+    let requiresAccessibility: Bool
     private let state: OnboardingState
     private let permissions: any PermissionChecking
     private let settings: DictationSettings
@@ -61,7 +62,9 @@ final class OnboardingViewModel {
 
     init(state: OnboardingState, permissions: any PermissionChecking, settings: DictationSettings,
          models: ModelsViewModel, dictation: DictationCoordinator, ephemeralScope: EphemeralScope,
-         navigation: Navigation, clock: any MonotonicClock) {
+         navigation: Navigation, clock: any MonotonicClock,
+         requiresAccessibility: Bool = AppCapabilities.requiresAccessibility) {
+        self.requiresAccessibility = requiresAccessibility
         self.state = state
         self.permissions = permissions
         self.settings = settings
@@ -72,7 +75,7 @@ final class OnboardingViewModel {
         self.clock = clock
         self.step = state.step
         self.microphone = permissions.microphone()
-        self.accessibilityGranted = permissions.accessibilityTrusted(prompt: false)
+        self.accessibilityGranted = requiresAccessibility && permissions.accessibilityTrusted(prompt: false)
         // Never arms try-it tracking (see `tryItTrackingEnabled`) — only step-entry side effects
         // that are safe to repeat on every launch (permissions/model refreshes) run from here.
         enter(step)
@@ -87,7 +90,7 @@ final class OnboardingViewModel {
     var canContinue: Bool {
         switch step {
         case .welcome, .hotkey, .tryIt: true
-        case .permissions: microphone == .granted && (accessibilityGranted || state.accessibilitySkipped)
+        case .permissions: microphone == .granted && (!requiresAccessibility || accessibilityGranted || state.accessibilitySkipped)
         case .model: modelRow?.state == .installed
         }
     }
@@ -145,7 +148,7 @@ final class OnboardingViewModel {
 
     private func refreshPermissions() {
         microphone = permissions.microphone()
-        accessibilityGranted = permissions.accessibilityTrusted(prompt: false)
+        accessibilityGranted = requiresAccessibility && permissions.accessibilityTrusted(prompt: false)
         if accessibilityGranted { showsAccessibilityDenied = false }
     }
 
@@ -157,12 +160,14 @@ final class OnboardingViewModel {
     /// after that comes back still untrusted (M-4 — the design frames ONB-02a as "after they came
     /// back", not the instant they click through).
     func openAccessibilitySettings() {
+        guard requiresAccessibility else { return }
         permissions.openAccessibilitySettings()
         startAccessibilityPolling()
     }
 
     func tryAgainAccessibility() {
-        accessibilityGranted = permissions.accessibilityTrusted(prompt: false)
+        guard requiresAccessibility else { return }
+        accessibilityGranted = requiresAccessibility && permissions.accessibilityTrusted(prompt: false)
         if accessibilityGranted {
             showsAccessibilityDenied = false
         } else {

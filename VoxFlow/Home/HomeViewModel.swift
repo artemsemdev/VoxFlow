@@ -86,7 +86,8 @@ final class HomeViewModel {
         let model = await modelStatus()
         setupRows = Self.buildSetupRows(microphone: permissions.microphone(),
                                         accessibilityTrusted: permissions.accessibilityTrusted(prompt: false),
-                                        model: model, hotkeyMode: settings.hotkeyMode)
+                                        model: model, hotkeyMode: settings.hotkeyMode,
+                                        requiresAccessibility: AppCapabilities.requiresAccessibility)
     }
 
     // MARK: Header (design ruling 2 — delegated to `StatsService`, the one place that owns "now"
@@ -205,15 +206,16 @@ final class HomeViewModel {
     }()
 
     nonisolated static func buildSetupRows(microphone: PermissionState, accessibilityTrusted: Bool, model: HomeModelStatus,
-                                           hotkeyMode: HotkeyMode) -> [SetupRow] {
+                                           hotkeyMode: HotkeyMode, requiresAccessibility: Bool = true) -> [SetupRow] {
         let micGranted = microphone == .granted
-        let permissionsGranted = micGranted && accessibilityTrusted
+        let permissionsGranted = micGranted && (!requiresAccessibility || accessibilityTrusted)
         let permissionLabel: String
-        switch (micGranted, accessibilityTrusted) {
+        if !requiresAccessibility { permissionLabel = micGranted ? "Microphone" : "Microphone required" }
+        else { switch (micGranted, accessibilityTrusted) {
         case (true, false): permissionLabel = "Accessibility required"
         case (false, true): permissionLabel = "Microphone required"
         default: permissionLabel = "Microphone & Accessibility"
-        }
+        } }
         let permissionsRow = SetupRow(
             id: "permissions", kind: permissionsGranted ? .ok : .attention,
             label: permissionLabel,
@@ -235,7 +237,7 @@ final class HomeViewModel {
 
         let hotkeyRow = SetupRow(
             id: "hotkey", kind: .ok,
-            label: "Hotkey · " + (hotkeyMode == .pushToTalk ? "hold fn" : "double-tap fn"),
+            label: "Hotkey · " + (hotkeyMode == .pushToTalk ? "hold fn" : "double-tap fn") + (requiresAccessibility ? "" : " in VoxFlow"),
             valueText: "Change", isLink: true, action: .openHotkey)
 
         return [permissionsRow, modelRow, hotkeyRow]

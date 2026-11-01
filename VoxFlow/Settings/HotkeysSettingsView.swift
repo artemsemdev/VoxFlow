@@ -51,7 +51,7 @@ struct HotkeysSettingsBody: View {
 
             if settings.shortcuts.usesFunctionKey, let fnWarning { FnSystemActionWarning(state: fnWarning) }
 
-            Text(HotkeysCopy.footer(mode: settings.hotkeyMode))
+            Text(HotkeysCopy.footer(mode: settings.hotkeyMode) + AppScopeCopy.hotkeyScope)
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
