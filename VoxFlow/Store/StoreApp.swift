@@ -1,6 +1,9 @@
 import AppKit
 import SwiftUI
 
+#if APP_STORE
+@main
+#endif
 struct StoreApp: App {
     @NSApplicationDelegateAdaptor(StoreAppDelegate.self) private var delegate
     var body: some Scene {
