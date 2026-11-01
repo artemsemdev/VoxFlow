@@ -21,6 +21,16 @@ private struct FakeFreshKeyProvider: HistoryKeyProviding {
 @Suite("HomeRecentRow")
 @MainActor
 struct HomeRecentRowTests {
+    @Test("In-app setup never asks for Accessibility")
+    func inAppSetup() {
+        let rows = HomeViewModel.buildSetupRows(microphone: .granted, accessibilityTrusted: false,
+            model: HomeModelStatus(readiness: .loaded, displayName: "small"), hotkeyMode: .pushToTalk,
+            requiresAccessibility: false)
+        #expect(rows[0].kind == .ok && rows[0].action == .none)
+        #expect(rows[0].label == "Microphone")
+        #expect(rows[2].label.contains("in VoxFlow"))
+    }
+
     @Test("timeAgo: floors to whole minutes/hours/days; never negative")
     func timeAgo() {
         let now = Date(timeIntervalSince1970: 1_000_000)

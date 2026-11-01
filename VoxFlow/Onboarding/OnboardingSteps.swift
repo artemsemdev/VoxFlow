@@ -10,7 +10,7 @@ struct WelcomeStepView: View {
             VStack(spacing: 10) {
                 Text("Speak. It types.")
                     .font(.system(size: 34, weight: .bold))
-                Text("VoxFlow turns your voice into clean text in any app — entirely on this Mac. Nothing you say ever leaves it.")
+                Text(AppScopeCopy.welcome)
                     .font(.system(size: 14))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -57,8 +57,8 @@ struct PermissionsStepView: View {
     var body: some View {
         VStack(spacing: 16) {
             VStack(spacing: 6) {
-                Text("Two permissions, both local").font(.system(size: 24, weight: .bold))
-                Text("macOS asks for these; VoxFlow uses them only on this Mac.")
+                Text(viewModel.requiresAccessibility ? "Two permissions, both local" : "Voice input, entirely local").font(.system(size: 24, weight: .bold))
+                Text(viewModel.requiresAccessibility ? "macOS asks for these; VoxFlow uses them only on this Mac." : "Allow the microphone to dictate inside VoxFlow.")
                     .font(.system(size: 13)).foregroundStyle(.secondary)
             }
             VStack(spacing: 0) {
@@ -102,10 +102,14 @@ struct PermissionsStepView: View {
         HStack(spacing: 14) {
             rowIcon("keyboard", color: viewModel.showsAccessibilityDenied ? .orange : .accentColor)
             VStack(alignment: .leading, spacing: 2) {
-                Text(viewModel.showsAccessibilityDenied ? "Accessibility — not granted" : "Accessibility")
+                Text(!viewModel.requiresAccessibility ? "Text input in VoxFlow" : viewModel.showsAccessibilityDenied ? "Accessibility — not granted" : "Accessibility")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(viewModel.showsAccessibilityDenied ? .orange : .primary)
-                if viewModel.showsAccessibilityDenied {
+                if !viewModel.requiresAccessibility {
+                    Text("Dictate in VoxFlow, then copy the result wherever you need it.")
+                        .font(.system(size: 12)).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else if viewModel.showsAccessibilityDenied {
                     Text("Without it VoxFlow can't type for you. It will copy text to the clipboard instead.")
                         .font(.system(size: 12)).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -124,7 +128,9 @@ struct PermissionsStepView: View {
                 }
             }
             Spacer()
-            if viewModel.accessibilityGranted {
+            if !viewModel.requiresAccessibility {
+                Label("Ready", systemImage: "checkmark.circle.fill").font(.caption).foregroundStyle(.green)
+            } else if viewModel.accessibilityGranted {
                 grantedLabel
             } else if viewModel.showsAccessibilityDenied {
                 Button("Try again") { viewModel.tryAgainAccessibility() }
