@@ -114,7 +114,7 @@ final class FnKeyMonitor {
         onEscape: @escaping () -> Void,
         onAnyKey: @escaping () -> Void,
         isHUDActive: @escaping () -> Bool,
-        source: any ShortcutEventSource = CGEventTapShortcutEventSource(),
+        source: (any ShortcutEventSource)? = nil,
         shortcuts: @escaping () -> DictationShortcuts = { DictationShortcuts() },
         context: (() -> ShortcutContext)? = nil,
         suspended: @escaping () -> Bool = { false },
@@ -123,7 +123,11 @@ final class FnKeyMonitor {
         onReinsert: (() -> Void)? = nil
     ) {
         let initial = shortcuts()
-        self.source = source
+        #if APP_STORE
+        self.source = source ?? InAppShortcutEventSource()
+        #else
+        self.source = source ?? CGEventTapShortcutEventSource()
+        #endif
         self.shortcuts = shortcuts
         self.bindings = initial
         self.decoder = ShortcutDecoder(shortcuts: initial)
