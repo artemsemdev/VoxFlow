@@ -18,23 +18,17 @@ targets:
   VoxFlowStore:
     type: application
     platform: macOS
-    # Explicit allowlist: the full app's history, MCP, global monitors, test data and
-    # local signing configuration are not inputs to this product.
+    # Compile the same application and screens as the desktop target. Only the
+    # superseded standalone Store prototype and generated desktop plist are excluded.
+    # User containers, test fixtures and screenshots are outside these source roots.
     sources:
-      - path: VoxFlow/Store
-      - path: VoxFlow/Files
-        excludes: [FilesPage.swift]
-      - path: VoxFlow/Design
-      - path: VoxFlow/Dictation/ModelLoader.swift
-      - path: VoxFlow/Settings/ModelsViewModel.swift
-      - path: VoxFlow/Settings/ModelsSettingsView.swift
-      - path: VoxFlow/App/QuitCoordinator.swift
-      - path: VoxFlow/MainWindow/SidebarView.swift
-      - path: VoxFlow/MainWindow/SidebarPage.swift
-      - path: VoxFlow/Assets.xcassets
+      - path: VoxFlow
+        excludes: [Store, Info.plist]
       - path: StoreDistribution/PrivacyInfo.xcprivacy
       - path: StoreDistribution/WhisperCpp-LICENSE.txt
       - path: StoreDistribution/Whisper-LICENSE.txt
+      - path: StoreDistribution/GRDB-LICENSE.txt
+      - path: StoreDistribution/LlamaCpp-LICENSE.txt
     dependencies:
       - package: VoxFlowKit
         product: VoxFlowCore
@@ -50,6 +44,12 @@ targets:
         product: VoxFlowDictation
       - package: VoxFlowKit
         product: VoxFlowStyling
+      - package: VoxFlowKit
+        product: VoxFlowStorage
+      - package: VoxFlowKit
+        product: VoxFlowLLM
+      - package: VoxFlowKit
+        product: VoxFlowMCP
     info:
       path: build/app-store/Info.plist
       properties:
@@ -58,7 +58,8 @@ targets:
         NSHumanReadableCopyright: "© 2026 Artem Semenov"
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
-        NSMicrophoneUsageDescription: "VoxFlow records when you press Start dictation and converts speech to text on this Mac."
+        NSMicrophoneUsageDescription: "VoxFlow listens when you start dictation. Audio is processed on this Mac."
+        NSContactsUsageDescription: "VoxFlow reads first and last names from Contacts so it spells them right. Nothing is uploaded."
         CFBundleDocumentTypes:
           - CFBundleTypeName: Audio or video
             LSItemContentTypes: [public.audio, public.movie]
@@ -70,7 +71,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: dev.artemsem.voxflow.store
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         MARKETING_VERSION: "2.1.1"
-        CURRENT_PROJECT_VERSION: "4"
+        CURRENT_PROJECT_VERSION: "5"
         SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) APP_STORE
         CODE_SIGN_STYLE: Automatic
         CODE_SIGN_IDENTITY: Apple Development

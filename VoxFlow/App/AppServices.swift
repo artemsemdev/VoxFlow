@@ -257,7 +257,7 @@ final class AppServices {
         // actor; `.keyLost` (the original key material is gone, e.g. a Keychain reset) and other open
         // failures land in `historyService.status` and are logged inside the service.
         let historyService = HistoryService(url: DictationStore.defaultURL, settings: dictationSettings,
-                                            keyProvider: { HistoryKeyProviders.default() }, clock: SystemMonotonicClock())
+                                            keyProvider: { HistoryKeyProviders.default(service: AppKeychainNamespace.service) }, clock: SystemMonotonicClock())
 
         // C1: `historySavedSink` bridges a successful `HistoryWriter.save` (running off the main
         // actor) back into `historyService.notifyChanged()`, so `StatsService` (the one subscriber

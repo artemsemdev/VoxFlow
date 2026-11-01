@@ -12,7 +12,7 @@ protocol TokenStoring: Sendable {
 /// Production `TokenStoring`: `KeychainString` over the generic-password item
 /// `dev.artemsem.voxflow` / `mcp-token` (design ST-06).
 struct KeychainTokenStore: TokenStoring {
-    let service = "dev.artemsem.voxflow"
+    let service = AppKeychainNamespace.service
     let account = "mcp-token"
 
     func read() throws -> String? { try KeychainString.read(service: service, account: account) }
