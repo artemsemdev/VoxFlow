@@ -24,7 +24,8 @@ let package = Package(
     ],
     targets: [
         .target(name: "VoxFlowCore"),
-        .target(name: "VoxFlowAudio", dependencies: ["VoxFlowCore"]),
+        .target(name: "VoxFlowAudio", dependencies: ["VoxFlowCore", "VoxFlowAudioBridge"]),
+        .target(name: "VoxFlowAudioBridge"),
         // Keep shared support independent of app-linked implementation modules. The dictation
         // fake is compiled from one shared source by its package and hosted test targets.
         .target(name: "VoxFlowTestSupport", dependencies: ["VoxFlowCore"]),
