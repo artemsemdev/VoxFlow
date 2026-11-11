@@ -11,6 +11,7 @@
 | [007](007-llm-styling-on-llama-cpp.md) | LLM styling on llama.cpp (Qwen2.5 3B): fallback matrix, determinism, lazy lifecycle, Re-style, Files rules-only | Accepted |
 | [008](008-loopback-mcp-server.md) | Loopback MCP server: two protocol eras, `NWListener` loopback binding, `libproc` peer identity, name+path client approval, path policy | Accepted |
 | [009](009-dictation-priority.md) | Bounded file windows and dictation priority on one native speech queue | Accepted |
+| [010](010-selected-microphone-route.md) | Input-only selected-device capture and tap exception containment | Accepted |
 
 v1 ADRs (001–027) live in the repository root under `docs/adr/` and `docs/architecture/06-decision-log.md`
 until promotion; they describe the archived .NET implementation and do not apply to v2.

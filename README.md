@@ -9,12 +9,14 @@ macOS 15+, Apple Silicon.
 VoxFlow 2 is a from-scratch rewrite with file transcription, system-wide dictation,
 local style cleanup and MCP integration.
 
-**Latest release: [2.1.1](https://github.com/artemsemdev/VoxFlow/releases/tag/v2.1.1), build 3.**
-This patch improves recognition and adds long-form Russian regression coverage. See the
-[release record](docs/delivery/2.1.1.md) for validation and remaining accuracy/manual-test gaps.
+**Latest release: [2.1.2](https://github.com/artemsemdev/VoxFlow/releases/tag/v2.1.2), build 6.**
+This patch prevents microphone tap-installation exceptions from terminating the app. See the
+[release record](docs/delivery/2.1.2.md) for validation and remaining manual-test gaps.
 The downloadable app uses the local VoxFlow Dev signature and is not notarized.
 
-## What works today (2.1.1)
+## What works today (2.1.2)
+
+- Microphone tap failures report a recording error; changed hardware formats are rejected before conversion.
 
 - History provides separate original/inserted copy actions with visible Copied confirmation.
 

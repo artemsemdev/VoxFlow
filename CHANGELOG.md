@@ -5,6 +5,20 @@ versioning.
 
 ## Unreleased
 
+## 2.1.2 — 2026-11-11
+
+App/export version `2.1.2`, build `6`. Microphone crash hotfix from `master`.
+
+### Fixed
+
+- Keep an explicitly selected USB microphone usable when the system input/output switches to
+  Bluetooth headphones, using input-only capture without changing system defaults (noise suppression off).
+- Convert AVFAudio tap-installation exceptions into recording errors instead of terminating
+  the app, and reject changed-format buffers before conversion.
+- Remove only a successfully installed tap from its owning input node during cleanup.
+
+See the [release record](docs/delivery/2.1.2.md) for validation and remaining limitations.
+
 ## 2.1.1 — 2026-10-30
 
 App/export version `2.1.1`, build `3`. Improves transcription quality on the existing local models.

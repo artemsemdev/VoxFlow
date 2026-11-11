@@ -48,8 +48,18 @@ public final class MicrophoneSource: MicrophoneCapturing, Sendable {
             let classifyStartError: @Sendable (String) -> MicrophoneError = { [microphoneUse] description in
                 Self.classifyStartError(description, microphoneUse: microphoneUse)
             }
+            let options = processing()
+            let uid = inputDeviceUID()
+            if let uid, !options.noiseSuppression {
+                let session = SelectedMicrophoneSession(uid: uid, chunkSeconds: chunkSeconds,
+                    classifyError: classifyStartError, continuation: continuation,
+                    onStopped: { [lease] in lease.release() })
+                continuation.onTermination = { _ in session.stop() }
+                session.start()
+                return
+            }
             // A settings edit affects the next capture, never a running session or its restarts.
-            let session = CaptureSession(chunkSeconds: chunkSeconds, processing: processing(), inputDeviceUID: inputDeviceUID(),
+            let session = CaptureSession(chunkSeconds: chunkSeconds, processing: options, inputDeviceUID: uid,
                                          classifyStartError: classifyStartError,
                                          continuation: continuation, onStopped: { [lease] in lease.release() })
             continuation.onTermination = { _ in session.stop() }
@@ -74,6 +84,7 @@ private final class CaptureSession: @unchecked Sendable {
     private var stopped = false
     private var gapTracker = CaptureGapTracker()
     private var currentTap: CaptureAudioTapBox?
+    private var installedTapNode: AVAudioInputNode?
 
     init(chunkSeconds: Double, processing: MicrophoneProcessingOptions, inputDeviceUID: String?,
          classifyStartError: @escaping @Sendable (String) -> MicrophoneError,
@@ -126,9 +137,15 @@ private final class CaptureSession: @unchecked Sendable {
         guard let converter = AVAudioConverter(from: inputFormat, to: target) else { throw MicrophoneError.engineFailed("no converter \(inputFormat) → 16 kHz mono") }
         let tap = CaptureAudioTapBox(token: generation,
                                      chunkSamples: Int(chunkSeconds * AudioSamples.sampleRate))
-        currentTap = tap
         let continuation = continuation
-        input.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [self] buffer, time in
+        try AudioTapInstallation.install(on: input, format: inputFormat) { [self] buffer, time in
+            do { try AudioTapInstallation.validate(buffer.format, expected: inputFormat) } catch {
+                queue.async { [self] in
+                    guard !stopped, gapTracker.isActive(generation) else { return }
+                    fail(error)
+                }
+                return
+            }
             let ratio = target.sampleRate / inputFormat.sampleRate
             let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 16
             guard let out = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: capacity) else { return }
@@ -169,6 +186,8 @@ private final class CaptureSession: @unchecked Sendable {
                 for chunk in chunks { continuation.yield(.chunk(chunk)) }
             }
         }
+        installedTapNode = input
+        currentTap = tap
         engine.prepare()
         do { try engine.start() } catch {
             throw classifyStartError(error.localizedDescription)
@@ -183,7 +202,7 @@ private final class CaptureSession: @unchecked Sendable {
         }
         let resumeToken = gapTracker.begin(at: interruptedAt)
         currentTap = nil
-        engine.inputNode.removeTap(onBus: 0)
+        removeInstalledTap()
         engine.stop()
         do {
             try installTapAndRun(generation: resumeToken)
@@ -210,10 +229,15 @@ private final class CaptureSession: @unchecked Sendable {
         currentTap = nil
         if let observer { NotificationCenter.default.removeObserver(observer) }
         deviceChanges?.cancel(); deviceChanges = nil
-        engine.inputNode.removeTap(onBus: 0)
+        removeInstalledTap()
         engine.stop()
         // Disabling the stopped voice-processing IO also releases its output attenuation.
         try? VoiceProcessingConfiguration.apply(.init(), to: engine.inputNode)
         onStopped()
+    }
+
+    private func removeInstalledTap() {
+        installedTapNode?.removeTap(onBus: 0)
+        installedTapNode = nil
     }
 }
