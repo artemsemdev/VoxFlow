@@ -10,8 +10,22 @@ For an explicit microphone with voice processing off, use an input-only AudioQue
 the selected CoreAudio UID. AudioQueue converts to the existing 16 kHz mono Float32 contract
 without configuring an output graph or changing system defaults. Check device presence before
 startup and before emitting samples; disconnects fail rather than falling back to another mic.
-Callbacks, buffer ownership and teardown share one serial queue. Dispose outside the native
-callback and release the shared capture lease only after disposal completes.
+Callbacks and session state share one serial queue. Mark the session stopped on that queue,
+then transfer native teardown to a separate serial queue. Pending callbacks reject buffers while
+synchronous Stop/Dispose drain them. Release the shared capture lease only after disposal completes;
+publish startup/callback failures after release so a retry cannot race cleanup.
+
+The original same-queue teardown blocked callbacks needed by Stop/Dispose, causing two native
+timeouts and approximately 29 seconds of self-reported microphone contention. Merely dispatching
+disposal outside the callback was insufficient: its executor must also be independent. Default CI
+models pending native callbacks and tests repeated capture, cancellation and failure cleanup.
+An opt-in hardware test performs three selected-input captures and requires each shutdown to
+complete within two seconds (audio is discarded):
+
+```bash
+VOXFLOW_MIC_TESTS=1 VOXFLOW_MIC_DEVICE_UID='<CoreAudio input UID>' \
+  swift test --package-path VoxFlowKit --filter MicrophoneSourceIntegrationTests/selectedInputRepeats
+```
 
 Default routing and voice processing retain AVAudioEngine. Contain tap-installation NSExceptions
 inside Objective-C and surface recording errors to Swift. Use the native NSError API where the
