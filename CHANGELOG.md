@@ -5,6 +5,13 @@ versioning.
 
 ## Unreleased
 
+### Fixed
+
+- Release the selected microphone without blocking its pending audio callbacks, preventing
+  a roughly 30-second “microphone is in use by VoxFlow” lockout between dictations.
+- Cover repeated capture, cancellation and failed-start/callback cleanup in hardware-independent
+  tests; add an opt-in three-capture test that bounds real selected-input shutdown time.
+
 ## 2.1.2 — 2026-11-11
 
 App/export version `2.1.2`, build `6`. Microphone crash hotfix from `master`.

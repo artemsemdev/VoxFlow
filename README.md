@@ -16,6 +16,9 @@ The downloadable app uses the local VoxFlow Dev signature and is not notarized.
 
 ## What works today (2.1.2)
 
+Development fix (not yet released): selected-microphone teardown runs separately from audio
+callbacks, preventing the approximately 30-second busy lockout between recordings.
+
 - Microphone tap failures report a recording error; changed hardware formats are rejected before conversion.
 
 - History provides separate original/inserted copy actions with visible Copied confirmation.

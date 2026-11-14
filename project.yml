@@ -16,7 +16,7 @@ settings:
     # No App Intents are defined; skip metadata extraction rather than link an unused framework.
     LM_SKIP_METADATA_EXTRACTION: YES
     MARKETING_VERSION: "2.1.2"
-    CURRENT_PROJECT_VERSION: "6"
+    CURRENT_PROJECT_VERSION: "7"
 packages:
   VoxFlowKit:
     path: VoxFlowKit
